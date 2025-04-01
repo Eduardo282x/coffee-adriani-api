@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Users {
+  id       Int    @id @default(autoincrement())
+  name     String
+  lastName String
+  username String
+  password String
+  rolId    Int
+  roles    Role   @relation(fields: [rolId], references: [id])
+}
+
+model Role {
+  id    Int     @id @default(autoincrement())
+  rol   String
+  Users Users[]
+}
+
+model Client {
+  id           Int            @id @default(autoincrement())
+  name         String
+  rif          String
+  address      String
+  phone        String
+  zone         String
+  blockId      Int
+  block        Block          @relation(fields: [blockId], references: [id])
+  active       Boolean
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  invoices     Invoice[]
+  Notification Notification[]
+}
+
+model Block {
+  id      Int      @id @default(autoincrement())
+  name    String
+  address String
+  clients Client[]
+}
+
+model Invoice {
+  id            Int              @id @default(autoincrement())
+  client        Client           @relation(fields: [clientId], references: [id])
+  clientId      Int
+  dispatchDate  DateTime
+  dueDate       DateTime
+  controlNumber String           @unique
+  exchangeRate  Int?
+  totalAmount   Int
+  status        InvoiceStatus
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  payments      Payment[]
+  invoiceItems  InvoiceProduct[]
+  Notification  Notification[]
+}
+
+enum InvoiceStatus {
+  PENDING
+  PARTIAL
+  PAID
+  CANCELED
+}
+
+model Product {
+  id                 Int                @id @default(autoincrement())
+  name               String
+  presentation       String
+  price              Int
+  priceUSD           Int
+  amount             Int
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  inventoryMovements Inventory[]
+  invoiceItems       InvoiceProduct[]
+  HistoryInventory   HistoryInventory[]
+}
+
+model HistoryProduct {
+  id           Int      @id @default(autoincrement())
+  name         String
+  presentation String
+  price        Int
+  priceUSD     Int
+  amount       Int
+  createdAt    DateTime @default(now())
+}
+
+model Inventory {
+  id           Int           @id @default(autoincrement())
+  product      Product       @relation(fields: [productId], references: [id])
+  productId    Int
+  quantity     Int
+  movementType InventoryType
+  movementDate DateTime
+  createdAt    DateTime      @default(now())
+}
+
+enum InventoryType {
+  IN
+  OUT
+}
+
+model HistoryInventory {
+  id           Int           @id @default(autoincrement())
+  product      Product       @relation(fields: [productId], references: [id])
+  productId    Int
+  quantity     Int
+  movementType InventoryType
+  movementDate DateTime      @default(now())
+}
+
+model InvoiceProduct {
+  id        Int     @id @default(autoincrement())
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  invoiceId Int
+  product   Product @relation(fields: [productId], references: [id])
+  productId Int
+  quantity  Int
+  unitPrice Int
+  subtotal  Int
+}
+
+model Payment {
+  id           Int           @id @default(autoincrement())
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
+  invoiceId    Int
+  amount       Int
+  method       PaymentMethod
+  exchangeRate Int?
+  paymentDate  DateTime
+  status       PaymentStatus
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+enum PaymentMethod {
+  TRANSFER
+  ZELLE
+  CASH
+  FOREIGN_CURRENCY
+}
+
+enum PaymentStatus {
+  CONFIRMED
+  PENDING
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  invoice   Invoice          @relation(fields: [invoiceId], references: [id])
+  invoiceId Int
+  type      NotificationType
+  message   String
+  seen      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  Client    Client?          @relation(fields: [clientId], references: [id])
+  clientId  Int?
+}
+
+enum NotificationType {
+  OVERDUE
+  PAYMENT_CONFIRMATION
+}
+
+model Seller {
+  id         Int      @id @default(autoincrement())
+  name       String
+  phone      String
+  commission Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  sales      Sale[]
+}
+
+model Sale {
+  id        Int      @id @default(autoincrement())
+  seller    Seller   @relation(fields: [sellerId], references: [id])
+  sellerId  Int
+  total     Int
+  saleDate  DateTime
+  createdAt DateTime @default(now())
+}

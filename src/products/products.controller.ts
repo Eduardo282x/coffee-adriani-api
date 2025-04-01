@@ -1,0 +1,28 @@
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { ProductsService } from './products.service';
+import { DTOProducts } from './product.dto';
+
+@Controller('products')
+export class ProductsController {
+
+    constructor(private productService: ProductsService) {
+
+    }
+
+    @Get()
+    async getProducts() {
+        return await this.productService.getProducts();
+    }
+    @Post()
+    async createProduct(@Body() product: DTOProducts) {
+        return await this.productService.createProduct(product);
+    }
+    @Put('/:id')
+    async updateProduct(@Param('id') id: string, @Body() product: DTOProducts) {
+        return await this.productService.updateProduct(Number(id),  product);
+    }
+    @Delete('/:id')
+    async deleteProduct(@Param('id') id: string,) {
+        return await this.productService.deleteProduct(Number(id));
+    }
+}
