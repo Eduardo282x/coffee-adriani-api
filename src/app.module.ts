@@ -3,7 +3,6 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
 import { ClientsModule } from './clients/clients.module';
-import { BlocksModule } from './blocks/blocks.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { ProductsModule } from './products/products.module';
 import { InvoiceProductsModule } from './invoice-products/invoice-products.module';
@@ -17,7 +16,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
-  imports: [ClientsModule, BlocksModule, InvoicesModule, ProductsModule, InvoiceProductsModule, PaymentsModule, NotificationsModule, InventoryModule, SellersModule, SalesModule, WebsocketModule, AuthModule, UsersModule],
+  imports: [ClientsModule, InvoicesModule, ProductsModule, InvoiceProductsModule, PaymentsModule, NotificationsModule, InventoryModule, SellersModule, SalesModule, WebsocketModule, AuthModule, UsersModule],
   controllers: [AppController],
   providers: [AppService, PrismaService],
 })

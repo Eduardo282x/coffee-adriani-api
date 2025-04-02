@@ -8,7 +8,6 @@ export class DTOClients {
     @IsString()
     address: string;
     @IsString()
-    @IsPhoneNumber()
     phone: string;
     @IsString()
     zone: string;
