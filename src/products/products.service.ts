@@ -12,14 +12,32 @@ export class ProductsService {
     }
 
     async getProducts(): Promise<Product[]> {
+        const getDolar = await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
+
         return await this.prismaService.product.findMany({
             orderBy: { id: 'asc' }
-        })
+        }).then(res =>
+            res.map(data => {
+                return {
+                    ...data,
+                    priceBs: data.price * Number(getDolar.dolar)
+                }
+            })
+        )
     }
 
     async createProduct(product: DTOProducts): Promise<DTOBaseResponse> {
         try {
-            const newProduct = await this.prismaService.product.create({
+            const findProductExist = await this.prismaService.product.findFirst({
+                where: { name: { equals: product.name, mode: 'insensitive' } }
+            })
+
+            if (findProductExist) {
+                badResponse.message = 'Este producto ya esta registrado.'
+                return badResponse;
+            }
+
+            await this.prismaService.product.create({
                 data: {
                     name: product.name,
                     presentation: product.presentation,
@@ -30,7 +48,13 @@ export class ProductsService {
             })
 
             await this.prismaService.historyProduct.create({
-                data: newProduct
+                data: {
+                    name: product.name,
+                    presentation: product.presentation,
+                    price: product.price,
+                    priceUSD: product.priceUSD,
+                    amount: product.amount
+                }
             })
 
             baseResponse.message = 'Producto agregado exitosamente.'

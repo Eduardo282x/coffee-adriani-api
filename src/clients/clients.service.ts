@@ -14,7 +14,8 @@ export class ClientsService {
     async getClients(): Promise<Client[]> {
         return await this.prismaService.client.findMany({
             where: { active: true },
-            include: { block: true }
+            include: { block: true },
+            orderBy: { id: 'asc' }
         })
     }
 

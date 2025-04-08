@@ -118,6 +118,12 @@ model HistoryInventory {
   movementDate DateTime      @default(now())
 }
 
+model HistoryDolar {
+  id    Int      @id @default(autoincrement())
+  dolar Decimal  @db.Decimal(10, 2)
+  date  DateTime @default(now())
+}
+
 model InvoiceProduct {
   id        Int     @id @default(autoincrement())
   invoice   Invoice @relation(fields: [invoiceId], references: [id])
