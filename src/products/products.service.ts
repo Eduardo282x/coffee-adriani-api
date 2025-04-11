@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Product } from '@prisma/client';
+import { HistoryProduct, Product } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOProducts } from './product.dto';
@@ -11,8 +11,12 @@ export class ProductsService {
 
     }
 
+    async getDolar() {
+        return await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
+    }
+
     async getProducts(): Promise<Product[]> {
-        const getDolar = await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
+        const getDolar = await this.getDolar();
 
         return await this.prismaService.product.findMany({
             orderBy: { id: 'asc' }
@@ -20,7 +24,22 @@ export class ProductsService {
             res.map(data => {
                 return {
                     ...data,
-                    priceBs: data.price * Number(getDolar.dolar)
+                    priceBs: (data.price * Number(getDolar.dolar)).toFixed(2)
+                }
+            })
+        )
+    }
+
+    async getProductHistory(): Promise<HistoryProduct[]> {
+        const getDolar = await this.getDolar();
+
+        return await this.prismaService.historyProduct.findMany({
+            orderBy: { id: 'asc' }
+        }).then(res =>
+            res.map(data => {
+                return {
+                    ...data,
+                    priceBs: (data.price * Number(getDolar.dolar)).toFixed(2)
                 }
             })
         )

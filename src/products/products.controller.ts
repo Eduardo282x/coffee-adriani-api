@@ -13,6 +13,14 @@ export class ProductsController {
     async getProducts() {
         return await this.productService.getProducts();
     }
+    @Get('/history')
+    async getProductHistory() {
+        return await this.productService.getProductHistory();
+    }
+    @Get('/dolar')
+    async getDolar() {
+        return await this.productService.getDolar();
+    }
     @Post()
     async createProduct(@Body() product: DTOProducts) {
         return await this.productService.createProduct(product);

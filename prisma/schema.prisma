@@ -55,6 +55,7 @@ model Invoice {
   controlNumber String           @unique
   exchangeRate  Int?
   totalAmount   Int
+  consignment   Boolean
   status        InvoiceStatus
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -64,6 +65,7 @@ model Invoice {
 }
 
 enum InvoiceStatus {
+  CREATED
   PENDING
   PARTIAL
   PAID
@@ -99,8 +101,6 @@ model Inventory {
   product      Product       @relation(fields: [productId], references: [id])
   productId    Int
   quantity     Int
-  movementType InventoryType
-  movementDate DateTime
   createdAt    DateTime      @default(now())
 }
 
