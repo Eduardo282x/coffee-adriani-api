@@ -16,6 +16,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DolarModule } from './dolar/dolar.module';
+import { MainloadModule } from './mainload/mainload.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { DolarModule } from './dolar/dolar.module';
     AuthModule,
     UsersModule,
     DolarModule,
+    MainloadModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
