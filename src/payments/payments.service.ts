@@ -18,6 +18,10 @@ export class PaymentsService {
         })
     }
 
+    async getPaymentsMethod() {
+        return await this.prismaService.paymentMethod.findMany()
+    }
+
     async savePayment(payment: PaymentDTO) {
         try {
             const zelle = await this.prismaService.paymentMethod.findFirst({
@@ -44,6 +48,26 @@ export class PaymentsService {
             })
 
             baseResponse.message = 'Pago guardado correctamente';
+            return baseResponse;
+        }
+        catch (error) {
+            badResponse.message = error.message;
+            return badResponse;
+        }
+    }
+
+    async updatePayment(id: number) {
+        try {
+            const payment = await this.prismaService.payment.findFirst({
+                where: { id: id }
+            })
+
+            await this.prismaService.payment.update({
+                data: { status: 'CONFIRMED' },
+                where: { id: id }
+            })
+
+            baseResponse.message = 'Pago actualizado correctamente';
             return baseResponse;
         }
         catch (error) {

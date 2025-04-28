@@ -1,11 +1,12 @@
 import { Transform, Type } from "class-transformer";
-import { IsArray, IsBoolean, IsDate, isNumber, IsNumber, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsBoolean, IsDate, IsNotEmpty, isNumber, IsNumber, IsString, ValidateNested } from "class-validator";
 import { DTOInventory } from "src/inventory/inventory.dto";
 
 export class DTOInvoice {
     @IsNumber()
     clientId: number;
     @IsString()
+    @IsNotEmpty()
     controlNumber: string;
     @IsBoolean()
     consignment: boolean;

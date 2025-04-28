@@ -10,3 +10,14 @@ export class PaymentDTO {
     @IsNumber() 
     methodId: number;
 }
+
+export class PaymentUpdateDTO {
+    @IsNumber()
+    @IsPositive()
+    invoiceId: number;
+    @IsNumber()
+    @IsPositive()
+    amount: number;
+    @IsNumber() 
+    methodId: number;
+}
