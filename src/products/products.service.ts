@@ -62,15 +62,6 @@ export class ProductsService {
 
     async createProduct(product: DTOProducts): Promise<DTOBaseResponse> {
         try {
-            const findProductExist = await this.prismaService.product.findFirst({
-                where: { name: { equals: product.name, mode: 'insensitive' } }
-            })
-
-            if (findProductExist) {
-                badResponse.message = 'Este producto ya esta registrado.'
-                return badResponse;
-            }
-
             await this.prismaService.product.create({
                 data: {
                     name: product.name,
