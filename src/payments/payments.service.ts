@@ -18,7 +18,14 @@ export class PaymentsService {
                 },
                 method: true
             }
-        })
+        }).then(pay =>
+            pay.map(data => {
+                return {
+                    ...data,
+                    amount: data.amount.toFixed(2)
+                }
+            })
+        )
     }
 
     async getPaymentsFilter(filter: DTODateRangeFilter) {
@@ -35,7 +42,14 @@ export class PaymentsService {
                     lte: filter.endDate
                 }
             }
-        })
+        }).then(pay => 
+            pay.map(data => {
+                return {
+                    ...data,
+                    amount: data.amount.toFixed(2)
+                }
+            })
+        )
     }
 
     async getPaymentsMethod() {
@@ -63,7 +77,7 @@ export class PaymentsService {
             })
 
             await this.prismaService.invoice.update({
-                data: { status: payment.amount !== findInvoice.totalAmount || zelle.name === 'Zelle' ? 'Pendiente' : 'Pagado' },
+                data: { status: Number(payment.amount) !== Number(findInvoice.totalAmount) || zelle.name === 'Zelle' ? 'Pendiente' : 'Pagado' },
                 where: { id: payment.invoiceId }
             })
 

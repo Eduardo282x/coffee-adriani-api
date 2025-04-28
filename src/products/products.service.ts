@@ -30,7 +30,7 @@ export class ProductsService {
         }
     }
 
-    async getProducts(): Promise<Product[]> {
+    async getProducts() {
         const getDolar = await this.getDolar();
 
         return await this.prismaService.product.findMany({
@@ -39,13 +39,15 @@ export class ProductsService {
             res.map(data => {
                 return {
                     ...data,
-                    priceBs: (data.price * Number(getDolar.dolar)).toFixed(2)
+                    price: data.price.toFixed(2),
+                    priceUSD: data.priceUSD.toFixed(2),
+                    priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
                 }
             })
         )
     }
 
-    async getProductHistory(): Promise<HistoryProduct[]> {
+    async getProductHistory() {
         const getDolar = await this.getDolar();
 
         return await this.prismaService.historyProduct.findMany({
@@ -54,7 +56,9 @@ export class ProductsService {
             res.map(data => {
                 return {
                     ...data,
-                    priceBs: (data.price * Number(getDolar.dolar)).toFixed(2)
+                    price: data.price.toFixed(2),
+                    priceUSD: data.priceUSD.toFixed(2),
+                    priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
                 }
             })
         )

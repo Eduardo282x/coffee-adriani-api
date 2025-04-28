@@ -44,7 +44,7 @@ export class InvoicesService {
 
             const invoiceWithoutClient = {
                 ...invoice,
-                statusPay: this.setStatusPayment(invoice as IInvoice)
+                statusPay: this.setStatusPayment(invoice)
             };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
             acc[clientId].invoices.push(invoiceWithoutClient);
@@ -75,7 +75,14 @@ export class InvoicesService {
                     lte: invoice.endDate
                 }
             }
-        })
+        }).then(inv => 
+            inv.map(data => {
+                return {
+                    ...data,
+                    totalAmount: data.totalAmount.toFixed(2)
+                }
+            })
+        )
 
         const groupedByClient = invoices.reduce((acc, invoice) => {
             const clientId = invoice.client.id;
@@ -89,7 +96,7 @@ export class InvoicesService {
 
             const invoiceWithoutClient = {
                 ...invoice,
-                statusPay: this.setStatusPayment(invoice as IInvoice)
+                statusPay: this.setStatusPayment(invoice)
             };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
             acc[clientId].invoices.push(invoiceWithoutClient);
@@ -101,7 +108,7 @@ export class InvoicesService {
         return result;
     }
 
-    setStatusPayment(invoice: IInvoice): string {
+    setStatusPayment(invoice): string {
         const total = invoice.payments.reduce((acc, payment) => acc + Number(payment.amount), 0);
 
         if (total === invoice.totalAmount) {
@@ -165,7 +172,7 @@ export class InvoicesService {
                     productId: det.productId,
                     quantity: det.quantity,
                     unitPrice: newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price,
-                    subtotal: newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price * det.quantity,
+                    subtotal: newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity,
                 }
             })
 
@@ -191,7 +198,7 @@ export class InvoicesService {
             await this.prismaService.invoice.update({
                 where: { id: saveInvoice.id },
                 data: {
-                    totalAmount: dataDetailsInvoice.reduce((acc, item) => acc + item.subtotal, 0),
+                    totalAmount: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0),
                 }
             })
 

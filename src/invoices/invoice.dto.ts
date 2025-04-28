@@ -30,7 +30,7 @@ export interface IInvoice {
     dueDate: Date;
     controlNumber: string;
     exchangeRate: null;
-    totalAmount: number;
+    totalAmount: number | any;
     consignment: boolean;
     status: string;
     createdAt: Date;
@@ -41,7 +41,7 @@ export interface IInvoice {
 export interface Payments {
     id: number;
     invoiceId: number;
-    amount: number;
+    amount: number | null;
     methodId: number;
     exchangeRate: null;
     paymentDate: Date;

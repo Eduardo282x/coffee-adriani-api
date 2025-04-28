@@ -1,4 +1,4 @@
-import { IsNumber, IsPositive, IsString, Min } from "class-validator";
+import { IsDecimal, IsNumber, IsPositive, IsString, Min } from "class-validator";
 
 export class DTOProducts {
     @IsString()

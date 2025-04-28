@@ -22,7 +22,9 @@ export class InventoryService {
                 ...iv,
                 product: {
                     ...iv.product,
-                    priceBs: (iv.product.price * Number(getDolar.dolar)).toFixed(2)
+                    price: iv.product.price.toFixed(2),
+                    priceUSD: iv.product.priceUSD.toFixed(2),
+                    priceBs: (Number(iv.product.price) * Number(getDolar.dolar)).toFixed(2)
                 }
             }
         }))
@@ -38,7 +40,9 @@ export class InventoryService {
                 ...iv,
                 product: {
                     ...iv.product,
-                    priceBs: (iv.product.price * Number(getDolar.dolar)).toFixed(2)
+                    price: iv.product.price.toFixed(2),
+                    priceUSD: iv.product.priceUSD.toFixed(2),
+                    priceBs: (Number(iv.product.price) * Number(getDolar.dolar)).toFixed(2)
                 }
             }
         }))
