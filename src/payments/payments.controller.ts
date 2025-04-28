@@ -24,8 +24,8 @@ export class PaymentsController {
         return await this.paymentService.savePayment(payment);
     }
 
-    @Put(':/id')
-    async updatePayment(@Param('id') id: string) {
-        return await this.paymentService.updatePayment(Number(id));
+    @Put('/zelle/:id')
+    async updatePaymentZelle(@Param('id') id: string) {
+        return await this.paymentService.updatePaymentZelle(Number(id));
     }
 }

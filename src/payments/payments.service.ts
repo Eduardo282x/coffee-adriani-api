@@ -56,7 +56,7 @@ export class PaymentsService {
         }
     }
 
-    async updatePayment(id: number) {
+    async updatePaymentZelle(id: number) {
         try {
             const payment = await this.prismaService.payment.findFirst({
                 where: { id: id }
