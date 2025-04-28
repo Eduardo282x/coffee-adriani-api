@@ -1,4 +1,4 @@
-import { IsNumber, IsPositive } from "class-validator";
+import { IsNumber, IsOptional, IsPositive, IsString } from "class-validator";
 
 export class DTOInventory {
     @IsNumber()
@@ -7,4 +7,8 @@ export class DTOInventory {
     @IsNumber()
     @IsPositive()
     quantity: number;
+
+    @IsString()
+    @IsOptional()
+    description?: string;
 }

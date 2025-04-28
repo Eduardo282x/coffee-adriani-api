@@ -7,7 +7,7 @@ import { DTOUser } from './user.dto';
 @Injectable()
 export class UsersService {
 
-    constructor(private prismaService: PrismaService) {
+    constructor(private readonly prismaService: PrismaService) {
 
     }
 

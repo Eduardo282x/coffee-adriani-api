@@ -1,4 +1,54 @@
 import { Injectable } from '@nestjs/common';
+import { badResponse, baseResponse } from 'src/dto/base.dto';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { PaymentDTO } from './payment.dto';
 
 @Injectable()
-export class PaymentsService {}
+export class PaymentsService {
+
+    constructor(private readonly prismaService: PrismaService) {
+
+    }
+
+    async getPayments() {
+        return await this.prismaService.payment.findMany({
+            include: {
+                invoice: true
+            }
+        })
+    }
+
+    async savePayment(payment: PaymentDTO) {
+        try {
+            const zelle = await this.prismaService.paymentMethod.findFirst({
+                where: { id: payment.methodId }
+            })
+
+            await this.prismaService.payment.create({
+                data: {
+                    invoiceId: payment.invoiceId,
+                    amount: payment.amount,
+                    paymentDate: new Date(),
+                    status: zelle.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
+                    methodId: payment.methodId,
+                }
+            })
+
+            const findInvoice = await this.prismaService.invoice.findFirst({
+                where: { id: payment.invoiceId },
+            })
+
+            await this.prismaService.invoice.update({
+                data: { status: payment.amount !== findInvoice.totalAmount || zelle.name === 'Zelle' ? 'Pendiente' : 'Pagado' },
+                where: { id: payment.invoiceId }
+            })
+
+            baseResponse.message = 'Pago guardado correctamente';
+            return baseResponse;
+        }
+        catch (error) {
+            badResponse.message = error.message;
+            return badResponse;
+        }
+    }
+}

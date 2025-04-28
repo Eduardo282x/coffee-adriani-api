@@ -3,16 +3,31 @@ import { HistoryProduct, Product } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOProducts } from './product.dto';
+import { Dolar, parseCustomDate } from 'src/dolar/dolar.service';
 
 @Injectable()
 export class ProductsService {
 
-    constructor(private prismaService: PrismaService) {
-
-    }
+    constructor(private readonly prismaService: PrismaService) { }
 
     async getDolar() {
         return await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
+    }
+
+    async saveDolar(dolar: Dolar) {
+        try {
+            await this.prismaService.historyDolar.create({
+                data: {
+                    dolar: dolar.price,
+                    date: parseCustomDate(dolar.last_update)
+                }
+            })
+            baseResponse.message = 'Tasa de dolar guardada exitosamente.';
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
     }
 
     async getProducts(): Promise<Product[]> {

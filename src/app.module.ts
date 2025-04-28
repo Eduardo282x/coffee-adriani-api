@@ -14,9 +14,26 @@ import { SalesModule } from './sales/sales.module';
 import { WebsocketModule } from './websokects/websokect.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { DolarModule } from './dolar/dolar.module';
 
 @Module({
-  imports: [ClientsModule, InvoicesModule, ProductsModule, InvoiceProductsModule, PaymentsModule, NotificationsModule, InventoryModule, SellersModule, SalesModule, WebsocketModule, AuthModule, UsersModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    ClientsModule,
+    InvoicesModule,
+    ProductsModule,
+    InvoiceProductsModule,
+    PaymentsModule,
+    NotificationsModule,
+    InventoryModule,
+    SellersModule,
+    SalesModule,
+    WebsocketModule,
+    AuthModule,
+    UsersModule,
+    DolarModule,
+  ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
 })

@@ -1,16 +1,20 @@
 import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { ClientsService } from './clients.service';
-import { DTOClients } from './client.dto';
+import { DTOBlocks, DTOClients } from './client.dto';
 
 @Controller('clients')
 export class ClientsController {
 
-    constructor(private clientService: ClientsService) {
+    constructor(private readonly clientService: ClientsService) {
     }
 
     @Get()
     async getClients() {
         return await this.clientService.getClients();
+    }
+    @Get('/parse')
+    async formatNumberClients() {
+        return await this.clientService.formatNumberClients();
     }
     @Post()
     async createClients(@Body() client: DTOClients) {
@@ -30,12 +34,12 @@ export class ClientsController {
         return await this.clientService.getBlocks();
     }
     @Post('/blocks')
-    async createBlocks(@Body() client: DTOClients) {
-        return await this.clientService.createBlocks(client);
+    async createBlocks(@Body() block: DTOBlocks) {
+        return await this.clientService.createBlocks(block);
     }
     @Put('/blocks/:id')
-    async updateBlocks(@Param('id') id: string, @Body() client: DTOClients) {
-        return await this.clientService.updateBlocks(Number(id), client);
+    async updateBlocks(@Param('id') id: string, @Body() block: DTOBlocks) {
+        return await this.clientService.updateBlocks(Number(id), block);
     }
     @Delete('/blocks/:id')
     async deleteBlocks(@Param('id') id: string) {

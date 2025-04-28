@@ -65,11 +65,11 @@ model Invoice {
 }
 
 enum InvoiceStatus {
-  CREATED
-  PENDING
-  PARTIAL
-  PAID
-  CANCELED
+  Creada
+  Pendiente
+  Pagado
+  Vencida
+  Cancelada
 }
 
 model Product {
@@ -97,11 +97,11 @@ model HistoryProduct {
 }
 
 model Inventory {
-  id           Int           @id @default(autoincrement())
-  product      Product       @relation(fields: [productId], references: [id])
-  productId    Int
-  quantity     Int
-  createdAt    DateTime      @default(now())
+  id        Int      @id @default(autoincrement())
+  product   Product  @relation(fields: [productId], references: [id])
+  productId Int
+  quantity  Int
+  createdAt DateTime @default(now())
 }
 
 enum InventoryType {
@@ -114,6 +114,7 @@ model HistoryInventory {
   product      Product       @relation(fields: [productId], references: [id])
   productId    Int
   quantity     Int
+  description  String        @default("")
   movementType InventoryType
   movementDate DateTime      @default(now())
 }
@@ -137,10 +138,11 @@ model InvoiceProduct {
 
 model Payment {
   id           Int           @id @default(autoincrement())
-  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
   invoiceId    Int
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
   amount       Int
-  method       PaymentMethod
+  methodId     Int
+  method       PaymentMethod @relation(references: [id], fields: [methodId])
   exchangeRate Int?
   paymentDate  DateTime
   status       PaymentStatus
@@ -148,11 +150,10 @@ model Payment {
   updatedAt    DateTime      @updatedAt
 }
 
-enum PaymentMethod {
-  TRANSFER
-  ZELLE
-  CASH
-  FOREIGN_CURRENCY
+model PaymentMethod {
+  id      Int       @id @default(autoincrement())
+  name    String
+  Payment Payment[]
 }
 
 enum PaymentStatus {

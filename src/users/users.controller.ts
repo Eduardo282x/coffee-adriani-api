@@ -5,7 +5,7 @@ import { DTOUser } from './user.dto';
 @Controller('users')
 export class UsersController {
 
-    constructor(private userService: UsersService) {
+    constructor(private readonly userService: UsersService) {
     }
 
     @Get()

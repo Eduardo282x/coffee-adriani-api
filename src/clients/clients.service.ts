@@ -7,7 +7,7 @@ import { DTOBlocks, DTOClients } from './client.dto';
 @Injectable()
 export class ClientsService {
 
-    constructor(private prismaService: PrismaService) {
+    constructor(private readonly prismaService: PrismaService) {
 
     }
 
@@ -17,6 +17,24 @@ export class ClientsService {
             include: { block: true },
             orderBy: { id: 'asc' }
         })
+    }
+
+    async formatNumberClients() {
+        const clients = await this.getClients();
+        const parseClients = clients.map(cli => {
+            const parseNumber = cli.phone.slice(0,1) === '0' ? cli.phone : `0${cli.phone}`
+            return {
+                ...cli,
+                phone: parseNumber
+            }
+        })
+
+        parseClients.map(async (cli) => {
+            await this.updateClients(cli.id, cli)
+        })
+
+        return 'Clientes formateados'
+
     }
 
     async createBlocks(newBlock: DTOBlocks): Promise<DTOBaseResponse> {
@@ -125,7 +143,6 @@ export class ClientsService {
                     phone: client.phone,
                     zone: client.zone,
                     blockId: client.blockId,
-                    active: true
                 }
             })
 

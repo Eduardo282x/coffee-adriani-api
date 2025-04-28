@@ -8,9 +8,10 @@ import * as jwt from 'jsonwebtoken';
 @Injectable()
 export class AuthService {
 
-    constructor(private prismaService: PrismaService, private readonly configService: ConfigService) {
-
-    }
+    constructor(
+        private readonly prismaService: PrismaService,
+        private readonly configService: ConfigService
+    ) { }
 
     async login(credentials: DTOLogin): Promise<DTOLoginResponse | DTOBaseResponse> {
         try {
