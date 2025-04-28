@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { badResponse, baseResponse } from 'src/dto/base.dto';
+import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PaymentDTO } from './payment.dto';
 
@@ -13,7 +13,27 @@ export class PaymentsService {
     async getPayments() {
         return await this.prismaService.payment.findMany({
             include: {
-                invoice: true
+                invoice: {
+                    include: { client: true }
+                },
+                method: true
+            }
+        })
+    }
+
+    async getPaymentsFilter(filter: DTODateRangeFilter) {
+        return await this.prismaService.payment.findMany({
+            include: {
+                invoice: {
+                    include: { client: true }
+                },
+                method: true
+            },
+            where: {
+                paymentDate: {
+                    gte: filter.startDate,
+                    lte: filter.endDate
+                }
             }
         })
     }

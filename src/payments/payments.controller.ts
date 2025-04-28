@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentDTO } from './payment.dto';
+import { DTODateRangeFilter } from 'src/dto/base.dto';
 
 @Controller('payments')
 export class PaymentsController {
@@ -12,6 +13,11 @@ export class PaymentsController {
     @Get()
     async getPayments() {
         return await this.paymentService.getPayments()
+    }
+
+    @Post('/filter')
+    async getPaymentsFilter(@Body() filter: DTODateRangeFilter) {
+        return await this.paymentService.getPaymentsFilter(filter)
     }
 
     @Get('/methods')

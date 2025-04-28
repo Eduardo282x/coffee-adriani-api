@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { badResponse, baseResponse } from 'src/dto/base.dto';
+import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOInvoice, DTOInvoiceFilter, IInvoice } from './invoice.dto';
+import { DTOInvoice, IInvoice } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { InvoiceStatus } from '@prisma/client';
@@ -56,7 +56,7 @@ export class InvoicesService {
         return result;
     }
 
-    async getInvoicesFilter(invoice: DTOInvoiceFilter) {
+    async getInvoicesFilter(invoice: DTODateRangeFilter) {
         const invoices = await this.prismaService.invoice.findMany({
             include: {
                 client: {
@@ -182,7 +182,7 @@ export class InvoicesService {
                     const dataInventory = {
                         productId: findInventory.productId,
                         quantity: findInventory.quantity - det.quantity,
-                        description: `Salida de producto por factura ${saveInvoice.id}`
+                        description: `Salida de producto por factura ${saveInvoice.controlNumber}`
                     }
                     await this.inventoryService.updateInventory(dataInventory, findInventory.id)
                 }

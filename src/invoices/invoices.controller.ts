@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
-import { DTOInvoice, DTOInvoiceFilter } from './invoice.dto';
+import { DTOInvoice } from './invoice.dto';
+import { DTODateRangeFilter } from 'src/dto/base.dto';
 
 @Controller('invoices')
 export class InvoicesController {
@@ -13,7 +14,7 @@ export class InvoicesController {
     }
 
     @Post('/filter')
-    async getInvoicesFilter(@Body() invoice: DTOInvoiceFilter) {
+    async getInvoicesFilter(@Body() invoice: DTODateRangeFilter) {
         return await this.invoicesService.getInvoicesFilter(invoice);
     }
 

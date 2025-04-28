@@ -23,15 +23,6 @@ export class DTOInvoice {
     details: DTOInventory[]
 }
 
-export class DTOInvoiceFilter {
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    startDate: Date;
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    endDate: Date;
-}
-
 export interface IInvoice {
     id: number;
     clientId: number;
