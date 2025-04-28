@@ -171,8 +171,8 @@ export class InvoicesService {
                     invoiceId: saveInvoice.id,
                     productId: det.productId,
                     quantity: det.quantity,
-                    unitPrice: newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price,
-                    subtotal: newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity,
+                    unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
+                    subtotal: Number(newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity),
                 }
             })
 
