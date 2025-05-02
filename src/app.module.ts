@@ -17,6 +17,11 @@ import { UsersModule } from './users/users.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DolarModule } from './dolar/dolar.module';
 import { MainloadModule } from './mainload/mainload.module';
+import { ConfigModule } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { AuthGuard } from './guards/auth/auth.guard';
+import { RolesGuard } from './guards/roles/roles.guard';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -35,9 +40,25 @@ import { MainloadModule } from './mainload/mainload.module';
     UsersModule,
     DolarModule,
     MainloadModule,
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env.local', '.env'], // primero busca en .env.local
+    }),
   ],
   controllers: [AppController],
-  providers: [AppService, PrismaService],
+  providers: [
+    AppService, 
+    PrismaService, 
+    JwtService,
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard, // se ejecuta primero
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard, // se ejecuta después, depende del user ya autenticado
+    },
+  ],
 })
 
 export class AppModule { }

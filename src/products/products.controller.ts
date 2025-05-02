@@ -25,6 +25,10 @@ export class ProductsController {
     async createProduct(@Body() product: DTOProducts) {
         return await this.productService.createProduct(product);
     }
+    @Post('/dolar')
+    async updateDolar() {
+        return await this.productService.saveDolar();
+    }
     @Put('/:id')
     async updateProduct(@Param('id') id: string, @Body() product: DTOProducts) {
         return await this.productService.updateProduct(Number(id),  product);

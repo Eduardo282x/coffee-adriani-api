@@ -63,17 +63,8 @@ export class UsersService {
 
     async deleteUsers(id: number): Promise<DTOBaseResponse> {
         try {
-
-            const findUser = await this.prismaService.users.findFirst({
-                where: { id }
-            })
-
-            if (findUser) {
-                baseResponse.message = ' Usuario eliminado'
-                return baseResponse;
-            }
-
-            baseResponse.message = 'Usuario creado exitosamente.'
+            await this.prismaService.users.delete({ where: { id } })
+            baseResponse.message = ' Usuario eliminado'
             return baseResponse;
         } catch (err) {
             badResponse.message = err.message;

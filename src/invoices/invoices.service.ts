@@ -42,10 +42,7 @@ export class InvoicesService {
                 };
             }
 
-            const invoiceWithoutClient = {
-                ...invoice,
-                statusPay: this.setStatusPayment(invoice)
-            };
+            const invoiceWithoutClient = { ...invoice };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
             acc[clientId].invoices.push(invoiceWithoutClient);
 
@@ -75,7 +72,7 @@ export class InvoicesService {
                     lte: invoice.endDate
                 }
             }
-        }).then(inv => 
+        }).then(inv =>
             inv.map(data => {
                 return {
                     ...data,
@@ -94,10 +91,7 @@ export class InvoicesService {
                 };
             }
 
-            const invoiceWithoutClient = {
-                ...invoice,
-                statusPay: this.setStatusPayment(invoice)
-            };
+            const invoiceWithoutClient = { ...invoice };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
             acc[clientId].invoices.push(invoiceWithoutClient);
 
@@ -108,19 +102,19 @@ export class InvoicesService {
         return result;
     }
 
-    setStatusPayment(invoice): string {
-        const total = invoice.payments.reduce((acc, payment) => acc + Number(payment.amount), 0);
+    // setStatusPayment(invoice): string {
+    //     const total = invoice.payments.reduce((acc, payment) => acc + Number(payment.amount), 0);
 
-        if (total === invoice.totalAmount) {
-            return 'Pagado'
-        }
+    //     if (total === invoice.totalAmount) {
+    //         return 'Pagado'
+    //     }
 
-        if (this.isDateExpired(invoice.dueDate)) {
-            return 'Vencida'
-        }
+    //     if (this.isDateExpired(invoice.dueDate)) {
+    //         return 'Vencida'
+    //     }
 
-        return 'Pendiente'
-    }
+    //     return 'Pendiente'
+    // }
 
     async checkInvoice() {
         const invoices = await this.prismaService.invoice.findMany({

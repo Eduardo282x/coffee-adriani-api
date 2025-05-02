@@ -4,6 +4,7 @@ import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOProducts } from './product.dto';
 import { Dolar, parseCustomDate } from 'src/dolar/dolar.service';
+import axios from 'axios';
 
 @Injectable()
 export class ProductsService {
@@ -14,12 +15,14 @@ export class ProductsService {
         return await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
     }
 
-    async saveDolar(dolar: Dolar) {
+    async saveDolar() {
         try {
+            const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
+
             await this.prismaService.historyDolar.create({
                 data: {
-                    dolar: dolar.price,
-                    date: parseCustomDate(dolar.last_update)
+                    dolar: response.price,
+                    date: parseCustomDate(response.last_update)
                 }
             })
             baseResponse.message = 'Tasa de dolar guardada exitosamente.';

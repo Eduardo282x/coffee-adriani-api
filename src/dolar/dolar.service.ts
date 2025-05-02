@@ -1,9 +1,7 @@
 import { ProductsService } from 'src/products/products.service';
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, Interval } from '@nestjs/schedule';
-import axios from 'axios';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { InvoicesService } from 'src/invoices/invoices.service';
 
 export interface Dolar {
     change: number;
@@ -29,7 +27,7 @@ export class DolarService {
     @Cron('0 8,13 * * *')
     async handleDollarRateCheck() {
         try {
-            const rate = await this.fetchDollarRateFromBCV();
+            const rate = await this.productService.saveDolar();
             this.logger.debug(`💵 Tasa BCV actualizada: ${rate}`);
         } catch (error) {
             this.logger.debug('❌ Error al obtener la tasa del dólar BCV', error.message);
@@ -42,11 +40,25 @@ export class DolarService {
             include: {
                 client: true,
                 invoiceItems: true
+            },
+            where: {
+                status: {
+                    not: {
+                        in: ['Pagado', 'Cancelada']
+                    }
+                }
             }
         })
 
         invoices.map(async (inv) => {
-            if (this.isDateExpired(inv.dueDate)) {
+            if (this.isDateExpired(inv.dispatchDate) && inv.status == 'Creada') {
+                await this.prismaService.invoice.update({
+                    where: { id: inv.id },
+                    data: { status: 'Pendiente' }
+                })
+            }
+
+            if (this.isDateExpired(inv.dueDate) && inv.status == 'Pendiente') {
                 await this.prismaService.invoice.update({
                     where: { id: inv.id },
                     data: { status: 'Vencida' }
@@ -60,12 +72,6 @@ export class DolarService {
         const cleanDueDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
         const cleanToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
         return cleanDueDate < cleanToday;
-    }
-
-    private async fetchDollarRateFromBCV() {
-        const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
-        await this.productService.saveDolar(response);
-        return response.price;
     }
 }
 

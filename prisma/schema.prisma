@@ -3,9 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // directUrl = env("DIRECT_URL")
 }
 
 model Users {
@@ -55,7 +55,7 @@ model Invoice {
   dueDate       DateTime
   controlNumber String           @unique
   exchangeRate  Int?
-  totalAmount   Int
+  totalAmount   Decimal          @db.Decimal(10, 2)
   consignment   Boolean
   status        InvoiceStatus
   createdAt     DateTime         @default(now())
@@ -77,8 +77,8 @@ model Product {
   id                 Int                @id @default(autoincrement())
   name               String
   presentation       String
-  price              Int
-  priceUSD           Int
+  price              Decimal            @db.Decimal(10, 2)
+  priceUSD           Decimal            @db.Decimal(10, 2)
   amount             Int
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -91,8 +91,8 @@ model HistoryProduct {
   id           Int      @id @default(autoincrement())
   name         String
   presentation String
-  price        Int
-  priceUSD     Int
+  price        Decimal  @db.Decimal(10, 2)
+  priceUSD     Decimal  @db.Decimal(10, 2)
   amount       Int
   createdAt    DateTime @default(now())
 }
@@ -133,15 +133,15 @@ model InvoiceProduct {
   product   Product @relation(fields: [productId], references: [id])
   productId Int
   quantity  Int
-  unitPrice Int
-  subtotal  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  subtotal  Decimal @db.Decimal(10, 2)
 }
 
 model Payment {
   id           Int           @id @default(autoincrement())
   invoiceId    Int
   invoice      Invoice       @relation(fields: [invoiceId], references: [id])
-  amount       Int
+  amount       Decimal       @db.Decimal(10, 2)
   methodId     Int
   method       PaymentMethod @relation(references: [id], fields: [methodId])
   exchangeRate Int?

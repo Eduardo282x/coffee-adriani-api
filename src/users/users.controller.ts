@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { DTOUser } from './user.dto';
+import { Roles } from 'src/guards/roles/roles.decorator';
 
 @Controller('users')
 export class UsersController {
@@ -8,6 +9,7 @@ export class UsersController {
     constructor(private readonly userService: UsersService) {
     }
 
+    @Roles('Administrador')
     @Get()
     async getUsers() {
         return await this.userService.getUsers();
