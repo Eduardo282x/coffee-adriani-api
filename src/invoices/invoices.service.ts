@@ -146,7 +146,6 @@ export class InvoicesService {
 
             const productInvalid = newInvoice.details.map(det => {
                 const findProduct = inventory.find(prod => prod.productId === det.productId);
-                console.log(`Cantidad solicitada: ${det.quantity}, Cantidad en inventario: ${findProduct.quantity}`);
                 
                 if (det.quantity > findProduct.quantity) {
                     return {

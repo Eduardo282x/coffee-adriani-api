@@ -30,6 +30,9 @@ export class DolarService {
             const rate = await this.productService.saveDolarAutomatic();
             this.logger.debug(`💵 Tasa BCV actualizada: ${rate}`);
         } catch (error) {
+            await this.prismaService.errorMessages.create({
+                data: { message: error.message, from: 'DolarService' }
+            })
             this.logger.debug('❌ Error al obtener la tasa del dólar BCV', error.message);
         }
     }

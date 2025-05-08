@@ -40,39 +40,53 @@ export class ProductsService {
     }
 
     async getProducts() {
-        const getDolar = await this.getDolar();
+        try {
+            const getDolar = await this.getDolar();
 
-        return await this.prismaService.product.findMany({
-            orderBy: { id: 'asc' }
-        }).then(res =>
-            res.map(data => {
-                return {
-                    ...data,
-                    price: data.price.toFixed(2),
-                    priceUSD: data.priceUSD.toFixed(2),
-                    purchasePrice: data.purchasePrice.toFixed(2),
-                    priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
-                }
+            return await this.prismaService.product.findMany({
+                orderBy: { id: 'asc' }
+            }).then(res =>
+                res.map(data => {
+                    return {
+                        ...data,
+                        price: data.price.toFixed(2),
+                        priceUSD: data.priceUSD.toFixed(2),
+                        purchasePrice: data.purchasePrice.toFixed(2),
+                        priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
+                    }
+                })
+            )
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ProductService' }
             })
-        )
+            return [];
+        }
     }
 
     async getProductHistory() {
-        const getDolar = await this.getDolar();
+        try {
+            const getDolar = await this.getDolar();
 
-        return await this.prismaService.historyProduct.findMany({
-            orderBy: { id: 'asc' }
-        }).then(res =>
-            res.map(data => {
-                return {
-                    ...data,
-                    price: data.price.toFixed(2),
-                    priceUSD: data.priceUSD.toFixed(2),
-                    purchasePrice: data.purchasePrice.toFixed(2),
-                    priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
-                }
+            return await this.prismaService.historyProduct.findMany({
+                orderBy: { id: 'asc' }
+            }).then(res =>
+                res.map(data => {
+                    return {
+                        ...data,
+                        price: data.price.toFixed(2),
+                        priceUSD: data.priceUSD.toFixed(2),
+                        purchasePrice: data.purchasePrice.toFixed(2),
+                        priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
+                    }
+                })
+            )
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ProductService' }
             })
-        )
+            return [];
+        }
     }
 
     async createProduct(product: DTOProducts): Promise<DTOBaseResponse> {

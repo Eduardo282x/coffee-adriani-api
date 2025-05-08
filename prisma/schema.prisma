@@ -222,3 +222,10 @@ model Sale {
   saleDate  DateTime
   createdAt DateTime @default(now())
 }
+
+model ErrorMessages {
+  id        Int      @id @default(autoincrement())
+  message   String
+  from      String
+  createdAt DateTime @default(now())
+}
