@@ -4,14 +4,19 @@ import { DTOInventory } from "src/inventory/inventory.dto";
 
 export class DTOInvoice {
     @IsNumber()
+    @IsNotEmpty({message: 'El cliente es requerido'})
     clientId: number;
     @IsString()
-    @IsNotEmpty()
+    @IsNotEmpty({message: 'El numero de factura es requerido'})
     controlNumber: string;
     @IsBoolean()
     consignment: boolean;
     @IsBoolean()
     priceUSD: boolean;
+
+    @IsDate()
+    @Transform(({ value }) => new Date(value))
+    dispatchDate: Date;
 
     @IsDate()
     @Transform(({ value }) => new Date(value))

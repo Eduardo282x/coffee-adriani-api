@@ -1,9 +1,12 @@
-import { IsNumber, IsPositive } from "class-validator";
+import { IsNumber, IsPositive, IsString } from "class-validator";
 
 export class PaymentDTO {
-    @IsNumber()
-    @IsPositive()
-    invoiceId: number;
+    @IsString()
+    currency: string;
+    @IsString()
+    reference: string;
+    @IsString()
+    bank: string;
     @IsNumber()
     @IsPositive()
     amount: number;

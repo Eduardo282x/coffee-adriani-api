@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { DTOInventory } from './inventory.dto';
 
@@ -19,7 +19,12 @@ export class InventoryController {
     }
 
     @Post()
-    async saveInventory(@Body() inventory: DTOInventory){
+    async saveInventory(@Body() inventory: DTOInventory) {
         return await this.inventoryService.saveInventory(inventory);
+    }
+
+    @Put('/:id')
+    async updateAmountInventory(@Body() inventory: DTOInventory, @Param('id') id: string) {
+        return await this.inventoryService.updateAmountInventory(inventory, Number(id));
     }
 }

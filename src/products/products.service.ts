@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { HistoryProduct, Product } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOProducts } from './product.dto';
+import { DTODolar, DTOProducts } from './product.dto';
 import { Dolar, parseCustomDate } from 'src/dolar/dolar.service';
 import axios from 'axios';
 
@@ -15,14 +14,21 @@ export class ProductsService {
         return await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
     }
 
-    async saveDolar() {
-        try {
-            const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
+    async saveDolarAutomatic() {
+        const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
+        const parseResponse = {
+            dolar: response.price,
+            date: parseCustomDate(response.last_update)
+        }
+        return await this.saveDolar(parseResponse);
+    }
 
+    async saveDolar(dolar: DTODolar) {
+        try {
             await this.prismaService.historyDolar.create({
                 data: {
-                    dolar: response.price,
-                    date: parseCustomDate(response.last_update)
+                    dolar: dolar.dolar,
+                    date: dolar.date
                 }
             })
             baseResponse.message = 'Tasa de dolar guardada exitosamente.';
@@ -44,6 +50,7 @@ export class ProductsService {
                     ...data,
                     price: data.price.toFixed(2),
                     priceUSD: data.priceUSD.toFixed(2),
+                    purchasePrice: data.purchasePrice.toFixed(2),
                     priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
                 }
             })
@@ -61,6 +68,7 @@ export class ProductsService {
                     ...data,
                     price: data.price.toFixed(2),
                     priceUSD: data.priceUSD.toFixed(2),
+                    purchasePrice: data.purchasePrice.toFixed(2),
                     priceBs: (Number(data.price) * Number(getDolar.dolar)).toFixed(2)
                 }
             })
@@ -75,7 +83,8 @@ export class ProductsService {
                     presentation: product.presentation,
                     price: product.price,
                     priceUSD: product.priceUSD,
-                    amount: product.amount
+                    amount: product.amount,
+                    purchasePrice: product.purchasePrice
                 }
             })
 
@@ -85,7 +94,8 @@ export class ProductsService {
                     presentation: product.presentation,
                     price: product.price,
                     priceUSD: product.priceUSD,
-                    amount: product.amount
+                    amount: product.amount,
+                    purchasePrice: product.purchasePrice
                 }
             })
 
@@ -106,7 +116,8 @@ export class ProductsService {
                     presentation: product.presentation,
                     price: product.price,
                     priceUSD: product.priceUSD,
-                    amount: product.amount
+                    amount: product.amount,
+                    purchasePrice: product.purchasePrice
                 }
             })
 
@@ -116,7 +127,8 @@ export class ProductsService {
                     presentation: product.presentation,
                     price: product.price,
                     priceUSD: product.priceUSD,
-                    amount: product.amount
+                    amount: product.amount,
+                    purchasePrice: product.purchasePrice
                 }
             })
 

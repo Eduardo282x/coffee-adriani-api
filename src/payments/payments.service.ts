@@ -2,21 +2,22 @@ import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PaymentDTO } from './payment.dto';
+import { ProductsService } from 'src/products/products.service';
+import { BankData } from './payments.data';
 
 @Injectable()
 export class PaymentsService {
 
-    constructor(private readonly prismaService: PrismaService) {
-
-    }
+    constructor(
+        private readonly prismaService: PrismaService,
+        private readonly productService: ProductsService
+    ) { }
 
     async getPayments() {
         return await this.prismaService.payment.findMany({
             include: {
-                invoice: {
-                    include: { client: true }
-                },
-                method: true
+                method: true,
+                dolar: true
             }
         }).then(pay =>
             pay.map(data => {
@@ -31,10 +32,8 @@ export class PaymentsService {
     async getPaymentsFilter(filter: DTODateRangeFilter) {
         return await this.prismaService.payment.findMany({
             include: {
-                invoice: {
-                    include: { client: true }
-                },
-                method: true
+                method: true,
+                dolar: true
             },
             where: {
                 paymentDate: {
@@ -42,11 +41,13 @@ export class PaymentsService {
                     lte: filter.endDate
                 }
             }
-        }).then(pay => 
+        }).then(pay =>
             pay.map(data => {
                 return {
                     ...data,
-                    amount: data.amount.toFixed(2)
+                    amount: data.amount.toFixed(2),
+                    amountUSD: data.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
+                    amountBs: data.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2)
                 }
             })
         )
@@ -56,29 +57,29 @@ export class PaymentsService {
         return await this.prismaService.paymentMethod.findMany()
     }
 
-    async savePayment(payment: PaymentDTO) {
+    getBanks() {
+        return BankData;
+    }
+
+    async registerPayment(payment: PaymentDTO) {
         try {
             const zelle = await this.prismaService.paymentMethod.findFirst({
                 where: { id: payment.methodId }
             })
 
+            const getDolar = await this.productService.getDolar()
+
             await this.prismaService.payment.create({
                 data: {
-                    invoiceId: payment.invoiceId,
                     amount: payment.amount,
+                    currency: payment.currency === 'USD' ? 'USD' : 'BS',
+                    reference: payment.reference,
+                    bank: zelle.name == 'Zelle' ? 'Zelle' : payment.bank,
+                    dolarId: getDolar.id,
                     paymentDate: new Date(),
                     status: zelle.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     methodId: payment.methodId,
                 }
-            })
-
-            const findInvoice = await this.prismaService.invoice.findFirst({
-                where: { id: payment.invoiceId },
-            })
-
-            await this.prismaService.invoice.update({
-                data: { status: Number(payment.amount) !== Number(findInvoice.totalAmount) || zelle.name === 'Zelle' ? 'Pendiente' : 'Pagado' },
-                where: { id: payment.invoiceId }
             })
 
             baseResponse.message = 'Pago guardado correctamente';

@@ -13,7 +13,9 @@ export class InventoryService {
 
     async getInventory() {
         const getDolar = await this.productsService.getDolar();
+
         return await this.prismaService.inventory.findMany({
+            orderBy: { id: 'asc' },
             include: {
                 product: true
             }
@@ -31,7 +33,9 @@ export class InventoryService {
     }
     async getInventoryHistory() {
         const getDolar = await this.productsService.getDolar();
+
         return await this.prismaService.historyInventory.findMany({
+            orderBy: { id: 'asc' },
             include: {
                 product: true
             }
@@ -122,6 +126,58 @@ export class InventoryService {
             }
 
             baseResponse.message = 'Producto actualizado en inventario.'
+            return baseResponse
+        }
+        catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async updateAmountInventory(inventory: DTOInventory, id: number) {
+        try {
+            const findProductInInventory = await this.prismaService.inventory.findFirst({
+                where: { id }
+            })
+
+            const findProductInHistoryInventory = await this.prismaService.historyInventory.findFirst({
+                orderBy: { id: 'desc' },
+                where: { productId: inventory.productId }
+            })
+
+            const updateInventory = await this.prismaService.inventory.update({
+                data: {
+                    quantity: findProductInInventory.quantity - findProductInHistoryInventory.quantity
+                },
+                where: { id }
+            });
+
+            await this.prismaService.historyInventory.create({
+                data: {
+                    productId: findProductInInventory.productId,
+                    quantity: findProductInHistoryInventory.quantity,
+                    description: 'Edición de inventario',
+                    movementType: 'EDIT'
+                }
+            })
+
+            await this.prismaService.inventory.update({
+                data: {
+                    quantity: updateInventory.quantity + inventory.quantity
+                },
+                where: { id }
+            });
+
+            await this.prismaService.historyInventory.create({
+                data: {
+                    productId: findProductInInventory.productId,
+                    quantity: inventory.quantity,
+                    description: 'Edición de inventario',
+                    movementType: 'EDIT'
+                }
+            })
+
+            baseResponse.message = 'Inventario modificado.'
             return baseResponse
         }
         catch (err) {

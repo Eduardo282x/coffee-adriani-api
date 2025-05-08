@@ -26,10 +26,10 @@ export class MainloadService {
 
             await this.prismaService.paymentMethod.createMany({
                 data: [
-                    { name: 'Pago Movil' },
-                    { name: 'Transferencia' },
-                    { name: 'Efectivo' },
-                    { name: 'Zelle' },
+                    { name: 'Pago Movil', currency: 'BS' },
+                    { name: 'Transferencia', currency: 'BS' },
+                    { name: 'Efectivo', currency: 'USD' },
+                    { name: 'Zelle', currency: 'USD' },
                 ]
             })
 
@@ -40,9 +40,20 @@ export class MainloadService {
                     { rol: 'Cobranza' },
                 ]
             })
+
+            await this.prismaService.users.create({
+                data: {
+                    name: 'admin',
+                    lastName: 'admin',
+                    password: 'admin',
+                    username: 'admin',
+                    rolId: 1
+                },
+
+            })
             baseResponse.message = 'Data cargada exitosamente';
             return baseResponse
-        } catch(err){
+        } catch (err) {
             badResponse.message = err.message
             return badResponse;
         }

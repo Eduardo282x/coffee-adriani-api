@@ -5,7 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  // directUrl = env("DIRECT_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Users {
@@ -48,21 +48,21 @@ model Block {
 }
 
 model Invoice {
-  id            Int              @id @default(autoincrement())
-  client        Client           @relation(fields: [clientId], references: [id])
-  clientId      Int
-  dispatchDate  DateTime
-  dueDate       DateTime
-  controlNumber String           @unique
-  exchangeRate  Int?
-  totalAmount   Decimal          @db.Decimal(10, 2)
-  consignment   Boolean
-  status        InvoiceStatus
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  payments      Payment[]
-  invoiceItems  InvoiceProduct[]
-  Notification  Notification[]
+  id             Int              @id @default(autoincrement())
+  client         Client           @relation(fields: [clientId], references: [id])
+  clientId       Int
+  dispatchDate   DateTime
+  dueDate        DateTime
+  controlNumber  String           @unique
+  exchangeRate   Int?
+  totalAmount    Decimal          @db.Decimal(10, 2)
+  consignment    Boolean
+  status         InvoiceStatus
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  invoiceItems   InvoiceProduct[]
+  Notification   Notification[]
+  InvoicePayment InvoicePayment[]
 }
 
 enum InvoiceStatus {
@@ -77,6 +77,7 @@ model Product {
   id                 Int                @id @default(autoincrement())
   name               String
   presentation       String
+  purchasePrice      Decimal            @db.Decimal(10, 2)
   price              Decimal            @db.Decimal(10, 2)
   priceUSD           Decimal            @db.Decimal(10, 2)
   amount             Int
@@ -88,13 +89,14 @@ model Product {
 }
 
 model HistoryProduct {
-  id           Int      @id @default(autoincrement())
-  name         String
-  presentation String
-  price        Decimal  @db.Decimal(10, 2)
-  priceUSD     Decimal  @db.Decimal(10, 2)
-  amount       Int
-  createdAt    DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  name          String
+  presentation  String
+  purchasePrice Decimal  @db.Decimal(10, 2)
+  price         Decimal  @db.Decimal(10, 2)
+  priceUSD      Decimal  @db.Decimal(10, 2)
+  amount        Int
+  createdAt     DateTime @default(now())
 }
 
 model Inventory {
@@ -108,6 +110,7 @@ model Inventory {
 enum InventoryType {
   IN
   OUT
+  EDIT
 }
 
 model HistoryInventory {
@@ -121,9 +124,10 @@ model HistoryInventory {
 }
 
 model HistoryDolar {
-  id    Int      @id @default(autoincrement())
-  dolar Decimal  @db.Decimal(10, 2)
-  date  DateTime @default(now())
+  id      Int       @id @default(autoincrement())
+  dolar   Decimal   @db.Decimal(10, 2)
+  date    DateTime  @default(now())
+  Payment Payment[]
 }
 
 model InvoiceProduct {
@@ -138,28 +142,49 @@ model InvoiceProduct {
 }
 
 model Payment {
-  id           Int           @id @default(autoincrement())
-  invoiceId    Int
-  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
-  amount       Decimal       @db.Decimal(10, 2)
-  methodId     Int
-  method       PaymentMethod @relation(references: [id], fields: [methodId])
-  exchangeRate Int?
-  paymentDate  DateTime
-  status       PaymentStatus
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id             Int              @id @default(autoincrement())
+  amount         Decimal          @db.Decimal(10, 2)
+  currency       Currency
+  reference      String
+  bank           String
+  dolarId        Int
+  dolar          HistoryDolar     @relation(fields: [dolarId], references: [id])
+  methodId       Int
+  method         PaymentMethod    @relation(references: [id], fields: [methodId])
+  paymentDate    DateTime
+  status         PaymentStatus
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  InvoicePayment InvoicePayment[]
+}
+
+model InvoicePayment {
+  id        Int     @id @default(autoincrement())
+  invoiceId Int
+  paymentId Int
+  amount    Decimal @db.Decimal(10, 2) // Monto asignado de este pago a esta factura
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@unique([invoiceId, paymentId]) // No se puede repetir la relación
 }
 
 model PaymentMethod {
-  id      Int       @id @default(autoincrement())
-  name    String
-  Payment Payment[]
+  id       Int       @id @default(autoincrement())
+  name     String
+  currency Currency
+  Payment  Payment[]
 }
 
 enum PaymentStatus {
   CONFIRMED
   PENDING
+}
+
+enum Currency {
+  USD
+  BS
 }
 
 model Notification {

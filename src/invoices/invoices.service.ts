@@ -4,7 +4,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOInvoice, IInvoice } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
-import { InvoiceStatus } from '@prisma/client';
 
 @Injectable()
 export class InvoicesService {
@@ -23,7 +22,6 @@ export class InvoicesService {
                 client: {
                     include: { block: true }
                 },
-                payments: true,
                 invoiceItems: {
                     include: {
                         product: true
@@ -59,7 +57,6 @@ export class InvoicesService {
                 client: {
                     include: { block: true }
                 },
-                payments: true,
                 invoiceItems: {
                     include: {
                         product: true
@@ -143,21 +140,41 @@ export class InvoicesService {
 
     async createInvoice(newInvoice: DTOInvoice) {
         try {
+
+            const products = await this.productService.getProducts();
+            const inventory = await this.inventoryService.getInventory();
+
+            const productInvalid = newInvoice.details.map(det => {
+                const findProduct = inventory.find(prod => prod.productId === det.productId);
+                console.log(`Cantidad solicitada: ${det.quantity}, Cantidad en inventario: ${findProduct.quantity}`);
+                
+                if (det.quantity > findProduct.quantity) {
+                    return {
+                        product: findProduct.product.name,
+                        quantity: findProduct.quantity,
+                        amount: det.quantity
+                    }
+                } else {
+                    return null
+                }
+            })
+
+            if (productInvalid.filter(pro => pro !== null).length > 0) {
+                badResponse.message = 'Estos productos exceden la cantidad que existe en inventario.'
+                return badResponse;
+            }
+
             const saveInvoice = await this.prismaService.invoice.create({
                 data: {
                     clientId: newInvoice.clientId,
                     controlNumber: newInvoice.controlNumber,
                     status: 'Creada',
-                    dispatchDate: new Date(),
+                    dispatchDate: newInvoice.dispatchDate,
                     dueDate: newInvoice.dueDate,
                     consignment: newInvoice.consignment,
-                    totalAmount: 0,
-                    createdAt: new Date(),
-                    updatedAt: new Date(),
+                    totalAmount: 0
                 }
             })
-
-            const products = await this.productService.getProducts();
 
             const dataDetailsInvoice = newInvoice.details.map(det => {
                 const findProduct = products.find(prod => prod.id === det.productId);
@@ -173,8 +190,6 @@ export class InvoicesService {
             await this.prismaService.invoiceProduct.createMany({
                 data: dataDetailsInvoice
             })
-
-            const inventory = await this.inventoryService.getInventory();
 
             newInvoice.details.map(async (det) => {
                 const findInventory = inventory.find(inv => inv.productId === det.productId);

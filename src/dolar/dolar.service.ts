@@ -27,7 +27,7 @@ export class DolarService {
     @Cron('0 8,13 * * *')
     async handleDollarRateCheck() {
         try {
-            const rate = await this.productService.saveDolar();
+            const rate = await this.productService.saveDolarAutomatic();
             this.logger.debug(`💵 Tasa BCV actualizada: ${rate}`);
         } catch (error) {
             this.logger.debug('❌ Error al obtener la tasa del dólar BCV', error.message);

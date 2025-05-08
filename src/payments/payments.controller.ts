@@ -14,6 +14,10 @@ export class PaymentsController {
     async getPayments() {
         return await this.paymentService.getPayments()
     }
+    @Get('/banks')
+    async getBanks() {
+        return await this.paymentService.getBanks()
+    }
 
     @Post('/filter')
     async getPaymentsFilter(@Body() filter: DTODateRangeFilter) {
@@ -26,8 +30,8 @@ export class PaymentsController {
     }
 
     @Post()
-    async savePayment(@Body() payment: PaymentDTO) {
-        return await this.paymentService.savePayment(payment);
+    async registerPayment(@Body() payment: PaymentDTO) {
+        return await this.paymentService.registerPayment(payment);
     }
 
     @Put('/zelle/:id')

@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { ProductsService } from './products.service';
-import { DTOProducts } from './product.dto';
+import { DTODolar, DTOProducts } from './product.dto';
 
 @Controller('products')
 export class ProductsController {
@@ -25,9 +25,13 @@ export class ProductsController {
     async createProduct(@Body() product: DTOProducts) {
         return await this.productService.createProduct(product);
     }
+    @Post('/dolar/automatic')
+    async updateDolarAutomatic() {
+        return await this.productService.saveDolarAutomatic();
+    }
     @Post('/dolar')
-    async updateDolar() {
-        return await this.productService.saveDolar();
+    async updateDolar(@Body() dolar: DTODolar) {
+        return await this.productService.saveDolar(dolar);
     }
     @Put('/:id')
     async updateProduct(@Param('id') id: string, @Body() product: DTOProducts) {
