@@ -10,7 +10,7 @@ export class PaymentDTO {
     @IsNumber()
     @IsPositive()
     amount: number;
-    @IsNumber() 
+    @IsNumber()
     methodId: number;
 }
 
@@ -21,6 +21,16 @@ export class PaymentUpdateDTO {
     @IsNumber()
     @IsPositive()
     amount: number;
-    @IsNumber() 
+    @IsNumber()
     methodId: number;
+}
+
+export class PayInvoiceDTO {
+    @IsString()
+    invoiceId: string;
+    @IsNumber()
+    paymentId: number;
+    @IsNumber()
+    @IsPositive()
+    amount: number;
 }

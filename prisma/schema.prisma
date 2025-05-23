@@ -56,6 +56,7 @@ model Invoice {
   controlNumber  String           @unique
   exchangeRate   Int?
   totalAmount    Decimal          @db.Decimal(10, 2)
+  remaining      Decimal          @db.Decimal(10, 2) @default(0)
   consignment    Boolean
   status         InvoiceStatus
   createdAt      DateTime         @default(now())
@@ -139,11 +140,14 @@ model InvoiceProduct {
   quantity  Int
   unitPrice Decimal @db.Decimal(10, 2)
   subtotal  Decimal @db.Decimal(10, 2)
+
+  @@unique([invoiceId, productId]) // No se puede repetir el producto en la misma factura
 }
 
 model Payment {
   id             Int              @id @default(autoincrement())
   amount         Decimal          @db.Decimal(10, 2)
+  remaining      Decimal          @db.Decimal(10, 2) @default(0)
   currency       Currency
   reference      String
   bank           String

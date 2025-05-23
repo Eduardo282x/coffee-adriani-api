@@ -22,6 +22,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from './guards/auth/auth.guard';
 import { RolesGuard } from './guards/roles/roles.guard';
 import { APP_GUARD } from '@nestjs/core';
+import { ExcelModule } from './excel/excel.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { APP_GUARD } from '@nestjs/core';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'], // primero busca en .env.local
     }),
+    ExcelModule,
   ],
   controllers: [AppController],
   providers: [

@@ -27,8 +27,8 @@ export class DolarService {
     @Cron('0 8,13 * * *')
     async handleDollarRateCheck() {
         try {
-            const rate = await this.productService.saveDolarAutomatic();
-            this.logger.debug(`💵 Tasa BCV actualizada: ${rate}`);
+            await this.productService.saveDolarAutomatic();
+            this.logger.debug(`💵 Tasa BCV actualizada`);
         } catch (error) {
             await this.prismaService.errorMessages.create({
                 data: { message: error.message, from: 'DolarService' }

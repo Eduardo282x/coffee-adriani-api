@@ -13,6 +13,16 @@ export class InvoicesController {
         return await this.invoicesService.getInvoices();
     }
 
+    @Get('/validate')
+    async findInvoiceWithoutDetails() {
+        return await this.invoicesService.findInvoiceWithoutDetails();
+    }
+
+    @Get('/validate/total')
+    async InvoiceValidateTotal() {
+        return await this.invoicesService.InvoiceValidateTotal();
+    }
+
     @Post('/filter')
     async getInvoicesFilter(@Body() invoice: DTODateRangeFilter) {
         return await this.invoicesService.getInvoicesFilter(invoice);

@@ -48,6 +48,9 @@ export class AuthService {
 
             return responseLogin;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'AuthService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }

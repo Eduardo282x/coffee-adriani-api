@@ -36,6 +36,9 @@ export class UsersService {
             baseResponse.message = 'Usuario creado exitosamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'UserService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -56,6 +59,9 @@ export class UsersService {
             baseResponse.message = 'Usuario actualizado exitosamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'UserService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -67,6 +73,9 @@ export class UsersService {
             baseResponse.message = ' Usuario eliminado'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'UserService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }

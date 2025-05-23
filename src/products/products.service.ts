@@ -34,6 +34,9 @@ export class ProductsService {
             baseResponse.message = 'Tasa de dolar guardada exitosamente.';
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ProductService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -116,6 +119,9 @@ export class ProductsService {
             baseResponse.message = 'Producto agregado exitosamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ProductService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -149,6 +155,9 @@ export class ProductsService {
             baseResponse.message = 'Producto actualizado exitosamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ProductService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -171,6 +180,9 @@ export class ProductsService {
             baseResponse.message = 'Producto eliminado exitosamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ProductService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }

@@ -91,6 +91,9 @@ export class InventoryService {
             return baseResponse
         }
         catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'inventoryService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -129,6 +132,9 @@ export class InventoryService {
             return baseResponse
         }
         catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'inventoryService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -181,6 +187,9 @@ export class InventoryService {
             return baseResponse
         }
         catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'inventoryService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }

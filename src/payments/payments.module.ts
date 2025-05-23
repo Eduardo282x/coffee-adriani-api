@@ -7,6 +7,7 @@ import { ProductsModule } from 'src/products/products.module';
 @Module({
   imports: [ProductsModule],
   controllers: [PaymentsController],
-  providers: [PaymentsService, PrismaService]
+  providers: [PaymentsService, PrismaService],
+  exports: [PaymentsService]
 })
 export class PaymentsModule { }

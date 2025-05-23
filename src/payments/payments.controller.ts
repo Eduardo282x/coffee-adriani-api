@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
-import { PaymentDTO } from './payment.dto';
+import { PayInvoiceDTO, PaymentDTO } from './payment.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 
 @Controller('payments')
@@ -32,6 +32,11 @@ export class PaymentsController {
     @Post()
     async registerPayment(@Body() payment: PaymentDTO) {
         return await this.paymentService.registerPayment(payment);
+    }
+
+    @Post('/associate')
+    async payInvoice(@Body() payment: PayInvoiceDTO) {
+        return await this.paymentService.payInvoice(payment);
     }
 
     @Put('/zelle/:id')

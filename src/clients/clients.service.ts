@@ -22,7 +22,7 @@ export class ClientsService {
     async formatNumberClients() {
         const clients = await this.getClients();
         const parseClients = clients.map(cli => {
-            const parseNumber = cli.phone.slice(0,1) === '0' ? cli.phone : `0${cli.phone}`
+            const parseNumber = cli.phone.slice(0, 1) === '0' ? cli.phone : `0${cli.phone}`
             return {
                 ...cli,
                 phone: parseNumber
@@ -58,6 +58,9 @@ export class ClientsService {
             baseResponse.message = 'Bloque agregado correctamente.';
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ClientService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -76,6 +79,9 @@ export class ClientsService {
             baseResponse.message = 'Bloque actualizado correctamente.';
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ClientService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
@@ -99,6 +105,9 @@ export class ClientsService {
             baseResponse.message = 'Bloque eliminado correctamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ClientService' }
+            })
             badResponse.message = err.message;
             return badResponse;
         }
