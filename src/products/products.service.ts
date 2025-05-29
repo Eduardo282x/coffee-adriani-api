@@ -45,7 +45,7 @@ export class ProductsService {
     async getProducts() {
         try {
             const getDolar = await this.getDolar();
-
+            
             return await this.prismaService.product.findMany({
                 orderBy: { id: 'asc' }
             }).then(res =>

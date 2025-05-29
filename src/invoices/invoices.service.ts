@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOInvoice, IInvoice } from './invoice.dto';
+import { DTOInvoice, IInvoice, IInvoiceWithDetails } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
-import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.controller';
+import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.interfaces';
 import { InvoiceStatus } from '@prisma/client';
 
 @Injectable()
@@ -59,10 +59,10 @@ export class InvoicesService {
         }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: typeof invoices }>);
 
         const result = Object.values(groupedByClient);
-                const totalPackage = invoices.reduce((acc, invoice) => {
-            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente' 
-            ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
-            : 0;
+        const totalPackage = invoices.reduce((acc, invoice) => {
+            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente'
+                ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
+                : 0;
             return acc + total;
         }, 0);
 
@@ -72,7 +72,42 @@ export class InvoicesService {
         };
     }
 
+    async getInvoiceWithDetails() {
+        try {
+            const invoice = await this.prismaService.invoice.findMany({
+                include: {
+                    client: {
+                        include: { block: true }
+                    },
+                    invoiceItems: {
+                        include: {
+                            product: true
+                        }
+                    }
+                },
+                where: {
+                    status: {
+                        notIn: ['Cancelada', 'Pagado']
+                    }
+                }
+            });
+
+            if (!invoice) {
+                return badResponse;
+            }
+
+            return invoice;
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'InvoiceService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
     async getInvoicesFilter(invoice: DTODateRangeFilter) {
+        const dolar = await this.productService.getDolar();
         const invoices = await this.prismaService.invoice.findMany({
             include: {
                 client: {
@@ -111,7 +146,11 @@ export class InvoicesService {
 
             const invoiceWithoutClient = { ...invoice };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
-            acc[clientId].invoices.push(invoiceWithoutClient);
+            const invoiceWithDolar = {
+                ...invoiceWithoutClient,
+                totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
+            }
+            acc[clientId].invoices.push(invoiceWithDolar);
 
             return acc;
         }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: typeof invoices }>);
@@ -119,16 +158,46 @@ export class InvoicesService {
         const result = Object.values(groupedByClient);
 
         const totalPackage = invoices.reduce((acc, invoice) => {
-            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente' 
-            ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
-            : 0;
+            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente'
+                ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
+                : 0;
             return acc + total;
         }, 0);
 
+        const groupedByProduct = invoices.reduce((acc, invoice) => {
+            invoice.invoiceItems.forEach(item => {
+                const productId = item.product.id;
+
+                if (!acc[productId]) {
+                    acc[productId] = {
+                        product: item.product,
+                        totalQuantity: 0,
+                    };
+                }
+
+                acc[productId].totalQuantity += Number(item.quantity);
+            })
+            return acc;
+        }, {} as Record<number, { product: typeof invoices[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
+
+
+        const totalPackageDet = Object.values(groupedByProduct);
+
         return {
             invoices: result,
-            package: totalPackage
+            package: totalPackage,
+            detPackage: totalPackageDet
         };
+    }
+
+    setTotalProducts = (invoices: IInvoiceWithDetails[], type: string) => {
+        const totalPackage = invoices.reduce((acc, invoice) => {
+            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente'
+                ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
+                : 0;
+            return acc + total;
+        }, 0);
+
     }
 
     async checkInvoice() {
@@ -278,6 +347,113 @@ export class InvoicesService {
             return badResponse;
         }
     }
+
+    async updateInvoice(id: number, newInvoice: DTOInvoice) {
+        try {
+            const invoice = await this.prismaService.invoice.findUnique({
+                where: { id },
+                include: {
+                    invoiceItems: true
+                }
+            });
+
+            await this.prismaService.invoice.update({
+                where: { id },
+                data: {
+                    clientId: newInvoice.clientId,
+                    controlNumber: newInvoice.controlNumber,
+                    dispatchDate: newInvoice.dispatchDate,
+                    dueDate: newInvoice.dueDate,
+                    consignment: newInvoice.consignment,
+                }
+            });
+
+            const products = await this.productService.getProducts();
+
+            // if (invoice.invoiceItems.length === newInvoice.details.length) {
+            const dataDetailsInvoice = newInvoice.details.map(det => {
+                const findProduct = products.find(prod => prod.id === det.productId);
+
+                return {
+                    invoiceId: id,
+                    productId: det.productId,
+                    quantity: det.quantity,
+                    unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
+                    subtotal: Number(newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity),
+                }
+            });
+
+            await this.prismaService.invoiceProduct.deleteMany({
+                where: { invoiceId: id }
+            })
+
+            await this.prismaService.invoiceProduct.createMany({
+                data: dataDetailsInvoice
+            });
+            // }
+
+            baseResponse.message = 'Factura actualizada correctamente';
+            return baseResponse;
+
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'InvoiceService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async deleteInvoice(id: number) {
+        try {
+            const invoice = await this.prismaService.invoice.update({
+                where: { id },
+                data: { status: 'Cancelada' },
+            });
+
+            if (!invoice) {
+                badResponse.message = 'Factura no encontrada';
+                return badResponse;
+            }
+
+            const detInvoice = await this.prismaService.invoiceProduct.findMany({
+                where: { invoiceId: id }
+            });
+
+            detInvoice.map(async (det) => {
+                const findInventory = await this.prismaService.inventory.findFirst({
+                    where: { productId: det.productId }
+                });
+
+                if (findInventory) {
+                    await this.prismaService.inventory.update({
+                        where: { id: findInventory.id },
+                        data: { quantity: findInventory.quantity + det.quantity }
+                    })
+                    await this.prismaService.historyInventory.create({
+                        data: {
+                            productId: findInventory.productId,
+                            quantity: det.quantity,
+                            description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
+                            movementType: 'IN'
+                        }
+                    })
+                }
+            })
+
+            baseResponse.message = 'Factura eliminada correctamente';
+            return baseResponse;
+
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'InvoiceService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    // ----------------------------------------------------------------
 
     async syncInvoiceExcel(invoices: ExcelTransformV2[]) {
         const existingInvoices = await this.prismaService.invoice.findMany();

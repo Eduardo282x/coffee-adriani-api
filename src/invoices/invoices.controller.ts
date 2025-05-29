@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { DTOInvoice } from './invoice.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
@@ -7,10 +7,15 @@ import { DTODateRangeFilter } from 'src/dto/base.dto';
 export class InvoicesController {
 
     constructor(private readonly invoicesService: InvoicesService) { }
-    
+
     @Get()
     async getInvoices() {
         return await this.invoicesService.getInvoices();
+    }
+
+    @Get('/unordered')
+    async getInvoiceWithDetails() {
+        return await this.invoicesService.getInvoiceWithDetails();
     }
 
     @Get('/validate')
@@ -31,6 +36,16 @@ export class InvoicesController {
     @Post()
     async createInvoice(@Body() newInvoice: DTOInvoice) {
         return await this.invoicesService.createInvoice(newInvoice);
+    }
+    
+    @Put('/:id')
+    async updateInvoice(@Param('id', ParseIntPipe) id: number, @Body() updatedInvoice: DTOInvoice) {
+        return await this.invoicesService.updateInvoice(id, updatedInvoice);
+    }
+
+    @Delete('/:id')
+    async deleteInvoice(@Param('id') id: string) {
+        return await this.invoicesService.deleteInvoice(Number(id));
     }
 
 }

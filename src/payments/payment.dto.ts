@@ -1,36 +1,39 @@
-import { IsNumber, IsPositive, IsString } from "class-validator";
+import { Type } from "class-transformer";
+import { IsArray, IsNotEmpty, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
 
 export class PaymentDTO {
     @IsString()
-    currency: string;
-    @IsString()
     reference: string;
-    @IsString()
-    bank: string;
     @IsNumber()
     @IsPositive()
     amount: number;
     @IsNumber()
-    methodId: number;
+    accountId: number;
 }
 
-export class PaymentUpdateDTO {
+export class PayInvoiceDetailsDTO {
     @IsNumber()
-    @IsPositive()
+    @IsNotEmpty({message: 'La numero de factura debe ser numero'})
     invoiceId: number;
     @IsNumber()
-    @IsPositive()
+    @IsNotEmpty({message: 'La cantidad debe ser numero'})
     amount: number;
-    @IsNumber()
-    methodId: number;
 }
 
 export class PayInvoiceDTO {
-    @IsString()
-    invoiceId: string;
     @IsNumber()
     paymentId: number;
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => PayInvoiceDetailsDTO)
+    details: PayInvoiceDetailsDTO[];
+}
+
+export class AccountsDTO {
+    @IsString()
+    name: string;
+    @IsString()
+    bank: string;
     @IsNumber()
-    @IsPositive()
-    amount: number;
+    methodId: number;
 }

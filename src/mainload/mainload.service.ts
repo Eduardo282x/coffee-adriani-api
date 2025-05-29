@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { AccountsDB, ProductsDB } from './mainload.data';
 
 @Injectable()
 export class MainloadService {
@@ -28,9 +29,18 @@ export class MainloadService {
                 data: [
                     { name: 'Pago Movil', currency: 'BS' },
                     { name: 'Transferencia', currency: 'BS' },
-                    { name: 'Efectivo', currency: 'USD' },
+                    { name: 'Efectivo $', currency: 'USD' },
+                    { name: 'Efectivo Bs', currency: 'BS' },
                     { name: 'Zelle', currency: 'USD' },
                 ]
+            })
+
+            await this.prismaService.product.createMany({
+                data: ProductsDB
+            })
+
+            await this.prismaService.accountsPayments.createMany({
+                data: AccountsDB
             })
 
             await this.prismaService.role.createMany({
@@ -48,8 +58,7 @@ export class MainloadService {
                     password: 'admin',
                     username: 'admin',
                     rolId: 1
-                },
-
+                }
             })
             baseResponse.message = 'Data cargada exitosamente';
             return baseResponse

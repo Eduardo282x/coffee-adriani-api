@@ -42,6 +42,9 @@ export interface IInvoice {
     updatedAt: Date;
     payments: Payments[];
 }
+export interface IInvoiceWithDetails extends IInvoice {
+    invoiceItems: DTOInventory[];
+}
 
 export interface Payments {
     id: number;

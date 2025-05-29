@@ -2,28 +2,19 @@ import { Controller, Post, UploadedFile, UseInterceptors } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express';
 import { parseExcelToJson } from 'src/common/utils.excel-parset';
 import { ExcelService } from './excel.service';
+import { ClientExcel, DetInvoiceDataExcel, ExcelTransform, ExcelTransformV2, PaymentParseExcel } from './excel.interfaces';
 
 @Controller('excel')
 export class ExcelController {
 
     constructor(private excelService: ExcelService) {
-
     }
 
-    @Post('upload')
+    @Post('upload/invoices')
     @UseInterceptors(FileInterceptor('file'))
-    async uploadExcel(@UploadedFile() file: Express.Multer.File) {
-
-        return {
-            message: 'Este servicio no esta disponible.'
-        }
-
+    async uploadInvoicesExcel(@UploadedFile() file: Express.Multer.File) {
         try {
             const invoiceData = parseExcelToJson(file.buffer, 0);
-            const detInvoiceData: DetInvoiceDataExcel[] = parseExcelToJson(file.buffer, 1);
-            // const clientPhoneData: ClientPhoneExcel[] = parseExcelToJson(file.buffer, 2);
-            const clientData: ClientExcel[] = parseExcelToJson(file.buffer, 2);
-            const paymentData: PaymentParseExcel[] = parseExcelToJson(file.buffer, 0);
             const parseData: ExcelTransform[] = invoiceData as ExcelTransform[];
 
             const parseDataToInvoice: ExcelTransformV2[] = parseData
@@ -34,10 +25,56 @@ export class ExcelController {
                         consignment: item.consignment === 'Si'
                     }
                 })
+
+            return await this.excelService.sendInvoices(parseDataToInvoice);
+        } catch (err) {
+            return err.message
+        }
+    }
+
+    @Post('upload/detInvoices')
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadDetInvoicesExcel(@UploadedFile() file: Express.Multer.File) {
+        try {
+            const detInvoiceData: DetInvoiceDataExcel[] = parseExcelToJson(file.buffer, 1);
             const parseDataToDetInvoice: DetInvoiceDataExcel[] = detInvoiceData.filter(item => item.invoice != null || item.product != null)
+            return await this.excelService.sendDetInvoices(parseDataToDetInvoice);
+        } catch (err) {
+            return err.message
+        }
+    }
+
+    @Post('upload/payments')
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadPaymentsExcel(@UploadedFile() file: Express.Multer.File) {
+        try {
+            const paymentData: PaymentParseExcel[] = parseExcelToJson(file.buffer, 0);
+            const filterPayments: PaymentParseExcel[] = paymentData.filter(pay => pay.total != null);
+            return await this.excelService.sendPayments(filterPayments);
+        } catch (err) {
+            return err.message
+        }
+    }
+
+    @Post('upload/payments/associate')
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadPaymentsAssociateExcel(@UploadedFile() file: Express.Multer.File) {
+        try {
+            const paymentData: PaymentParseExcel[] = parseExcelToJson(file.buffer, 0);
+            const filterPayments: PaymentParseExcel[] = paymentData.filter(pay => pay.total != null);
+            return await this.excelService.sendPaymentsAssociate(filterPayments);
+        } catch (err) {
+            return err.message
+        }
+    }
+
+    @Post('upload/clients')
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadClientsExcel(@UploadedFile() file: Express.Multer.File) {
+        try {
+            const clientData: ClientExcel[] = parseExcelToJson(file.buffer, 0);
             const parseDataToClient: ClientExcel[] = clientData.filter(item => item.address != null);
-            const filterPayments: PaymentParseExcel[] = paymentData.filter(pay => pay.amount != null);
-            return await this.excelService.sendInvoices(parseDataToInvoice, parseDataToDetInvoice, parseDataToClient, filterPayments);
+            return await this.excelService.sendClients(parseDataToClient);
         } catch (err) {
             return err.message
         }
@@ -77,79 +114,3 @@ export const parseAnyExcelDate = (input: any): Date | null => {
 
     return null;
 };
-
-export interface ExcelTransform {
-    controlNumber: number;
-    client: string;
-    totalAmount: number;
-    consignment: string;
-    status: string;
-    dispatchDate: number;
-    dueDate: number;
-}
-
-export interface ExcelTransformV2 {
-    controlNumber: number;
-    client: string;
-    totalAmount: number;
-    consignment: boolean;
-    status: string;
-    dispatchDate: number;
-    dueDate: number;
-}
-
-export interface DetInvoiceDataExcel {
-    invoice: number;
-    product: string;
-    quantity: number;
-    unitPrice: number;
-    subtotal: number;
-}
-
-export interface DetInvoiceDataExcelParse {
-    controlNumber: string;
-    product: string;
-    quantity: number;
-    unitPrice: number;
-    subtotal: number;
-}
-
-export interface ClientPhoneExcel {
-    client: string;
-    phone: number;
-}
-export interface ClientPhoneExcelParse {
-    client: string;
-    phone: string;
-}
-
-export interface ClientExcel {
-    name: string;
-    rif: string;
-    address: string;
-    phone: number;
-    zone: string;
-    blockId: number;
-    active: string;
-}
-
-export interface PaymentExcel {
-    date: number;
-    controlNumber: number;
-    client: string;
-    bank: string;
-    reference: string;
-    amount: number;
-    dolar: number;
-    total: number;
-}
-export interface PaymentParseExcel {
-    date: Date;
-    controlNumber: number;
-    client: string;
-    bank: string;
-    reference: string;
-    amount: number;
-    dolar: number;
-    total: number;
-}

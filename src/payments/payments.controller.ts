@@ -1,13 +1,13 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
-import { PayInvoiceDTO, PaymentDTO } from './payment.dto';
+import { AccountsDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 
 @Controller('payments')
 export class PaymentsController {
 
     constructor(private readonly paymentService: PaymentsService) {
-        
+
     }
 
     @Get()
@@ -17,6 +17,10 @@ export class PaymentsController {
     @Get('/banks')
     async getBanks() {
         return await this.paymentService.getBanks()
+    }
+    @Get('/accounts')
+    async getAccountsPayments() {
+        return await this.paymentService.getAccountsPayments()
     }
 
     @Post('/filter')
@@ -34,6 +38,11 @@ export class PaymentsController {
         return await this.paymentService.registerPayment(payment);
     }
 
+    @Post('/accounts')
+    async postAccountsPayments(@Body() account: AccountsDTO) {
+        return await this.paymentService.createAccountPayment(account)
+    }
+
     @Post('/associate')
     async payInvoice(@Body() payment: PayInvoiceDTO) {
         return await this.paymentService.payInvoice(payment);
@@ -42,5 +51,15 @@ export class PaymentsController {
     @Put('/zelle/:id')
     async updatePaymentZelle(@Param('id') id: string) {
         return await this.paymentService.updatePaymentZelle(Number(id));
+    }
+
+    @Put('/accounts/:id')
+    async putAccountsPayments(@Param('id') id: string, @Body() account: AccountsDTO) {
+        return await this.paymentService.updateAccountPayment(Number(id), account)
+    }
+
+    @Delete('/accounts/:id')
+    async deleteAccountsPayments(@Param('id') id: string) {
+        return await this.paymentService.deleteAccountsPayments(Number(id))
     }
 }

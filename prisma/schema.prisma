@@ -5,7 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  // directUrl = env("DIRECT_URL")
 }
 
 model Users {
@@ -33,7 +33,7 @@ model Client {
   zone         String
   blockId      Int
   block        Block          @relation(fields: [blockId], references: [id])
-  active       Boolean
+  active       Boolean        @default(true)
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   invoices     Invoice[]
@@ -55,12 +55,15 @@ model Invoice {
   dueDate        DateTime
   controlNumber  String           @unique
   exchangeRate   Int?
+  sellerId       Int?
+  seller         Seller?          @relation(fields: [sellerId], references: [id])
   totalAmount    Decimal          @db.Decimal(10, 2)
-  remaining      Decimal          @db.Decimal(10, 2) @default(0)
+  remaining      Decimal          @default(0) @db.Decimal(10, 2)
   consignment    Boolean
   status         InvoiceStatus
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+  deleted        Boolean          @default(false)
   invoiceItems   InvoiceProduct[]
   Notification   Notification[]
   InvoicePayment InvoicePayment[]
@@ -144,17 +147,26 @@ model InvoiceProduct {
   @@unique([invoiceId, productId]) // No se puede repetir el producto en la misma factura
 }
 
+model AccountsPayments {
+  id        Int           @id @default(autoincrement())
+  name      String
+  bank      String
+  methodId  Int
+  method    PaymentMethod @relation(references: [id], fields: [methodId])
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  Payment   Payment[]
+}
+
 model Payment {
   id             Int              @id @default(autoincrement())
   amount         Decimal          @db.Decimal(10, 2)
-  remaining      Decimal          @db.Decimal(10, 2) @default(0)
-  currency       Currency
+  remaining      Decimal          @default(0) @db.Decimal(10, 2)
+  accountId      Int
+  account        AccountsPayments @relation(fields: [accountId], references: [id])
   reference      String
-  bank           String
   dolarId        Int
   dolar          HistoryDolar     @relation(fields: [dolarId], references: [id])
-  methodId       Int
-  method         PaymentMethod    @relation(references: [id], fields: [methodId])
   paymentDate    DateTime
   status         PaymentStatus
   createdAt      DateTime         @default(now())
@@ -175,10 +187,10 @@ model InvoicePayment {
 }
 
 model PaymentMethod {
-  id       Int       @id @default(autoincrement())
-  name     String
-  currency Currency
-  Payment  Payment[]
+  id               Int                @id @default(autoincrement())
+  name             String
+  currency         Currency
+  AccountsPayments AccountsPayments[]
 }
 
 enum PaymentStatus {
@@ -209,13 +221,14 @@ enum NotificationType {
 }
 
 model Seller {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   name       String
   phone      String
   commission Int
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   sales      Sale[]
+  Invoice    Invoice[]
 }
 
 model Sale {
