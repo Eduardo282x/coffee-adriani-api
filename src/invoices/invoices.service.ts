@@ -119,6 +119,9 @@ export class InvoicesService {
                     }
                 }
             },
+            orderBy: {
+                dispatchDate: 'desc'
+            },
             where: {
                 dispatchDate: {
                     gte: invoice.startDate,
@@ -406,13 +409,21 @@ export class InvoicesService {
 
     async deleteInvoice(id: number) {
         try {
-            const invoice = await this.prismaService.invoice.update({
-                where: { id },
-                data: { status: 'Cancelada' },
+            const invoice = await this.prismaService.invoice.findFirst({
+                where: { id }
             });
 
             if (!invoice) {
                 badResponse.message = 'Factura no encontrada';
+                return badResponse;
+            }
+
+            const findInvoicePayment = await this.prismaService.invoicePayment.findFirst({
+                where: { invoiceId: id }
+            })
+
+            if (findInvoicePayment) {
+                badResponse.message = 'Esta factura ya se encuentra paga.';
                 return badResponse;
             }
 
@@ -439,6 +450,14 @@ export class InvoicesService {
                         }
                     })
                 }
+            })
+
+            await this.prismaService.invoiceProduct.deleteMany({
+                where: { invoiceId: invoice.id }
+            })
+
+            await this.prismaService.invoice.delete({
+                where: { id: invoice.id }
             })
 
             baseResponse.message = 'Factura eliminada correctamente';

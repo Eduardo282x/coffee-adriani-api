@@ -37,6 +37,10 @@ export class PaymentsController {
     async registerPayment(@Body() payment: PaymentDTO) {
         return await this.paymentService.registerPayment(payment);
     }
+    @Put('/:id')
+    async updatePayments(@Param('id') id: string, @Body() payment: PaymentDTO) {
+        return await this.paymentService.updatePayment(Number(id), payment);
+    }
 
     @Post('/accounts')
     async postAccountsPayments(@Body() account: AccountsDTO) {
@@ -61,5 +65,9 @@ export class PaymentsController {
     @Delete('/accounts/:id')
     async deleteAccountsPayments(@Param('id') id: string) {
         return await this.paymentService.deleteAccountsPayments(Number(id))
+    }
+    @Delete('/:id')
+    async deletePayment(@Param('id') id: string) {
+        return await this.paymentService.deletePayment(Number(id))
     }
 }

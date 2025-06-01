@@ -1,5 +1,5 @@
-import { Type } from "class-transformer";
-import { IsArray, IsNotEmpty, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
+import { Transform, Type } from "class-transformer";
+import { IsArray, IsDate, IsNotEmpty, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
 
 export class PaymentDTO {
     @IsString()
@@ -9,14 +9,17 @@ export class PaymentDTO {
     amount: number;
     @IsNumber()
     accountId: number;
+    @IsDate()
+    @Transform(({ value }) => new Date(value))
+    paymentDate: Date;
 }
 
 export class PayInvoiceDetailsDTO {
     @IsNumber()
-    @IsNotEmpty({message: 'La numero de factura debe ser numero'})
+    @IsNotEmpty({ message: 'La numero de factura debe ser numero' })
     invoiceId: number;
     @IsNumber()
-    @IsNotEmpty({message: 'La cantidad debe ser numero'})
+    @IsNotEmpty({ message: 'La cantidad debe ser numero' })
     amount: number;
 }
 

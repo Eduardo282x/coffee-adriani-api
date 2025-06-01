@@ -76,12 +76,13 @@ export class PaymentsService {
     }
 
     async getPaymentsFilter(filter: DTODateRangeFilter) {
-        return await this.prismaService.payment.findMany({
+        const dataPayments = await this.prismaService.payment.findMany({
             include: {
                 dolar: true,
                 account: {
                     include: { method: true }
-                }
+                },
+                InvoicePayment: true
             },
             orderBy: { paymentDate: 'desc' },
             where: {
@@ -94,6 +95,7 @@ export class PaymentsService {
             pay.map(data => {
                 return {
                     ...data,
+                    associated: data.InvoicePayment.length > 0,
                     amount: data.amount.toFixed(2),
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
@@ -101,6 +103,15 @@ export class PaymentsService {
                 }
             })
         )
+
+        const totalAmountBs = dataPayments.filter(item => item.account.method.currency === 'BS').reduce((acc, data) => acc + Number(data.amount), 0)
+        const totalAmountUSB = dataPayments.filter(item => item.account.method.currency === 'USD').reduce((acc, data) => acc + Number(data.amount), 0)
+
+        return {
+            payments: dataPayments,
+            totalBs: totalAmountBs,
+            totalUSD: totalAmountUSB
+        }
     }
 
     async getPaymentsMethod() {
@@ -125,7 +136,7 @@ export class PaymentsService {
                     remaining: payment.amount,
                     reference: payment.reference,
                     dolarId: getDolar.id,
-                    paymentDate: new Date(),
+                    paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
                 }
@@ -154,7 +165,7 @@ export class PaymentsService {
                     remaining: payment.amount,
                     reference: payment.reference,
                     dolarId: getDolar.id,
-                    paymentDate: new Date(),
+                    paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
                 },
@@ -258,6 +269,26 @@ export class PaymentsService {
 
     async saveDataExcelPaymentsLocal(payments: PaymentParseExcel[]) {
 
+    }
+
+    async deletePayment(id: number) {
+        try {
+            const findPaymentAssociate = await this.prismaService.invoicePayment.findFirst({
+                where: { paymentId: id }
+            })
+            if (findPaymentAssociate) {
+                badResponse.message = 'Este pago esta asociado a una factura.'
+                return badResponse;
+            }
+            await this.prismaService.payment.delete({
+                where: { id }
+            })
+            baseResponse.message = 'Pago eliminado exitosamente';
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
     }
 
     async deleteAccountsPayments(id: number) {
