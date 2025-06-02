@@ -43,6 +43,11 @@ export class InvoicesController {
         return await this.invoicesService.updateInvoice(id, updatedInvoice);
     }
 
+    @Put('/pay/:id')
+    async markPayed(@Param('id', ParseIntPipe) id: number) {
+        return await this.invoicesService.markPayed(id);
+    }
+
     @Delete('/:id')
     async deleteInvoice(@Param('id') id: string) {
         return await this.invoicesService.deleteInvoice(Number(id));

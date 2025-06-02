@@ -160,14 +160,9 @@ export class InvoicesService {
 
         const result = Object.values(groupedByClient);
 
-        const totalPackage = invoices.reduce((acc, invoice) => {
-            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente'
-                ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
-                : 0;
-            return acc + total;
-        }, 0);
+        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente')
 
-        const groupedByProduct = invoices.reduce((acc, invoice) => {
+        const groupedByProduct = invoicesFilter.reduce((acc, invoice) => {
             invoice.invoiceItems.forEach(item => {
                 const productId = item.product.id;
 
@@ -188,7 +183,7 @@ export class InvoicesService {
 
         return {
             invoices: result,
-            package: totalPackage,
+            package: totalPackageDet.reduce((acc, item) => acc + item.totalQuantity, 0),
             detPackage: totalPackageDet
         };
     }
@@ -404,6 +399,20 @@ export class InvoicesService {
             })
             badResponse.message = err.message;
             return badResponse;
+        }
+    }
+
+    async markPayed(id: number) {
+        try {
+            await this.prismaService.invoice.update({
+                where: { id },
+                data: { status: 'Pagado' }
+            })
+            baseResponse.message = 'Factura marcada como pagada.'
+            return baseResponse;
+        } catch (err) {
+            baseResponse.message = err.message;
+            return badResponse
         }
     }
 

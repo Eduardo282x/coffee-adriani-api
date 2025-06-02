@@ -228,31 +228,31 @@ export class PaymentsService {
                     throw new Error(`La factura #${findInvoice.controlNumber} ya está pagada.`);
                 }
 
-                const totalAmountPay = findPayment.account.method.currency === 'BS'
-                    ? pay.amount / Number(findPayment.dolar.dolar)
-                    : pay.amount
+                // const totalAmountPay = findPayment.account.method.currency === 'BS'
+                //     ? pay.amount / Number(findPayment.dolar.dolar)
+                //     : pay.amount
 
 
                 await this.prismaService.invoicePayment.create({
                     data: {
                         invoiceId: findInvoice.id,
                         paymentId: findPayment.id,
-                        amount: totalAmountPay
+                        amount: pay.amount
                     }
                 });
 
-                const setStatusPay = Number(totalAmountPay).toFixed(2) === Number(findInvoice.totalAmount).toFixed(2)
+                const setStatusPay = Number(pay.amount).toFixed(2) === Number(findInvoice.totalAmount).toFixed(2)
                     ? 'Pagado'
                     : 'Pendiente'
 
                 await this.prismaService.payment.update({
-                    data: { remaining: Number(findPayment.amount) - totalAmountPay },
+                    data: { remaining: Number(findPayment.amount) - pay.amount },
                     where: { id: findPayment.id }
                 })
 
                 await this.prismaService.invoice.update({
                     data: {
-                        remaining: Number(findInvoice.remaining) - totalAmountPay,
+                        remaining: Number(findInvoice.remaining) - pay.amount,
                         status: setStatusPay
                     },
                     where: { id: findInvoice.id }
