@@ -37,15 +37,20 @@ export class InvoicesController {
     async createInvoice(@Body() newInvoice: DTOInvoice) {
         return await this.invoicesService.createInvoice(newInvoice);
     }
-    
-    @Put('/:id')
-    async updateInvoice(@Param('id', ParseIntPipe) id: number, @Body() updatedInvoice: DTOInvoice) {
-        return await this.invoicesService.updateInvoice(id, updatedInvoice);
+
+    @Put('/details')
+    async updateInvoiceDet() {
+        return await this.invoicesService.updateInvoiceDet();
     }
 
     @Put('/pay/:id')
     async markPayed(@Param('id', ParseIntPipe) id: number) {
         return await this.invoicesService.markPayed(id);
+    }
+
+    @Put('/:id')
+    async updateInvoice(@Param('id', ParseIntPipe) id: number, @Body() updatedInvoice: DTOInvoice) {
+        return await this.invoicesService.updateInvoice(id, updatedInvoice);
     }
 
     @Delete('/:id')

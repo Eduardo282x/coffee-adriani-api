@@ -232,8 +232,9 @@ export class PaymentsService {
             }
 
             pay.details.map(async (pay) => {
-                const findInvoice = await this.prismaService.invoice.findFirst({
-                    where: { id: pay.invoiceId }
+                let findInvoice = await this.prismaService.invoice.findFirst({
+                    where: { id: pay.invoiceId },
+                    include: { invoiceItems: true }
                 });
 
                 if (!findInvoice) {
@@ -247,6 +248,25 @@ export class PaymentsService {
                 // const totalAmountPay = findPayment.account.method.currency === 'BS'
                 //     ? pay.amount / Number(findPayment.dolar.dolar)
                 //     : pay.amount
+
+                if (findPayment.account.method.currency == 'USD') {
+                    const newTotalUSD = findInvoice.invoiceItems.reduce((acc, item) => acc + (Number(item.unitPriceUSD) * item.quantity), 0)
+                    findInvoice = await this.prismaService.invoice.update({
+                        data: { totalAmount: newTotalUSD, remaining: newTotalUSD },
+                        include: { invoiceItems: true },
+                        where: { id: findInvoice.id }
+                    })
+
+                    findInvoice.invoiceItems.map(async (item) => {
+                        await this.prismaService.invoiceProduct.update({
+                            data: {
+                                unitPrice: item.unitPriceUSD,
+                                subtotal: Number(item.unitPriceUSD) * item.quantity
+                            },
+                            where: { id: item.id }
+                        })
+                    })
+                }
 
 
                 await this.prismaService.invoicePayment.create({

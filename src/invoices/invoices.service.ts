@@ -114,9 +114,15 @@ export class InvoicesService {
                         notIn: ['Cancelada', 'Pagado']
                     }
                 }
-            });
+            }).then(item => item.map(data => {
+                return {
+                    ...data,
+                    specialPrice: data.invoiceItems.reduce((acc, det) => acc + (Number(det.unitPriceUSD) * det.quantity), 0),
+                }
+            }))
 
             if (!invoice) {
+                badResponse.message = 'No se han encontrado facturas.'
                 return badResponse;
             }
 
@@ -329,6 +335,7 @@ export class InvoicesService {
                     productId: det.productId,
                     quantity: det.quantity,
                     unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
+                    unitPriceUSD: Number(findProduct.priceUSD),
                     subtotal: Number(newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity),
                 }
             })
@@ -401,6 +408,7 @@ export class InvoicesService {
                     productId: det.productId,
                     quantity: det.quantity,
                     unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
+                    unitPriceUSD: Number(findProduct.priceUSD),
                     subtotal: Number(newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity),
                 }
             });
@@ -423,6 +431,39 @@ export class InvoicesService {
             })
             badResponse.message = err.message;
             return badResponse;
+        }
+    }
+
+    async updateInvoiceDet() {
+        try {
+            const getDetailsInvoice = await this.prismaService.invoiceProduct.findMany();
+            const historyProduct = await this.prismaService.historyProduct.findMany();
+
+            let notFound = 0;
+            getDetailsInvoice.map(async (item) => {
+                const findProductHistory = historyProduct.find(data =>
+                    Number(data.price).toFixed(2) === Number(item.unitPrice).toFixed(2)
+                )
+
+                if (!findProductHistory || !findProductHistory.priceUSD) {
+                    notFound += 1;
+                } else {
+                    await this.prismaService.invoiceProduct.update({
+                        data: { unitPriceUSD: findProductHistory.priceUSD },
+                        where: { id: item.id }
+                    })
+                }
+            })
+
+            console.log(getDetailsInvoice.length);
+            console.log(notFound);
+
+            baseResponse.message = 'Detalles actualizados.'
+            return baseResponse;
+
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse
         }
     }
 
@@ -631,6 +672,7 @@ export class InvoicesService {
                 quantity: data.quantity,
                 subtotal: data.subtotal,
                 unitPrice: data.unitPrice,
+                unitPriceUSD: data.unitPrice,
             }
         })
 

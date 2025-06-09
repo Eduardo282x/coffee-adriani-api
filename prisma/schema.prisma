@@ -135,14 +135,15 @@ model HistoryDolar {
 }
 
 model InvoiceProduct {
-  id        Int     @id @default(autoincrement())
-  invoice   Invoice @relation(fields: [invoiceId], references: [id])
-  invoiceId Int
-  product   Product @relation(fields: [productId], references: [id])
-  productId Int
-  quantity  Int
-  unitPrice Decimal @db.Decimal(10, 2)
-  subtotal  Decimal @db.Decimal(10, 2)
+  id           Int     @id @default(autoincrement())
+  invoice      Invoice @relation(fields: [invoiceId], references: [id])
+  invoiceId    Int
+  product      Product @relation(fields: [productId], references: [id])
+  productId    Int
+  quantity     Int
+  unitPriceUSD Decimal @db.Decimal(10, 2) @default(0)
+  unitPrice    Decimal @db.Decimal(10, 2)
+  subtotal     Decimal @db.Decimal(10, 2)
 
   @@unique([invoiceId, productId]) // No se puede repetir el producto en la misma factura
 }
