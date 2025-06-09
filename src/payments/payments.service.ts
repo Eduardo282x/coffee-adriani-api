@@ -16,20 +16,36 @@ export class PaymentsService {
     ) { }
 
     async getPayments() {
-        return await this.prismaService.payment.findMany({
+        const dataPayments = await this.prismaService.payment.findMany({
             include: {
-                dolar: true
+                dolar: true,
+                account: {
+                    include: { method: true }
+                },
+                InvoicePayment: true
             },
-            orderBy: { id: 'asc' }
+            orderBy: { paymentDate: 'desc' }
         }).then(pay =>
             pay.map(data => {
                 return {
                     ...data,
+                    associated: data.InvoicePayment.length > 0,
                     amount: data.amount.toFixed(2),
+                    amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
+                    amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
                     remaining: data.remaining.toFixed(2)
                 }
             })
         )
+
+        const totalAmountBs = dataPayments.filter(item => item.account.method.currency === 'BS').reduce((acc, data) => acc + Number(data.amount), 0)
+        const totalAmountUSB = dataPayments.filter(item => item.account.method.currency === 'USD').reduce((acc, data) => acc + Number(data.amount), 0)
+
+        return {
+            payments: dataPayments,
+            totalBs: totalAmountBs,
+            totalUSD: totalAmountUSB
+        }
     }
 
     async getAccountsPayments() {

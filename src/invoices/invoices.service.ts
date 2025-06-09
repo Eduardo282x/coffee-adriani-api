@@ -21,6 +21,7 @@ export class InvoicesService {
     }
 
     async getInvoices() {
+        const dolar = await this.productService.getDolar();
         const invoices = await this.prismaService.invoice.findMany({
             include: {
                 client: {
@@ -31,15 +32,18 @@ export class InvoicesService {
                         product: true
                     }
                 }
+            },
+            orderBy: {
+                dispatchDate: 'desc'
             }
-        }).then(inv => {
-            return inv.map(data => {
+        }).then(inv =>
+            inv.map(data => {
                 return {
                     ...data,
                     totalAmount: data.totalAmount.toFixed(2)
                 }
             })
-        })
+        )
 
         const groupedByClient = invoices.reduce((acc, invoice) => {
             const clientId = invoice.client.id;
@@ -53,22 +57,42 @@ export class InvoicesService {
 
             const invoiceWithoutClient = { ...invoice };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
-            acc[clientId].invoices.push(invoiceWithoutClient);
+            const invoiceWithDolar = {
+                ...invoiceWithoutClient,
+                totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
+            }
+            acc[clientId].invoices.push(invoiceWithDolar);
 
             return acc;
         }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: typeof invoices }>);
 
         const result = Object.values(groupedByClient);
-        const totalPackage = invoices.reduce((acc, invoice) => {
-            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente'
-                ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
-                : 0;
-            return acc + total;
-        }, 0);
+
+        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente')
+
+        const groupedByProduct = invoicesFilter.reduce((acc, invoice) => {
+            invoice.invoiceItems.forEach(item => {
+                const productId = item.product.id;
+
+                if (!acc[productId]) {
+                    acc[productId] = {
+                        product: item.product,
+                        totalQuantity: 0,
+                    };
+                }
+
+                acc[productId].totalQuantity += Number(item.quantity);
+            })
+            return acc;
+        }, {} as Record<number, { product: typeof invoices[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
+
+
+        const totalPackageDet = Object.values(groupedByProduct);
 
         return {
             invoices: result,
-            package: totalPackage
+            package: totalPackageDet.reduce((acc, item) => acc + item.totalQuantity, 0),
+            detPackage: totalPackageDet
         };
     }
 
