@@ -293,6 +293,15 @@ export class InvoicesService {
 
     async createInvoice(newInvoice: DTOInvoice) {
         try {
+            const findDuplicateControlNumber = await this.prismaService.invoice.findFirst({
+                where: { controlNumber: newInvoice.controlNumber },
+                include: { client: true }
+            })
+
+            if (findDuplicateControlNumber) {
+                badResponse.message = `Ya existe una factura con ese numero de control del cliente ${findDuplicateControlNumber.client.name}`
+                return badResponse;
+            }
 
             const products = await this.productService.getProducts();
             const inventory = await this.inventoryService.getInventory();

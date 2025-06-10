@@ -136,6 +136,9 @@ export class ClientsService {
             baseResponse.message = 'Cliente agregado exitosamente.'
             return baseResponse;
         } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ClientService' }
+            })
             badResponse.message = err.message
             return badResponse;
         }
