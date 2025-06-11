@@ -1,4 +1,4 @@
-import { IsNumber, IsPhoneNumber, IsString } from "class-validator";
+import { IsNumber, IsOptional, IsPhoneNumber, IsString } from "class-validator";
 
 export class DTOClients {
     @IsString()
@@ -7,8 +7,9 @@ export class DTOClients {
     rif: string;
     @IsString()
     address: string;
+    @IsOptional()
     @IsString()
-    @IsPhoneNumber('VE')
+    // @IsPhoneNumber('VE')
     phone: string;
     @IsString()
     zone: string;

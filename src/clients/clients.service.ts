@@ -126,7 +126,7 @@ export class ClientsService {
                     name: newClient.name,
                     rif: newClient.rif,
                     address: newClient.address,
-                    phone: newClient.phone,
+                    phone: newClient.phone ? newClient.phone : '',
                     zone: newClient.zone,
                     blockId: newClient.blockId,
                     active: true
