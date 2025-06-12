@@ -168,9 +168,8 @@ export class ClientsService {
 
     async deleteClients(id: number): Promise<DTOBaseResponse> {
         try {
-            await this.prismaService.client.update({
-                where: { id },
-                data: { active: false }
+            await this.prismaService.client.delete({
+                where: { id }
             })
 
             baseResponse.message = 'Cliente eliminado exitosamente.'
