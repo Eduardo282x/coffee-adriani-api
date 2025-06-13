@@ -68,7 +68,7 @@ export class InvoicesService {
 
         const result = Object.values(groupedByClient);
 
-        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente')
+        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
 
         // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
 
@@ -76,8 +76,8 @@ export class InvoicesService {
         const totalPackageDetCount = this.groupProductCountInvoices(invoicesFilter);
 
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.remaining), 0)
+        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
         const debt = totalCashInvoicesPending - remainingCashInvoices;
 
 
@@ -188,7 +188,7 @@ export class InvoicesService {
 
         const result = Object.values(groupedByClient);
 
-        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente')
+        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
 
         // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
 
@@ -196,9 +196,10 @@ export class InvoicesService {
         const totalPackageDetCount = this.groupProductCountInvoices(invoicesFilter);
 
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.remaining), 0)
+        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
         const debt = totalCashInvoicesPending - remainingCashInvoices;
+
 
         return {
             invoices: result,
