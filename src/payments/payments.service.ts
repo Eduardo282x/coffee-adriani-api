@@ -33,7 +33,8 @@ export class PaymentsService {
                     amount: data.amount.toFixed(2),
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
-                    remaining: data.remaining.toFixed(2)
+                    remaining: data.remaining.toFixed(2),
+                    credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
                 }
             })
         )
@@ -115,7 +116,8 @@ export class PaymentsService {
                     amount: data.amount.toFixed(2),
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
-                    remaining: data.remaining.toFixed(2)
+                    remaining: data.remaining.toFixed(2),
+                    credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
                 }
             })
         )

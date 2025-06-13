@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOInvoice, IInvoice, IInvoiceWithDetails } from './invoice.dto';
+import { DetProducts, DTOInvoice, IInvoiceWithDetails } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
@@ -70,29 +70,27 @@ export class InvoicesService {
 
         const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente')
 
-        const groupedByProduct = invoicesFilter.reduce((acc, invoice) => {
-            invoice.invoiceItems.forEach(item => {
-                const productId = item.product.id;
+        // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
 
-                if (!acc[productId]) {
-                    acc[productId] = {
-                        product: item.product,
-                        totalQuantity: 0,
-                    };
-                }
+        // const totalPackageDet = Object.values(groupedByProduct);
+        const totalPackageDetCount = this.groupProductCountInvoices(invoicesFilter);
 
-                acc[productId].totalQuantity += Number(item.quantity);
-            })
-            return acc;
-        }, {} as Record<number, { product: typeof invoices[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
+        const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.remaining), 0)
+        const debt = totalCashInvoicesPending - remainingCashInvoices;
 
-
-        const totalPackageDet = Object.values(groupedByProduct);
 
         return {
             invoices: result,
-            package: totalPackageDet.reduce((acc, item) => acc + item.totalQuantity, 0),
-            detPackage: totalPackageDet
+            package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
+            detPackage: totalPackageDetCount,
+            payments: {
+                total: totalCashInvoices,
+                totalPending: totalCashInvoicesPending,
+                remaining: remainingCashInvoices,
+                debt: debt,
+            }
         };
     }
 
@@ -137,7 +135,7 @@ export class InvoicesService {
     }
 
     async getInvoicesFilter(invoice: DTODateRangeFilter) {
-        const dolar = await this.productService.getDolar();
+        // const dolar = await this.productService.getDolar();
         const invoices = await this.prismaService.invoice.findMany({
             include: {
                 client: {
@@ -179,11 +177,11 @@ export class InvoicesService {
 
             const invoiceWithoutClient = { ...invoice };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
-            const invoiceWithDolar = {
-                ...invoiceWithoutClient,
-                totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
-            }
-            acc[clientId].invoices.push(invoiceWithDolar);
+            // const invoiceWithDolar = {
+            //     ...invoiceWithoutClient,
+            //     totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
+            // }
+            acc[clientId].invoices.push(invoiceWithoutClient);
 
             return acc;
         }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: typeof invoices }>);
@@ -192,30 +190,104 @@ export class InvoicesService {
 
         const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente')
 
-        const groupedByProduct = invoicesFilter.reduce((acc, invoice) => {
+        // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
+
+        // const totalPackageDet = Object.values(groupedByProduct);
+        const totalPackageDetCount = this.groupProductCountInvoices(invoicesFilter);
+
+        const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente').reduce((acc, item) => acc + Number(item.remaining), 0)
+        const debt = totalCashInvoicesPending - remainingCashInvoices;
+
+        return {
+            invoices: result,
+            package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
+            detPackage: totalPackageDetCount,
+            payments: {
+                total: totalCashInvoices,
+                totalPending: totalCashInvoicesPending,
+                remaining: remainingCashInvoices,
+                debt: debt,
+            }
+        };
+    }
+
+    // groupProductInvoices(invoicesFilter) {
+    //     return invoicesFilter.reduce((acc, invoice) => {
+    //         invoice.invoiceItems.forEach(item => {
+    //             const productId = item.product.id;
+
+    //             if (!acc[productId]) {
+    //                 acc[productId] = {
+    //                     productId: item.product.id,
+    //                     product: item.product,
+    //                     totalQuantity: 0,
+    //                 };
+    //             }
+
+    //             acc[productId].totalQuantity += Number(item.quantity);
+    //         })
+    //         return acc;
+    //     }, {} as Record<number, { product: typeof invoicesFilter[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
+    // }
+
+    groupProductCountInvoices(invoicesFilter) {
+        const calculateProducts = invoicesFilter.reduce((acc, invoice) => {
+            let paidRemaining = Number(invoice.totalAmount) - Number(invoice.remaining);
+
             invoice.invoiceItems.forEach(item => {
                 const productId = item.product.id;
+                const unitPrice = Number(item.unitPrice);
+                let quantity = Number(item.quantity);
+                let quantityPaid = 0;
 
+                // Calcular cuántas unidades se han pagado por este producto
+                while (quantity > 0 && paidRemaining >= unitPrice) {
+                    quantityPaid += 1;
+                    paidRemaining -= unitPrice;
+                    quantity -= 1;
+                }
+
+                // Si queda un pago parcial para una unidad (ej. 0.5 producto)
+                if (quantity > 0 && paidRemaining > 0) {
+                    const partialFraction = paidRemaining / unitPrice;
+                    quantityPaid += partialFraction;
+                    paidRemaining -= unitPrice * partialFraction;
+                    quantity -= partialFraction;
+                }
+
+                // Agregar al acumulador
                 if (!acc[productId]) {
                     acc[productId] = {
+                        productId: item.product.id,
                         product: item.product,
                         totalQuantity: 0,
+                        paidQuantity: 0,
+                        total: 0,
                     };
                 }
 
                 acc[productId].totalQuantity += Number(item.quantity);
-            })
+                acc[productId].paidQuantity += quantityPaid;
+                acc[productId].total = acc[productId].totalQuantity - quantityPaid;
+            });
+
             return acc;
-        }, {} as Record<number, { product: typeof invoices[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
-
-
-        const totalPackageDet = Object.values(groupedByProduct);
-
-        return {
-            invoices: result,
-            package: totalPackageDet.reduce((acc, item) => acc + item.totalQuantity, 0),
-            detPackage: totalPackageDet
-        };
+        }, {} as Record<number, {
+            product: typeof invoicesFilter[number]['invoiceItems'][number]['product'],
+            totalQuantity: number,
+            paidQuantity: number
+        }>);
+        const parseProducts: DetProducts[] = Object.values(calculateProducts);
+        
+        const calculateFinalTotal = parseProducts.map((data: DetProducts) => {
+            return {
+                ...data,
+                total: data.totalQuantity - data.paidQuantity
+            }
+        })
+        return calculateFinalTotal;
     }
 
     setTotalProducts = (invoices: IInvoiceWithDetails[], type: string) => {

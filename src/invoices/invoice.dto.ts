@@ -57,3 +57,23 @@ export interface Payments {
     createdAt: Date;
     updatedAt: Date;
 }
+
+export interface DetProducts {
+    productId:     number;
+    product:       Product;
+    totalQuantity: number;
+    paidQuantity:  number;
+    total:         number;
+}
+
+export interface Product {
+    id:            number;
+    name:          string;
+    presentation:  string;
+    purchasePrice: string;
+    price:         string;
+    priceUSD:      string;
+    amount:        number;
+    createdAt:     Date;
+    updatedAt:     Date;
+}
