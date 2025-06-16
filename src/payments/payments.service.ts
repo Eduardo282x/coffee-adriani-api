@@ -22,7 +22,9 @@ export class PaymentsService {
                 account: {
                     include: { method: true }
                 },
-                InvoicePayment: true
+                InvoicePayment: {
+                    include: { invoice: { include: { client: { include: { block: true } } } } }
+                }
             },
             orderBy: { paymentDate: 'desc' }
         }).then(pay =>
@@ -34,6 +36,7 @@ export class PaymentsService {
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
                     remaining: data.remaining.toFixed(2),
+                    remainingUSD: data.account.method.currency === 'USD' ? data.remaining.toFixed(2) : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
                     credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
                 }
             })
@@ -99,7 +102,9 @@ export class PaymentsService {
                 account: {
                     include: { method: true }
                 },
-                InvoicePayment: true
+                InvoicePayment: {
+                    include: { invoice: { include: { client: { include: { block: true } } } } }
+                }
             },
             orderBy: { paymentDate: 'desc' },
             where: {
@@ -117,6 +122,7 @@ export class PaymentsService {
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
                     remaining: data.remaining.toFixed(2),
+                    remainingUSD: data.account.method.currency === 'USD' ? data.remaining.toFixed(2) : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
                     credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
                 }
             })
@@ -283,8 +289,12 @@ export class PaymentsService {
                     ? 'Pagado'
                     : 'Pendiente'
 
+                const calculateRemaining = findPayment.account.method.currency == 'BS' 
+                ? ((Number(findPayment.amount) / Number(findPayment.dolar.dolar)) - pay.amount) * Number(findPayment.dolar.dolar)
+                : Number(findPayment.amount) - pay.amount
+
                 await this.prismaService.payment.update({
-                    data: { remaining: Number(findPayment.amount) - pay.amount },
+                    data: { remaining: Number(calculateRemaining) },
                     where: { id: findPayment.id }
                 })
 
@@ -314,10 +324,19 @@ export class PaymentsService {
             const findPaymentAssociate = await this.prismaService.invoicePayment.findFirst({
                 where: { paymentId: id }
             })
+
             if (findPaymentAssociate) {
-                badResponse.message = 'Este pago esta asociado a una factura.'
-                return badResponse;
+                await this.prismaService.invoice.update({
+                    data: {
+                        remaining: { increment: findPaymentAssociate.amount },
+                        status: 'Pendiente'
+                    },
+                    where: { id: findPaymentAssociate.invoiceId }
+                })
             }
+            await this.prismaService.invoicePayment.delete({
+                where: { id: findPaymentAssociate.id }
+            })
             await this.prismaService.payment.delete({
                 where: { id }
             })
