@@ -101,7 +101,8 @@ export class ProductsService {
                     price: product.price,
                     priceUSD: product.priceUSD,
                     amount: product.amount,
-                    purchasePrice: product.purchasePrice
+                    purchasePrice: product.purchasePrice,
+                    purchasePriceUSD: product.purchasePriceUSD
                 }
             })
 
@@ -137,7 +138,8 @@ export class ProductsService {
                     price: product.price,
                     priceUSD: product.priceUSD,
                     amount: product.amount,
-                    purchasePrice: product.purchasePrice
+                    purchasePrice: product.purchasePrice,
+                    purchasePriceUSD: product.purchasePriceUSD
                 }
             })
 
@@ -148,7 +150,8 @@ export class ProductsService {
                     price: product.price,
                     priceUSD: product.priceUSD,
                     amount: product.amount,
-                    purchasePrice: product.purchasePrice
+                    purchasePrice: product.purchasePrice,
+                    purchasePriceUSD: product.purchasePriceUSD
                 }
             })
 

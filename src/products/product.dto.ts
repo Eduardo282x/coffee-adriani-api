@@ -17,6 +17,10 @@ export class DTOProducts {
     @IsNumber()
     @IsPositive()
     @Min(0)
+    purchasePriceUSD: number;
+    @IsNumber()
+    @IsPositive()
+    @Min(0)
     priceUSD: number;
     @IsNumber()
     @IsPositive()

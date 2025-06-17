@@ -24,9 +24,18 @@ export class PaymentsService {
                 },
                 InvoicePayment: {
                     include: { invoice: { include: { client: { include: { block: true } } } } }
-                }
+                },
             },
-            orderBy: { paymentDate: 'desc' }
+            orderBy: { paymentDate: 'desc' },
+            where: {
+                account: {
+                    name: {
+                        not: {
+                            contains: 'Gastos'
+                        }
+                    }
+                }
+            }
         }).then(pay =>
             pay.map(data => {
                 return {
@@ -111,6 +120,13 @@ export class PaymentsService {
                 paymentDate: {
                     gte: filter.startDate,
                     lte: filter.endDate
+                },
+                account: {
+                    name: {
+                        not: {
+                            contains: 'Gastos'
+                        }
+                    }
                 }
             }
         }).then(pay =>
@@ -289,9 +305,9 @@ export class PaymentsService {
                     ? 'Pagado'
                     : 'Pendiente'
 
-                const calculateRemaining = findPayment.account.method.currency == 'BS' 
-                ? ((Number(findPayment.amount) / Number(findPayment.dolar.dolar)) - pay.amount) * Number(findPayment.dolar.dolar)
-                : Number(findPayment.amount) - pay.amount
+                const calculateRemaining = findPayment.account.method.currency == 'BS'
+                    ? ((Number(findPayment.amount) / Number(findPayment.dolar.dolar)) - pay.amount) * Number(findPayment.dolar.dolar)
+                    : Number(findPayment.amount) - pay.amount
 
                 await this.prismaService.payment.update({
                     data: { remaining: Number(calculateRemaining) },
