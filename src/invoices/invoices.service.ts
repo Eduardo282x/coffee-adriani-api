@@ -68,12 +68,12 @@ export class InvoicesService {
 
         const result = Object.values(groupedByClient);
 
-        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
+        // const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
 
         // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
 
         // const totalPackageDet = Object.values(groupedByProduct);
-        const totalPackageDetCount = this.groupProductCountInvoices(invoicesFilter);
+        const totalPackageDetCount = this.groupProductCountInvoices(invoices);
 
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
@@ -188,12 +188,12 @@ export class InvoicesService {
 
         const result = Object.values(groupedByClient);
 
-        const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
+        // const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
 
         // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
 
         // const totalPackageDet = Object.values(groupedByProduct);
-        const totalPackageDetCount = this.groupProductCountInvoices(invoicesFilter);
+        const totalPackageDetCount = this.groupProductCountInvoices(invoices);
 
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)

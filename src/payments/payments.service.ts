@@ -301,10 +301,6 @@ export class PaymentsService {
                     }
                 });
 
-                const setStatusPay = Number(pay.amount).toFixed(2) === Number(findInvoice.totalAmount).toFixed(2)
-                    ? 'Pagado'
-                    : 'Pendiente'
-
                 const calculateRemaining = findPayment.account.method.currency == 'BS'
                     ? ((Number(findPayment.amount) / Number(findPayment.dolar.dolar)) - pay.amount) * Number(findPayment.dolar.dolar)
                     : Number(findPayment.amount) - pay.amount
@@ -315,11 +311,13 @@ export class PaymentsService {
                 })
 
                 await this.prismaService.invoice.update({
+                    where: { id: findInvoice.id },
                     data: {
-                        remaining: Number(findInvoice.remaining) - pay.amount,
-                        status: setStatusPay
+                        remaining: {
+                            decrement: pay.amount,
+                        },
+                        status: Number(findInvoice.remaining) - pay.amount === 0 ? 'Pagado' : 'Pendiente',
                     },
-                    where: { id: findInvoice.id }
                 });
             });
 
