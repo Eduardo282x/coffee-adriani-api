@@ -331,10 +331,10 @@ export class PaymentsService {
                     },
                     where: { id: findPaymentAssociate.invoiceId }
                 })
+                await this.prismaService.invoicePayment.delete({
+                    where: { id: findPaymentAssociate.id }
+                })
             }
-            await this.prismaService.invoicePayment.delete({
-                where: { id: findPaymentAssociate.id }
-            })
             await this.prismaService.payment.delete({
                 where: { id }
             })
