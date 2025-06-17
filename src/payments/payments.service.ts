@@ -26,16 +26,7 @@ export class PaymentsService {
                     include: { invoice: { include: { client: { include: { block: true } } } } }
                 },
             },
-            orderBy: { paymentDate: 'desc' },
-            where: {
-                account: {
-                    name: {
-                        not: {
-                            contains: 'Gastos'
-                        }
-                    }
-                }
-            }
+            orderBy: { paymentDate: 'desc' }
         }).then(pay =>
             pay.map(data => {
                 return {
@@ -120,13 +111,6 @@ export class PaymentsService {
                 paymentDate: {
                     gte: filter.startDate,
                     lte: filter.endDate
-                },
-                account: {
-                    name: {
-                        not: {
-                            contains: 'Gastos'
-                        }
-                    }
                 }
             }
         }).then(pay =>
