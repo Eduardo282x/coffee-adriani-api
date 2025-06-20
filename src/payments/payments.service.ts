@@ -257,7 +257,7 @@ export class PaymentsService {
                 //     ? pay.amount / Number(findPayment.dolar.dolar)
                 //     : pay.amount
 
-                if (findPayment.account.method.currency == 'USD') {
+                if (findPayment.account.method.currency == 'USD' && findInvoice.remaining == findInvoice.totalAmount) {
                     const newTotalUSD = findInvoice.invoiceItems.reduce((acc, item) => acc + (Number(item.unitPriceUSD) * item.quantity), 0)
                     findInvoice = await this.prismaService.invoice.update({
                         data: { totalAmount: newTotalUSD, remaining: newTotalUSD },
@@ -294,13 +294,16 @@ export class PaymentsService {
                     where: { id: findPayment.id }
                 })
 
+                console.log(findInvoice.remaining);
+                console.log(pay.amount);
+
                 await this.prismaService.invoice.update({
                     where: { id: findInvoice.id },
                     data: {
                         remaining: {
                             decrement: pay.amount,
                         },
-                        status: Number(findInvoice.remaining) - pay.amount === 0 ? 'Pagado' : 'Pendiente',
+                        status: Number(findInvoice.remaining) - pay.amount <= 0 ? 'Pagado' : 'Pendiente',
                     },
                 });
             });
