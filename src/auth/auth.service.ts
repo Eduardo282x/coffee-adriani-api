@@ -39,7 +39,7 @@ export class AuthService {
             };
 
             const secretKey = this.configService.get<string>('JWT_SECRET');
-            const token = jwt.sign(payload, secretKey, { expiresIn: '8h' });
+            const token = jwt.sign(payload, secretKey, { expiresIn: '7d' });
 
             const responseLogin: DTOLoginResponse = {
                 ...baseResponse,

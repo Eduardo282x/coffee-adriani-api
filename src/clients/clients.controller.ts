@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Res } from '@nestjs/common';
 import { ClientsService } from './clients.service';
-import { DTOBlocks, DTOClients } from './client.dto';
+import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
+import { Response } from 'express';
 
 @Controller('clients')
 export class ClientsController {
@@ -20,6 +21,25 @@ export class ClientsController {
     async createClients(@Body() client: DTOClients) {
         return await this.clientService.createClients(client);
     }
+    
+    @Post('/report')
+    async reportClients(@Body() report: DTOReportClients, @Res() res: Response) {
+        try {
+            const pdfBuffer = await this.clientService.reportClients(report) as Buffer;
+
+            res.set({
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': 'attachment; filename=ReporteClientes.pdf',
+                'Content-Length': pdfBuffer.length,
+            });
+
+            res.end(pdfBuffer);
+        } catch (error) {
+            console.error('Error generando PDF:', error);
+            res.status(500).send('Error generando PDF');
+        }
+    }
+
     @Put('/:id')
     async updateClients(@Param('id') id: string, @Body() client: DTOClients) {
         return await this.clientService.updateClients(Number(id), client);

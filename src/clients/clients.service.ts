@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Block, Client } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOBlocks, DTOClients } from './client.dto';
+import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
+import * as PDFDocument from 'pdfkit';
+// import * as fs from 'fs';
+import * as stream from 'stream';
+import { PassThrough } from 'stream';
 
 @Injectable()
 export class ClientsService {
@@ -179,4 +183,148 @@ export class ClientsService {
             return badResponse;
         }
     }
+
+    async reportClients(client: DTOReportClients): Promise<Buffer | DTOBaseResponse> {
+        try {
+            const where: any = { active: true };
+
+            if (client.zone) {
+                where.zone = { equals: client.zone, mode: 'insensitive' };
+            }
+
+            if (client.blockId) {
+                where.blockId = client.blockId;
+            }
+
+            const clientsReports = await this.prismaService.client.findMany({
+                where,
+                include: { block: true, invoices: { where: { status: { in: ['Creada', 'Pendiente', 'Vencida'] } } } },
+                orderBy: { blockId: 'asc' }
+            }).then(cli => {
+                return cli.map(c => {
+                    const totalInvoices = c.invoices.reduce((acc, invoice) => acc + Number(invoice.totalAmount), 0);
+                    const totalPaid = c.invoices.reduce((acc, invoice) => acc + Number(invoice.remaining), 0);
+                    const debt = totalInvoices - totalPaid;
+
+                    return {
+                        ...c,
+                        totalInvoices,
+                        totalPaid,
+                        debt
+                    }
+                });
+            }).then(cli => {
+                if (client.status === 'clean') {
+                    return cli.filter(c => c.totalInvoices == 0);
+                }
+
+                if (client.status === 'pending') {
+                    return cli.filter(c => c.totalInvoices != 0);
+                }
+
+                return cli;
+            });
+
+            const filePDF = await new Promise(resolve => {
+                const doc = new PDFDocument({ margin: 10, size: 'A4' });
+                const buffer: Uint8Array[] = [];
+
+                doc.on('data', buffer.push.bind(buffer));
+                doc.on('end', () => resolve(Buffer.concat(buffer)));
+                // doc.pipe(fs.createWriteStream('ReporteClientes.pdf'));
+                doc.pipe(new stream.PassThrough());
+
+                const columns = [
+                    { header: 'Nombre', width: 100 },
+                    { header: 'Dirección', width: 130 },
+                    { header: 'Rif', width: 60 },
+                    { header: 'Teléfono', width: 60 },
+                    { header: 'Zona', width: 55 },
+                    { header: 'Bloque', width: 45 },
+                    { header: 'Total', width: 45 },
+                    { header: 'Pagado', width: 45 },
+                    { header: 'Debe', width: 45 },
+                ];
+
+                const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+                const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+                const startX = doc.page.margins.left + (pageWidth - tableWidth) / 2;
+                const rowHeight = 25;
+                const maxY = doc.page.height - doc.page.margins.bottom - rowHeight;
+
+                function drawCellBorder(x: number, y: number, width: number, height: number) {
+                    doc.lineWidth(0.5).rect(x, y, width, height).stroke();
+                }
+
+                function drawHeaders(y: number) {
+                    let x = startX;
+                    doc.font('Helvetica-Bold').fontSize(8);
+                    for (const col of columns) {
+                        doc.text(col.header, x + 2, y + 5, { width: col.width, align: 'center' });
+                        drawCellBorder(x, y, col.width, rowHeight);
+                        x += col.width;
+                    }
+                }
+
+                function drawRow(cli, y: number) {
+                    let x = startX;
+                    const row = [
+                        cli.name,
+                        cli.address,
+                        cli.rif,
+                        cli.phone,
+                        cli.zone,
+                        cli.block ? cli.block.name : 'N/A',
+                        `${formatNumberWithDots(cli.totalInvoices)} $`,
+                        `${formatNumberWithDots(cli.debt)} $`,
+                        `${formatNumberWithDots(cli.totalPaid)} $`
+                    ];
+
+                    doc.font('Helvetica').fontSize(8).fillColor('black');
+                    for (let i = 0; i < columns.length; i++) {
+                        doc.text(row[i], x + 2, y + 5, { width: columns[i].width, align: 'center' });
+                        drawCellBorder(x, y, columns[i].width, rowHeight);
+                        x += columns[i].width;
+                    }
+                }
+
+                // Comienza el documento
+                doc.font('Helvetica-Bold').fontSize(12).text('Lista de clientes', 10, 20, { align: 'left' });
+                let startY = doc.y + 10;
+                drawHeaders(startY);
+                startY += rowHeight;
+
+                for (const cli of clientsReports) {
+                    if (startY + rowHeight > maxY) {
+                        doc.addPage();
+                        startY = 20;
+                        drawHeaders(startY);
+                        startY += rowHeight;
+                    }
+                    drawRow(cli, startY);
+                    startY += rowHeight;
+                }
+
+                doc.end();
+            });
+
+            return filePDF as Buffer;
+
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ClientService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
 }
+
+export const formatNumberWithDots = (number: number | string): string => {
+    const parsed = typeof number === 'string' ? parseFloat(number) : number;
+
+    return new Intl.NumberFormat('es-VE', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(parsed);
+};
