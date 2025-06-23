@@ -281,7 +281,7 @@ export class InvoicesService {
             paidQuantity: number
         }>);
         const parseProducts: DetProducts[] = Object.values(calculateProducts);
-        
+
         const calculateFinalTotal = parseProducts.map((data: DetProducts) => {
             return {
                 ...data,
@@ -461,12 +461,19 @@ export class InvoicesService {
 
     async updateInvoice(id: number, newInvoice: DTOInvoice) {
         try {
+            const products = await this.productService.getProducts();
+
             const invoice = await this.prismaService.invoice.findUnique({
                 where: { id },
                 include: {
                     invoiceItems: true
                 }
             });
+
+            if(!invoice){
+                badResponse.message = 'Factura no encontrada';
+                return badResponse;
+            }
 
             await this.prismaService.invoice.update({
                 where: { id },
@@ -478,8 +485,6 @@ export class InvoicesService {
                     consignment: newInvoice.consignment,
                 }
             });
-
-            const products = await this.productService.getProducts();
 
             // if (invoice.invoiceItems.length === newInvoice.details.length) {
             const dataDetailsInvoice = newInvoice.details.map(det => {
@@ -502,7 +507,14 @@ export class InvoicesService {
             await this.prismaService.invoiceProduct.createMany({
                 data: dataDetailsInvoice
             });
-            // }
+
+            await this.prismaService.invoice.update({
+                data: {
+                    totalAmount: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0),
+                    remaining: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0)
+                },
+                where: { id }
+            })
 
             baseResponse.message = 'Factura actualizada correctamente';
             return baseResponse;
