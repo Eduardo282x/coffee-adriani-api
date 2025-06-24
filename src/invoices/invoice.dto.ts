@@ -1,6 +1,7 @@
 import { Transform, Type } from "class-transformer";
-import { IsArray, IsBoolean, IsDate, IsNotEmpty, isNumber, IsNumber, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsString, ValidateNested } from "class-validator";
 import { DTOInventory } from "src/inventory/inventory.dto";
+import { InvoiceStatus } from "@prisma/client";
 
 export class DTOInvoice {
     @IsNumber()
@@ -76,4 +77,9 @@ export interface Product {
     amount:        number;
     createdAt:     Date;
     updatedAt:     Date;
+}
+
+
+export interface OptionalFilterInvoices {
+    status: InvoiceStatus
 }

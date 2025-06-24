@@ -6,12 +6,12 @@ export class DTOBaseResponse {
     success: boolean;
 }
 
-export const baseResponse = {
+export const baseResponse: DTOBaseResponse = {
     message: '',
     success: true,
 }
 
-export const badResponse = {
+export const badResponse: DTOBaseResponse = {
     message: '',
     success: false,
 }

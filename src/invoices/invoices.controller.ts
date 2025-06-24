@@ -13,6 +13,11 @@ export class InvoicesController {
         return await this.invoicesService.getInvoices();
     }
 
+    @Get('/expired')
+    async getInvoicesExpired() {
+        return await this.invoicesService.getInvoicesExpired();
+    }
+
     @Get('/unordered')
     async getInvoiceWithDetails() {
         return await this.invoicesService.getInvoiceWithDetails();
@@ -26,6 +31,11 @@ export class InvoicesController {
     @Get('/validate/total')
     async InvoiceValidateTotal() {
         return await this.invoicesService.InvoiceValidateTotal();
+    }
+    
+    @Post('/check')
+    async checkInvoice() {
+        return await this.invoicesService.checkInvoice();
     }
 
     @Post('/filter')

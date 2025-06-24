@@ -51,14 +51,21 @@ export class DolarService {
                     }
                 }
             }
-        })
+        });
+
+        const invoicesModify = {
+            pending: 0,
+            expired: 0
+        }
 
         invoices.map(async (inv) => {
             if (this.isDateExpired(inv.dispatchDate) && inv.status == 'Creada') {
                 await this.prismaService.invoice.update({
                     where: { id: inv.id },
                     data: { status: 'Pendiente' }
-                })
+                });
+
+                invoicesModify.pending += 1;
             }
 
             if (this.isDateExpired(inv.dueDate) && inv.status == 'Pendiente') {
@@ -66,8 +73,13 @@ export class DolarService {
                     where: { id: inv.id },
                     data: { status: 'Vencida' }
                 })
+
+                invoicesModify.expired += 1;
             }
         })
+
+        this.logger.debug(`Facturas actualizadas exitosamente.`);
+        this.logger.debug(invoicesModify);
     }
 
     isDateExpired(dueDate: Date): boolean {

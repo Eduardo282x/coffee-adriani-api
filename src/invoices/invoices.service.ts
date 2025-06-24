@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DetProducts, DTOInvoice, IInvoiceWithDetails } from './invoice.dto';
+import { DetProducts, DTOInvoice, IInvoiceWithDetails, OptionalFilterInvoices } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.interfaces';
 import { InvoiceStatus } from '@prisma/client';
+import { error } from 'console';
 
 @Injectable()
 export class InvoicesService {
@@ -20,7 +21,12 @@ export class InvoicesService {
 
     }
 
-    async getInvoices() {
+    async getInvoices(filter?: OptionalFilterInvoices) {
+        const where: any = {};
+        if (filter.status) {
+            where.status = filter.status as InvoiceStatus;
+        }
+
         const dolar = await this.productService.getDolar();
         const invoices = await this.prismaService.invoice.findMany({
             include: {
@@ -31,11 +37,15 @@ export class InvoicesService {
                     include: {
                         product: true
                     }
+                },
+                InvoicePayment: {
+                    include: { payment: { include: { account: true } } }
                 }
             },
             orderBy: {
                 dispatchDate: 'desc'
-            }
+            },
+            where
         }).then(inv =>
             inv.map(data => {
                 return {
@@ -80,7 +90,6 @@ export class InvoicesService {
         const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
         const debt = totalCashInvoicesPending - remainingCashInvoices;
 
-
         return {
             invoices: result,
             package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
@@ -92,6 +101,15 @@ export class InvoicesService {
                 debt: debt,
             }
         };
+    }
+
+    async getInvoicesExpired() {
+        try {
+            return await this.getInvoices({status: 'Vencida'})
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
     }
 
     async getInvoiceWithDetails() {
@@ -145,6 +163,9 @@ export class InvoicesService {
                     include: {
                         product: true
                     }
+                },
+                InvoicePayment: {
+                    include: { payment: { include: { account: true } } }
                 }
             },
             orderBy: {
@@ -212,6 +233,58 @@ export class InvoicesService {
                 debt: debt,
             }
         };
+    }
+
+    async checkInvoice() {
+        try {
+            const invoices = await this.prismaService.invoice.findMany({
+                include: {
+                    client: true,
+                    invoiceItems: true
+                },
+                where: {
+                    status: {
+                        not: {
+                            in: ['Pagado', 'Cancelada']
+                        }
+                    }
+                }
+            });
+
+            const invoicesModify = {
+                pending: 0,
+                expired: 0
+            }
+
+            invoices.map(async (inv) => {
+                if (this.isDateExpired(inv.dispatchDate) && inv.status == 'Creada') {
+                    await this.prismaService.invoice.update({
+                        where: { id: inv.id },
+                        data: { status: 'Pendiente' }
+                    });
+
+                    invoicesModify.pending += 1;
+                }
+
+                if (this.isDateExpired(inv.dueDate) && inv.status == 'Pendiente') {
+                    await this.prismaService.invoice.update({
+                        where: { id: inv.id },
+                        data: { status: 'Vencida' }
+                    })
+
+                    invoicesModify.expired += 1;
+                }
+            });
+
+            console.log(invoicesModify);
+
+
+            baseResponse.message = 'Facturas verificadas.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
     }
 
     // groupProductInvoices(invoicesFilter) {
@@ -301,23 +374,23 @@ export class InvoicesService {
 
     }
 
-    async checkInvoice() {
-        const invoices = await this.prismaService.invoice.findMany({
-            include: {
-                client: true,
-                invoiceItems: true
-            }
-        })
+    // async checkInvoice() {
+    //     const invoices = await this.prismaService.invoice.findMany({
+    //         include: {
+    //             client: true,
+    //             invoiceItems: true
+    //         }
+    //     })
 
-        invoices.map(async (inv) => {
-            if (this.isDateExpired(inv.dueDate)) {
-                await this.prismaService.invoice.update({
-                    where: { id: inv.id },
-                    data: { status: 'Vencida' }
-                })
-            }
-        })
-    }
+    //     invoices.map(async (inv) => {
+    //         if (this.isDateExpired(inv.dueDate)) {
+    //             await this.prismaService.invoice.update({
+    //                 where: { id: inv.id },
+    //                 data: { status: 'Vencida' }
+    //             })
+    //         }
+    //     })
+    // }
 
     isDateExpired(dueDate: Date): boolean {
         const today = new Date();
@@ -470,7 +543,7 @@ export class InvoicesService {
                 }
             });
 
-            if(!invoice){
+            if (!invoice) {
                 badResponse.message = 'Factura no encontrada';
                 return badResponse;
             }

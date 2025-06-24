@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ExpensesDTO } from './expenses.dto';
 
 @Injectable()
 export class ExpensesService {
@@ -9,10 +10,10 @@ export class ExpensesService {
 
     }
 
-    async getExpenses() {
+    async getExpensesFilter(expenseFilter: ExpensesDTO) {
         try {
-            const invoices = await this.getInvoices();
-            const payments = await this.getPayments();
+            const invoices = await this.getInvoices(expenseFilter);
+            const payments = await this.getPayments(expenseFilter);
 
             return {
                 invoices: invoices,
@@ -24,13 +25,17 @@ export class ExpensesService {
         }
     }
 
-    async getInvoices() {
+    async getInvoices(expenseFilter: ExpensesDTO) {
         try {
             const invoices = await this.prismaService.invoice.findMany({
                 where: {
                     status: 'Pagado',
                     remaining: {
                         not: 0
+                    },
+                    dispatchDate: {
+                        gte: expenseFilter.startDate,
+                        lte: expenseFilter.endDate
                     }
                 },
                 include: { client: true }
@@ -43,12 +48,16 @@ export class ExpensesService {
         }
     }
 
-    async getPayments() {
+    async getPayments(expenseFilter: ExpensesDTO) {
         try {
             const payments = await this.prismaService.payment.findMany({
                 where: {
                     account: {
                         name: { contains: 'Gastos' }
+                    },
+                    paymentDate: {
+                        gte: expenseFilter.startDate,
+                        lte: expenseFilter.endDate
                     }
                 },
                 include: {
