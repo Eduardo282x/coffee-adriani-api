@@ -23,7 +23,9 @@ export class InvoicesService {
 
     async getInvoices(filter?: OptionalFilterInvoices) {
         const where: any = {};
-        if (filter.status) {
+        console.log(filter);
+        
+        if (filter && filter.status) {
             where.status = filter.status as InvoiceStatus;
         }
 
