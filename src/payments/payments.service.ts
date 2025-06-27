@@ -44,6 +44,7 @@ export class PaymentsService {
 
         const totalAmountBs = dataPayments.filter(item => item.account.method.currency === 'BS').reduce((acc, data) => acc + Number(data.amount), 0)
         const totalAmountUSB = dataPayments.filter(item => item.account.method.currency === 'USD').reduce((acc, data) => acc + Number(data.amount), 0)
+        // const totalUsd = dataPayments.reduce((acc, data) => acc + Number(data.amountUSD), 0)
 
         return {
             payments: dataPayments,
@@ -257,13 +258,13 @@ export class PaymentsService {
                 //     ? pay.amount / Number(findPayment.dolar.dolar)
                 //     : pay.amount
 
-                if (findPayment.account.method.currency == 'USD' && findInvoice.remaining == findInvoice.totalAmount) {
+                if (findPayment.account.method.currency == 'USD' && Number(findInvoice.remaining) == Number(findInvoice.totalAmount)) {
                     const newTotalUSD = findInvoice.invoiceItems.reduce((acc, item) => acc + (Number(item.unitPriceUSD) * item.quantity), 0)
                     findInvoice = await this.prismaService.invoice.update({
-                        data: { totalAmount: newTotalUSD, remaining: newTotalUSD },
+                        data: { totalAmount: Number(newTotalUSD).toFixed(2), remaining: Number(newTotalUSD).toFixed(2) },
                         include: { invoiceItems: true },
                         where: { id: findInvoice.id }
-                    })
+                    });
 
                     findInvoice.invoiceItems.map(async (item) => {
                         await this.prismaService.invoiceProduct.update({
@@ -276,7 +277,6 @@ export class PaymentsService {
                     })
                 }
 
-
                 await this.prismaService.invoicePayment.create({
                     data: {
                         invoiceId: findInvoice.id,
@@ -287,15 +287,12 @@ export class PaymentsService {
 
                 const calculateRemaining = findPayment.account.method.currency == 'BS'
                     ? ((Number(findPayment.amount) / Number(findPayment.dolar.dolar)) - pay.amount) * Number(findPayment.dolar.dolar)
-                    : Number(findPayment.amount) - pay.amount
+                    : Number(findPayment.amount) - pay.amount;
 
                 await this.prismaService.payment.update({
                     data: { remaining: Number(calculateRemaining) },
                     where: { id: findPayment.id }
                 })
-
-                console.log(findInvoice.remaining);
-                console.log(pay.amount);
 
                 await this.prismaService.invoice.update({
                     where: { id: findInvoice.id },
@@ -303,7 +300,7 @@ export class PaymentsService {
                         remaining: {
                             decrement: pay.amount,
                         },
-                        status: Number(findInvoice.remaining) - pay.amount <= 0 ? 'Pagado' : 'Pendiente',
+                        status: Number(findInvoice.remaining) - pay.amount <= 2 ? 'Pagado' : 'Pendiente',
                     },
                 });
             });
@@ -359,6 +356,62 @@ export class PaymentsService {
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
+        }
+    }
+
+    async validateAssociatedPaymentsInvoices() {
+        try {
+            let invoicesAffected = 0;
+            let invoicesAffectedData = [];
+            let messages = [];
+            // Obtener todas las facturas con sus pagos
+            const allInvoices = await this.prismaService.invoice.findMany({
+                include: {
+                    InvoicePayment: true,
+                },
+                where: {
+                    status: {
+                        notIn: ['Pagado', 'Cancelada', 'Creada']
+                    }
+                }
+            });
+
+            for (const invoice of allInvoices) {
+                // Sumar los montos pagados
+                const totalPaid = invoice.InvoicePayment.reduce((sum, payment) => {
+                    return sum + Number(payment.amount);
+                }, 0);
+
+                // Calcular lo que queda por pagar
+                const remaining = Number(invoice.totalAmount) - totalPaid;
+                if (remaining < 0) {
+                    messages.push(`Factura #${invoice.controlNumber} tiene un saldo negativo: ${remaining}`);
+                    continue; // O manejar el error de otra manera
+                }
+                // Determinar nuevo estado
+                const newStatus = remaining === 0 ? 'Pagado' : 'Pendiente';
+
+                // Verificar si hay cambios necesarios
+                if (Number(invoice.remaining) !== remaining || invoice.status !== newStatus) {
+                    invoicesAffected++;
+                    invoicesAffectedData.push(invoice)
+                    await this.prismaService.invoice.update({
+                        where: { id: invoice.id },
+                        data: {
+                            remaining: remaining,
+                            status: newStatus,
+                        },
+                    });
+                }
+            }
+
+            console.log('Validación de facturas completada exitosamente.');
+            // baseResponse.data = { invoices: invoicesAffectedData, message: messages };
+            baseResponse.message = `Se actualizaron ${invoicesAffected} facturas.`;
+            return baseResponse;
+        } catch (error) {
+            console.error('Error al validar facturas:', error);
+            throw new Error('No se pudo completar la validación de facturas');
         }
     }
 
