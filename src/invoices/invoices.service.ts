@@ -227,8 +227,8 @@ export class InvoicesService {
 
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-        const debt = totalCashInvoicesPending - remainingCashInvoices;
+        const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const remainingCashInvoices = totalCashInvoices - debt;
 
 
         return {
@@ -238,8 +238,8 @@ export class InvoicesService {
             payments: {
                 total: totalCashInvoices,
                 totalPending: totalCashInvoicesPending,
-                remaining: remainingCashInvoices,
                 debt: debt,
+                remaining: remainingCashInvoices,
             }
         };
     }
