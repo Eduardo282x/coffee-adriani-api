@@ -90,6 +90,10 @@ export class InvoicesService {
         const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const remainingCashInvoices = totalCashInvoices - debt;
 
+        const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
+        const paid = totalCashInvoicesPending - debtOld;
+        const realPending = remainingCashInvoices - (totalCashInvoicesPending - debtOld)
+
         return {
             invoices: result,
             package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
@@ -97,8 +101,8 @@ export class InvoicesService {
             payments: {
                 total: totalCashInvoices,
                 totalPending: totalCashInvoicesPending,
-                debt: debt,
-                remaining: remainingCashInvoices,
+                debt: debt + paid,
+                remaining: realPending,
             }
         };
     }
@@ -228,8 +232,11 @@ export class InvoicesService {
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        
         const remainingCashInvoices = totalCashInvoices - debt;
-
+        const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
+        const paid = totalCashInvoicesPending - debtOld;
+        const realPending = remainingCashInvoices - (totalCashInvoicesPending - debtOld)
 
         return {
             invoices: result,
@@ -238,8 +245,8 @@ export class InvoicesService {
             payments: {
                 total: totalCashInvoices,
                 totalPending: totalCashInvoicesPending,
-                debt: debt,
-                remaining: remainingCashInvoices,
+                debt: debt + paid,
+                remaining: realPending,
             }
         };
     }
