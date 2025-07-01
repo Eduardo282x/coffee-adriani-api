@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
+import { badResponse, baseResponse, DTOBaseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DetProducts, DTOInvoice, IInvoiceWithDetails, OptionalFilterInvoices } from './invoice.dto';
+import { DetProducts, DTOInvoice, IInvoiceWithDetails, OptionalFilterInvoices, ResponseInvoice } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
@@ -87,8 +87,8 @@ export class InvoicesService {
 
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const remainingCashInvoices = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-        const debt = totalCashInvoicesPending - remainingCashInvoices;
+        const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
+        const remainingCashInvoices = totalCashInvoices - debt;
 
         return {
             invoices: result,
@@ -97,15 +97,24 @@ export class InvoicesService {
             payments: {
                 total: totalCashInvoices,
                 totalPending: totalCashInvoicesPending,
-                remaining: remainingCashInvoices,
                 debt: debt,
+                remaining: remainingCashInvoices,
             }
         };
     }
 
+    async getInvoicesPaid() {
+        try {
+            return await this.getInvoices({ status: 'Pagado' })
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
     async getInvoicesExpired() {
         try {
-            return await this.getInvoices({status: 'Vencida'})
+            return await this.getInvoices({ status: 'Vencida' })
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
@@ -270,6 +279,14 @@ export class InvoicesService {
                     await this.prismaService.invoice.update({
                         where: { id: inv.id },
                         data: { status: 'Vencida' }
+                    });
+
+                    await this.prismaService.clientReminder.create({
+                        data: {
+                            clientId: inv.clientId,
+                            messageId: 1,
+                            send: true,
+                        }
                     })
 
                     invoicesModify.expired += 1;

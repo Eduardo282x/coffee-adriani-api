@@ -5,10 +5,10 @@ import { InvoiceStatus } from "@prisma/client";
 
 export class DTOInvoice {
     @IsNumber()
-    @IsNotEmpty({message: 'El cliente es requerido'})
+    @IsNotEmpty({ message: 'El cliente es requerido' })
     clientId: number;
     @IsString()
-    @IsNotEmpty({message: 'El numero de factura es requerido'})
+    @IsNotEmpty({ message: 'El numero de factura es requerido' })
     controlNumber: string;
     @IsBoolean()
     consignment: boolean;
@@ -60,26 +60,90 @@ export interface Payments {
 }
 
 export interface DetProducts {
-    productId:     number;
-    product:       Product;
+    productId: number;
+    product: Product;
     totalQuantity: number;
-    paidQuantity:  number;
-    total:         number;
+    paidQuantity: number;
+    total: number;
 }
 
 export interface Product {
-    id:            number;
-    name:          string;
-    presentation:  string;
+    id: number;
+    name: string;
+    presentation: string;
     purchasePrice: string;
-    price:         string;
-    priceUSD:      string;
-    amount:        number;
-    createdAt:     Date;
-    updatedAt:     Date;
+    price: string;
+    priceUSD: string;
+    amount: number;
+    createdAt: Date;
+    updatedAt: Date;
 }
 
 
 export interface OptionalFilterInvoices {
     status: InvoiceStatus
 }
+
+export interface ResponseInvoice {
+    invoices: ResponseInvoiceInvoice[];
+    package: number;
+    detPackage: any;
+    payments: any;
+}
+
+
+export interface ResponseInvoiceInvoice {
+    client: Client;
+    invoices: InvoiceInvoice[];
+}
+
+export interface Client {
+    id: number;
+    name: string;
+    rif: string;
+    address: string;
+    phone: string;
+    zone: string;
+    blockId: number;
+    active: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    block: Block;
+}
+
+export interface Block {
+    id: number;
+    name: string;
+    address: string;
+}
+
+export interface InvoiceInvoice {
+    id: number;
+    clientId: number;
+    dispatchDate: Date;
+    dueDate: Date;
+    controlNumber: string;
+    exchangeRate: null;
+    sellerId: null;
+    totalAmount: string;
+    remaining: string;
+    consignment: boolean;
+    status: InvoiceStatus;
+    createdAt: Date;
+    updatedAt: Date;
+    deleted: boolean;
+    invoiceItems: InvoiceItem[];
+    totalAmountBs: string;
+}
+
+export interface InvoiceItem {
+    id: number;
+    invoiceId: number;
+    productId: number;
+    quantity: number;
+    unitPriceUSD: string;
+    unitPrice: string;
+    subtotal: string;
+    product: Product;
+}
+

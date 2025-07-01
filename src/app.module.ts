@@ -24,6 +24,7 @@ import { RolesGuard } from './guards/roles/roles.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { ExcelModule } from './excel/excel.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { CollectionModule } from './collection/collection.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ExpensesModule } from './expenses/expenses.module';
     }),
     ExcelModule,
     ExpensesModule,
+    CollectionModule,
   ],
   controllers: [AppController],
   providers: [

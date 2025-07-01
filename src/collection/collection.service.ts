@@ -1,0 +1,222 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
+import { badResponse, baseResponse } from 'src/dto/base.dto';
+import { InvoicesService } from 'src/invoices/invoices.service';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { CollectionDTO, MessageDTO } from './collection.dto';
+import { IInvoice, ResponseInvoice } from 'src/invoices/invoice.dto';
+
+@Injectable()
+export class CollectionService {
+
+    constructor(
+        private readonly prismaService: PrismaService,
+        private readonly invoiceService: InvoicesService,
+        private readonly configService: ConfigService
+    ) {
+    }
+
+    async getClientReminder() {
+        try {
+            const invoicesExpired = await this.invoiceService.getInvoicesExpired() as unknown as ResponseInvoice;
+
+            return await this.prismaService.clientReminder.findMany({
+                include: {
+                    client: { include: { block: true } },
+                    message: true
+                },
+                orderBy: {
+                    id: 'asc'
+                }
+            }).then(item => item.map(data => {
+                const findClient = invoicesExpired.invoices.find(inv => inv.client.id == data.clientId)
+                return {
+                    ...data,
+                    invoices: findClient.invoices,
+                    total: findClient.invoices.reduce((acc, inv) => acc + Number(inv.totalAmount), 0)
+                }
+            }))
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async getMessages() {
+        return await this.prismaService.message.findMany({
+            orderBy: { id: 'asc' }
+        });
+    }
+    async createMessages(message: MessageDTO) {
+        try {
+            await this.prismaService.message.create({
+                data: {
+                    title: message.title,
+                    content: message.content
+                }
+            });
+
+            baseResponse.message = 'Mensaje guardado exitosamente.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+    async updateMessages(id: number, message: MessageDTO) {
+        try {
+            await this.prismaService.message.update({
+                where: { id },
+                data: {
+                    title: message.title,
+                    content: message.content
+                }
+            });
+
+            baseResponse.message = 'Mensaje actualizado exitosamente.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async updateClientCollection(id: number, data: CollectionDTO) {
+        try {
+            await this.prismaService.clientReminder.update({
+                where: { id },
+                data: {
+                    messageId: data.messageId,
+                    send: data.send
+                }
+            });
+
+            baseResponse.message = 'Mensaje actualizado exitosamente.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async addClientToCollection() {
+        try {
+            const invoicesExpired = await this.invoiceService.getInvoicesExpired() as unknown as ResponseInvoice;
+            const clientList = invoicesExpired.invoices.map((inv) => {
+                return {
+                    clientId: inv.client.id,
+                    messageId: 1,
+                    send: true
+                }
+            })
+            await this.prismaService.clientReminder.createMany({
+                data: clientList
+            })
+            baseResponse.message = 'Clientes agregados a la cobranza'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async sendMessages() {
+        try {
+            const reminder = await this.prismaService.clientReminder.findMany({
+                where: { send: true },
+                include: {
+                    client: true,
+                    message: true
+                }
+            });
+
+            const isValidPhone = (phone: string) => {
+                return typeof phone === 'string' && /^0\d{10}$/.test(phone);
+            };
+
+            // Función para ajustar el número de teléfono
+            const adjustPhone = (phone: string) => {
+                return '58' + phone.slice(1);
+            };
+
+            for (const rem of reminder) {
+                const phone = rem.client.phone;
+                if (isValidPhone(phone)) {
+                    const adjustedPhone = adjustPhone(phone);
+                    await this.sendWhatsAppMessage(adjustedPhone, rem.message.content);
+
+                    await this.prismaService.clientReminder.update({
+                        where: { id: rem.id },
+                        data: { sentAt: new Date() }
+                    });
+                } else {
+                    console.log(`Número de teléfono inválido para el cliente ${rem.client.name}: ${phone}`);
+                }
+            }
+
+            baseResponse.message = 'Mensajes enviados exitosamente.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async sendReminder(clientId: number) {
+        const reminder = await this.prismaService.clientReminder.findFirst({
+            where: { clientId, send: true },
+            include: {
+                client: true,
+                message: true
+            }
+        });
+
+        if (!reminder) throw new Error('No hay recordatorio configurado.');
+
+        const phone = reminder.client.phone; // Asegúrate de tener el formato +58...
+        const message = reminder.message.content;
+
+        const result = await this.sendWhatsAppMessage(phone, message);
+
+        await this.prismaService.clientReminder.update({
+            where: { id: reminder.id },
+            data: { sentAt: new Date() }
+        });
+
+        return result;
+    }
+
+
+    async sendWhatsAppMessage(phone: string, message: string) {
+        const WHATSAPP_TOKEN = this.configService.get<string>('WHATSAPP_TOKEN');
+        const WHATSAPP_PHONE_ID = this.configService.get<string>('WHATSAPP_PHONE_ID');
+
+        try {
+            const url = `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/messages`;
+
+            const response = await axios.post(
+                url,
+                {
+                    messaging_product: 'whatsapp',
+                    to: phone,
+                    type: 'text',
+                    text: {
+                        body: message
+                    }
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+
+            return response.data;
+        } catch (error) {
+            console.error('Error al enviar mensaje por WhatsApp:', error.response?.data || error.message);
+            throw error;
+        }
+    }
+}

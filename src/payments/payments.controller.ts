@@ -32,6 +32,10 @@ export class PaymentsController {
     async getPaymentsMethod() {
         return await this.paymentService.getPaymentsMethod()
     }
+    @Get('/validate')
+    async validateAssociatedPaymentsInvoices() {
+        return await this.paymentService.validateAssociatedPaymentsInvoices()
+    }
 
     @Post()
     async registerPayment(@Body() payment: PaymentDTO) {

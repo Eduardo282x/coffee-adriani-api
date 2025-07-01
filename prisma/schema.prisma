@@ -25,19 +25,20 @@ model Role {
 }
 
 model Client {
-  id           Int            @id @default(autoincrement())
-  name         String
-  rif          String
-  address      String
-  phone        String
-  zone         String
-  blockId      Int
-  block        Block          @relation(fields: [blockId], references: [id])
-  active       Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  invoices     Invoice[]
-  Notification Notification[]
+  id             Int              @id @default(autoincrement())
+  name           String
+  rif            String
+  address        String
+  phone          String
+  zone           String
+  blockId        Int
+  block          Block            @relation(fields: [blockId], references: [id])
+  active         Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  invoices       Invoice[]
+  Notification   Notification[]
+  ClientReminder ClientReminder[]
 }
 
 model Block {
@@ -250,4 +251,24 @@ model ErrorMessages {
   message   String
   from      String
   createdAt DateTime @default(now())
+}
+
+model Message {
+  id             Int              @id @default(autoincrement())
+  title          String           @db.VarChar(100) // Título opcional
+  content        String           @db.Text // Mensaje largo con saltos de línea, emojis, etc.
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  ClientReminder ClientReminder[]
+}
+
+model ClientReminder {
+  id        Int       @id @default(autoincrement())
+  clientId  Int
+  messageId Int
+  send      Boolean   @default(false) // Marcar si se va a enviar o no
+  sentAt    DateTime? // Fecha en la que realmente fue enviado (opcional)
+  client    Client    @relation(fields: [clientId], references: [id])
+  message   Message   @relation(fields: [messageId], references: [id])
+  createdAt DateTime  @default(now())
 }
