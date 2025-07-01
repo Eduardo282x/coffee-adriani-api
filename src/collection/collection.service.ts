@@ -21,7 +21,7 @@ export class CollectionService {
         try {
             const invoicesExpired = await this.invoiceService.getInvoicesExpired() as unknown as ResponseInvoice;
 
-            return await this.prismaService.clientReminder.findMany({
+            const response = await this.prismaService.clientReminder.findMany({
                 include: {
                     client: { include: { block: true } },
                     message: true
@@ -30,13 +30,19 @@ export class CollectionService {
                     id: 'asc'
                 }
             }).then(item => item.map(data => {
-                const findClient = invoicesExpired.invoices.find(inv => inv.client.id == data.clientId)
+                const findClient = invoicesExpired.invoices.find(inv => inv.client.id == data.clientId);
+
+                if (!findClient || !findClient.invoices) {
+                    return null;
+                }
                 return {
                     ...data,
                     invoices: findClient.invoices,
                     total: findClient.invoices.reduce((acc, inv) => acc + Number(inv.totalAmount), 0)
                 }
-            }))
+            }));
+
+            return response.filter(data => data !== null);
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
