@@ -17,8 +17,6 @@ async function bootstrap() {
     forbidNonWhitelisted: true,
     transform: true,
     exceptionFactory: (errors) => {
-      console.log(errors);
-      
       const message = errors
         .map(
           (error) =>

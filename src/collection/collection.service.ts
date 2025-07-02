@@ -225,4 +225,28 @@ export class CollectionService {
             throw error;
         }
     }
+
+    async sendWhatsAppMessageTwilio(phone: string, message: string) {
+        const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
+        const authToken = this.configService.get<string>('TWILIO_ACCOUNT_TOKEN');
+        const phoneNumberProvider = this.configService.get<string>('TWILIO_NUMBER_TEXT');
+
+        try {
+            const client = require('twilio')(accountSid, authToken);
+
+            client.messages
+                .create({
+                    body: message,
+                    from: `whatsapp:+${phoneNumberProvider}`,
+                    to: `whatsapp:+${phone}`
+                })
+                .then(message => console.log(message.sid))
+                .done();
+
+            // return response.data;
+        } catch (error) {
+            console.error('Error al enviar mensaje por WhatsApp:', error.response?.data || error.message);
+            throw error;
+        }
+    }
 }

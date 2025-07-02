@@ -282,7 +282,7 @@ export class InvoicesService {
                     invoicesModify.pending += 1;
                 }
 
-                if (this.isDateExpired(inv.dueDate) && inv.status == 'Pendiente') {
+                if (this.isDateExpired(inv.dueDate) && (inv.status == 'Pendiente' || inv.status == 'Creada')) {
                     await this.prismaService.invoice.update({
                         where: { id: inv.id },
                         data: { status: 'Vencida' }

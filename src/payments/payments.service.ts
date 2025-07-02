@@ -303,6 +303,22 @@ export class PaymentsService {
                         status: Number(findInvoice.remaining) - pay.amount <= 2 ? 'Pagado' : 'Pendiente',
                     },
                 });
+
+                if (Number(findInvoice.remaining) - pay.amount <= 2) {
+                    const findClientReminder = await this.prismaService.clientReminder.findFirst({
+                        where: {
+                            clientId: findInvoice.clientId,
+                        }
+                    })
+
+                    if(findClientReminder){
+                        await this.prismaService.clientReminder.delete({
+                            where: {
+                                id: findClientReminder.id,
+                            }
+                        })
+                    }
+                }
             });
 
             baseResponse.message = `Pago Asociado a factura exitosamente.`

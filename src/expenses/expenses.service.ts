@@ -15,11 +15,26 @@ export class ExpensesService {
             const invoices = await this.getInvoicesRemaining(expenseFilter);
             const invoicesEarns = await this.getInvoicesEarn(expenseFilter);
             const payments = await this.getPayments(expenseFilter);
+            const paymentsNoAssociated = await this.getPaymentsNoAssociated(expenseFilter) as any[];
+
+            const calculateTotal = paymentsNoAssociated.map(pay => {
+                const findMethodPay = pay.account.method.currency;
+                if (findMethodPay === 'US') {
+                    return Number(pay.amount)
+                } else {
+                    const parseDolar = Number(pay.amount) / Number(pay.dolar.dolar);
+                    return parseDolar;
+                }
+            }).reduce((acc, item) => acc + item, 0)
 
             return {
                 invoicesEarns,
                 invoices: invoices,
-                payments: payments
+                payments: payments,
+                paymentsNoAssociated: {
+                    payments: paymentsNoAssociated,
+                    total: calculateTotal
+                }
             };
         } catch (err) {
             badResponse.message = err.message;
@@ -292,6 +307,38 @@ export class ExpensesService {
                             method: true
                         }
                     }
+                }
+            })
+
+            return payments;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async getPaymentsNoAssociated(expenseFilter: ExpensesDTO) {
+        try {
+            const payments = await this.prismaService.payment.findMany({
+                where: {
+                    account: {
+                        name: { not: 'Gastos' }
+                    },
+                    paymentDate: {
+                        gte: expenseFilter.startDate,
+                        lte: expenseFilter.endDate
+                    },
+                    InvoicePayment: {
+                        none: {}
+                    }
+                },
+                include: {
+                    account: {
+                        include: {
+                            method: true
+                        }
+                    },
+                    dolar: true
                 }
             })
 
