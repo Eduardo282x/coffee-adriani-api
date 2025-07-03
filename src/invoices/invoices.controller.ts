@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Res } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { DTOInvoice } from './invoice.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
+import { Response } from 'express';
 
 @Controller('invoices')
 export class InvoicesController {
@@ -32,7 +33,7 @@ export class InvoicesController {
     async InvoiceValidateTotal() {
         return await this.invoicesService.InvoiceValidateTotal();
     }
-    
+
     @Post('/check')
     async checkInvoice() {
         return await this.invoicesService.checkInvoice();
@@ -41,6 +42,14 @@ export class InvoicesController {
     @Post('/filter')
     async getInvoicesFilter(@Body() invoice: DTODateRangeFilter) {
         return await this.invoicesService.getInvoicesFilter(invoice);
+    }
+
+    @Post('/export')
+    async exportInvoicesExcel(@Res() res: Response, @Body() query: DTODateRangeFilter) {
+        const buffer = await this.invoicesService.exportInvoicesToExcel(query);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=facturas.xlsx');
+        res.send(buffer);
     }
 
     @Post()

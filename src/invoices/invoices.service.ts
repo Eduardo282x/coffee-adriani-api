@@ -7,7 +7,7 @@ import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.interfaces';
 import { InvoiceStatus } from '@prisma/client';
-import { error } from 'console';
+import * as XLSX from 'xlsx';
 
 @Injectable()
 export class InvoicesService {
@@ -232,7 +232,7 @@ export class InvoicesService {
         const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.totalAmount), 0)
         const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        
+
         const remainingCashInvoices = totalCashInvoices - debt;
         const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
         const paid = totalCashInvoicesPending - debtOld;
@@ -936,6 +936,135 @@ export class InvoicesService {
             duplicates,         // Registros exactos duplicados
             duplicateInvoices,  // Lista de invoice con productos repetidos
         };
+    }
+
+
+
+    async exportInvoicesToExcel(dateRange?: DTODateRangeFilter) {
+        const where: any = {};
+        if (dateRange?.startDate && dateRange?.endDate) {
+            where.dispatchDate = {
+                gte: dateRange.startDate,
+                lte: dateRange.endDate
+            };
+        }
+
+        const invoices = await this.prismaService.invoice.findMany({
+            where,
+            include: {
+                client: { include: { block: true } },
+                invoiceItems: { include: { product: true } },
+                InvoicePayment: {
+                    include: {
+                        payment: {
+                            include: {
+                                account: { include: { method: true } }
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: { dispatchDate: 'desc' }
+        });
+
+        // Hoja 1: Solo datos de facturas
+        const sheet1 = [
+            [
+                'N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
+            ],
+            ...invoices.map(inv => [
+                inv.controlNumber,
+                inv.client.name,
+                inv.client.block.name,
+                inv.client.address,
+                inv.client.zone,
+                inv.dispatchDate,
+                inv.dueDate,
+                inv.totalAmount.toFixed(2),
+                inv.remaining.toFixed(2),
+                inv.status
+            ])
+        ];
+
+        // Hoja 2: Facturas + detalles debajo
+        const sheet2: any[] = [
+            ['N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado']
+        ];
+        invoices.forEach(inv => {
+            sheet2.push([
+                inv.controlNumber,
+                inv.client.name,
+                inv.client.block.name,
+                inv.client.address,
+                inv.client.zone,
+                inv.dispatchDate,
+                inv.dueDate,
+                inv.totalAmount.toFixed(2),
+                inv.remaining.toFixed(2),
+                inv.status
+            ]);
+            // Encabezado de detalles
+            sheet2.push(['Producto', 'Cantidad', 'Precio', 'Subtotal']);
+            inv.invoiceItems.forEach(det => {
+                sheet2.push([
+                    det.product.name,
+                    det.quantity,
+                    det.unitPrice.toFixed(2),
+                    det.subtotal.toFixed(2)
+                ]);
+            });
+            sheet2.push([]); // Línea en blanco entre facturas
+        });
+
+        // Hoja 3: Facturas + detalles + pagos debajo
+        const sheet3: any[] = [
+            ['N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado']
+        ];
+        invoices.forEach(inv => {
+            sheet3.push([
+                inv.controlNumber,
+                inv.client.name,
+                inv.client.block.name,
+                inv.client.address,
+                inv.client.zone,
+                inv.dispatchDate,
+                inv.dueDate,
+                inv.totalAmount.toFixed(2),
+                inv.remaining.toFixed(2),
+                inv.status
+            ]);
+            // Detalles
+            sheet3.push(['Producto', 'Cantidad', 'Precio', 'Subtotal']);
+            inv.invoiceItems.forEach(det => {
+                sheet3.push([
+                    det.product.name,
+                    det.quantity,
+                    det.unitPrice.toFixed(2),
+                    det.subtotal.toFixed(2)
+                ]);
+            });
+            // Pagos
+            sheet3.push(['Pagos', 'Monto', 'Método', 'Moneda']);
+            inv.InvoicePayment.forEach(ip => {
+                sheet3.push([
+                    ip.payment.reference,
+                    `${ip.amount.toFixed(2)} $`,
+                    ip.payment.account.method.name,
+                    ip.payment.account.method.currency
+                ]);
+            });
+            sheet3.push([]); // Línea en blanco entre facturas
+        });
+
+        // Crear el libro y las hojas
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet1), 'Facturas');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet2), 'Facturas y Detalles');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet3), 'Facturas, Detalles y Pagos');
+
+        // Generar el buffer
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        return buffer;
     }
 
 }
