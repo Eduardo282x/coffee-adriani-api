@@ -332,7 +332,8 @@ export class InvoicesService {
 
     groupProductCountInvoices(invoicesFilter) {
         const calculateProducts = invoicesFilter.reduce((acc, invoice) => {
-            let paidRemaining = Number(invoice.totalAmount) - Number(invoice.remaining);
+            const parseRemaining = invoice.status =='Pagado' ? 0 : Number(invoice.remaining);
+            let paidRemaining = Number(invoice.totalAmount) - parseRemaining;
 
             invoice.invoiceItems.forEach(item => {
                 const productId = item.product.id;
