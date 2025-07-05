@@ -7,7 +7,8 @@ import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.interfaces';
 import { InvoiceStatus } from '@prisma/client';
-import * as XLSX from 'xlsx';
+// import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class InvoicesService {
@@ -103,7 +104,7 @@ export class InvoicesService {
                 totalPending: totalCashInvoicesPending,
                 debt: debt + paid,
                 remaining: realPending,
-            }
+            },
         };
     }
 
@@ -332,7 +333,7 @@ export class InvoicesService {
 
     groupProductCountInvoices(invoicesFilter) {
         const calculateProducts = invoicesFilter.reduce((acc, invoice) => {
-            const parseRemaining = invoice.status =='Pagado' ? 0 : Number(invoice.remaining);
+            const parseRemaining = invoice.status == 'Pagado' ? 0 : Number(invoice.remaining);
             let paidRemaining = Number(invoice.totalAmount) - parseRemaining;
 
             invoice.invoiceItems.forEach(item => {
@@ -941,12 +942,139 @@ export class InvoicesService {
 
 
 
-    async exportInvoicesToExcel(dateRange?: DTODateRangeFilter) {
+    // async exportInvoicesToExcel(dateRange?: DTODateRangeFilter) {
+    //     const where: any = {};
+    //     if (dateRange?.startDate && dateRange?.endDate) {
+    //         where.dispatchDate = {
+    //             gte: dateRange.startDate,
+    //             lte: dateRange.endDate
+    //         };
+    //     }
+
+    //     const invoices = await this.prismaService.invoice.findMany({
+    //         where,
+    //         include: {
+    //             client: { include: { block: true } },
+    //             invoiceItems: { include: { product: true } },
+    //             InvoicePayment: {
+    //                 include: {
+    //                     payment: {
+    //                         include: {
+    //                             account: { include: { method: true } }
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         },
+    //         orderBy: { dispatchDate: 'desc' }
+    //     });
+
+    //     // Hoja 1: Solo datos de facturas
+    //     const sheet1 = [
+    //         [
+    //             'N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
+    //         ],
+    //         ...invoices.map(inv => [
+    //             inv.controlNumber,
+    //             inv.client.name,
+    //             inv.client.block.name,
+    //             inv.client.address,
+    //             inv.client.zone,
+    //             inv.dispatchDate,
+    //             inv.dueDate,
+    //             inv.totalAmount.toFixed(2),
+    //             inv.remaining.toFixed(2),
+    //             inv.status
+    //         ])
+    //     ];
+
+    //     // Hoja 2: Facturas + detalles debajo
+    //     const sheet2: any[] = [
+    //         ['N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado']
+    //     ];
+    //     invoices.forEach(inv => {
+    //         sheet2.push([
+    //             inv.controlNumber,
+    //             inv.client.name,
+    //             inv.client.block.name,
+    //             inv.client.address,
+    //             inv.client.zone,
+    //             inv.dispatchDate,
+    //             inv.dueDate,
+    //             inv.totalAmount.toFixed(2),
+    //             inv.remaining.toFixed(2),
+    //             inv.status
+    //         ]);
+    //         // Encabezado de detalles
+    //         sheet2.push(['Producto', 'Cantidad', 'Precio', 'Subtotal']);
+    //         inv.invoiceItems.forEach(det => {
+    //             sheet2.push([
+    //                 det.product.name,
+    //                 det.quantity,
+    //                 det.unitPrice.toFixed(2),
+    //                 det.subtotal.toFixed(2)
+    //             ]);
+    //         });
+    //         sheet2.push([]); // Línea en blanco entre facturas
+    //     });
+
+    //     // Hoja 3: Facturas + detalles + pagos debajo
+    //     const sheet3: any[] = [
+    //         ['N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado']
+    //     ];
+    //     invoices.forEach(inv => {
+    //         sheet3.push([
+    //             inv.controlNumber,
+    //             inv.client.name,
+    //             inv.client.block.name,
+    //             inv.client.address,
+    //             inv.client.zone,
+    //             inv.dispatchDate,
+    //             inv.dueDate,
+    //             inv.totalAmount.toFixed(2),
+    //             inv.remaining.toFixed(2),
+    //             inv.status
+    //         ]);
+    //         // Detalles
+    //         sheet3.push(['Producto', 'Cantidad', 'Precio', 'Subtotal']);
+    //         inv.invoiceItems.forEach(det => {
+    //             sheet3.push([
+    //                 det.product.name,
+    //                 det.quantity,
+    //                 det.unitPrice.toFixed(2),
+    //                 det.subtotal.toFixed(2)
+    //             ]);
+    //         });
+    //         // Pagos
+    //         sheet3.push(['Pagos', 'Monto', 'Método', 'Moneda']);
+    //         inv.InvoicePayment.forEach(ip => {
+    //             sheet3.push([
+    //                 ip.payment.reference,
+    //                 `${ip.amount.toFixed(2)} $`,
+    //                 ip.payment.account.method.name,
+    //                 ip.payment.account.method.currency
+    //             ]);
+    //         });
+    //         sheet3.push([]); // Línea en blanco entre facturas
+    //     });
+
+    //     // Crear el libro y las hojas
+    //     const wb = XLSX.utils.book_new();
+    //     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet1), 'Facturas');
+    //     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet2), 'Facturas y Detalles');
+    //     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet3), 'Facturas, Detalles y Pagos');
+
+    //     // Generar el buffer
+    //     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    //     return buffer;
+    // }
+
+    async exportInvoicesToExcelWithExcelJS(dateRange?: DTODateRangeFilter): Promise<Buffer> {
         const where: any = {};
         if (dateRange?.startDate && dateRange?.endDate) {
             where.dispatchDate = {
                 gte: dateRange.startDate,
-                lte: dateRange.endDate
+                lte: dateRange.endDate,
             };
         }
 
@@ -959,40 +1087,52 @@ export class InvoicesService {
                     include: {
                         payment: {
                             include: {
-                                account: { include: { method: true } }
-                            }
-                        }
-                    }
-                }
+                                account: { include: { method: true } },
+                                dolar: true
+                            },
+                        },
+                    },
+                },
             },
-            orderBy: { dispatchDate: 'desc' }
+            orderBy: { dispatchDate: 'desc' },
         });
 
-        // Hoja 1: Solo datos de facturas
-        const sheet1 = [
-            [
-                'N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
-            ],
-            ...invoices.map(inv => [
-                inv.controlNumber,
-                inv.client.name,
-                inv.client.block.name,
-                inv.client.address,
-                inv.client.zone,
-                inv.dispatchDate,
-                inv.dueDate,
-                inv.totalAmount.toFixed(2),
-                inv.remaining.toFixed(2),
-                inv.status
-            ])
+        const productsMap: Map<string, { total: number; price: number }> = new Map();
+        invoices.forEach((inv) => {
+            inv.invoiceItems.forEach(({ product, quantity, unitPrice }) => {
+                const key = product.name;
+                const current = productsMap.get(key);
+                if (!current) {
+                    productsMap.set(key, { total: quantity, price: Number(unitPrice) });
+                } else {
+                    current.total += quantity;
+                    productsMap.set(key, current);
+                }
+            });
+        });
+
+        const productNames = Array.from(productsMap.keys());
+
+        const workbook = new ExcelJS.Workbook();
+
+        // Hoja 1 - Facturas
+        const ws1 = workbook.addWorksheet('Facturas');
+
+        const baseHeaders = [
+            'N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
         ];
 
-        // Hoja 2: Facturas + detalles debajo
-        const sheet2: any[] = [
-            ['N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado']
-        ];
+        const productHeaders = productNames.flatMap(name => [`${name}`, `Precio`]);
+        const finalHeaders = [...baseHeaders, ...productHeaders, 'Total de bultos', 'Monto', 'Abono'];
+
+        ws1.addRow(finalHeaders);
+        ws1.getRow(1).font = { bold: true };
+
         invoices.forEach(inv => {
-            sheet2.push([
+            const totalBultos = inv.invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+            const abono = Number(inv.totalAmount) - Number(inv.remaining);
+
+            const rowData: (string | number | Date)[] = [
                 inv.controlNumber,
                 inv.client.name,
                 inv.client.block.name,
@@ -1000,71 +1140,97 @@ export class InvoicesService {
                 inv.client.zone,
                 inv.dispatchDate,
                 inv.dueDate,
-                inv.totalAmount.toFixed(2),
-                inv.remaining.toFixed(2),
-                inv.status
-            ]);
-            // Encabezado de detalles
-            sheet2.push(['Producto', 'Cantidad', 'Precio', 'Subtotal']);
-            inv.invoiceItems.forEach(det => {
-                sheet2.push([
-                    det.product.name,
-                    det.quantity,
-                    det.unitPrice.toFixed(2),
-                    det.subtotal.toFixed(2)
-                ]);
-            });
-            sheet2.push([]); // Línea en blanco entre facturas
+                Number(inv.totalAmount),
+                Number(inv.remaining),
+                inv.status,
+            ];
+
+            // Agregar los productos por nombre (cantidad y precio)
+            for (const productName of productNames) {
+                const found = inv.invoiceItems.find(item => item.product.name === productName);
+                rowData.push(found ? found.quantity : '');
+                rowData.push(found ? Number(found.unitPrice) : 0);
+            }
+
+            rowData.push(totalBultos);
+            rowData.push(''); // Monto vacío
+            rowData.push(abono);
+
+            const row = ws1.addRow(rowData);
+
+            // Formato de fecha
+            row.getCell(6).numFmt = 'dd/mm/yyyy';
+            row.getCell(7).numFmt = 'dd/mm/yyyy';
+
+            // Color por estado
+            const colorMap = {
+                Creada: 'dbeafe',
+                Pendiente: 'ffedd4',
+                Vencida: 'ffe2e2',
+                Pagado: 'dbfce7',
+                Cancelada: 'ffe2e2',
+            };
+            const fillColor = colorMap[inv.status as keyof typeof colorMap];
+            if (fillColor) {
+                row.getCell(10).fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: fillColor },
+                };
+            }
         });
 
-        // Hoja 3: Facturas + detalles + pagos debajo
-        const sheet3: any[] = [
-            ['N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado']
+        // Hoja 2 - Pagos
+        const ws2 = workbook.addWorksheet('Pagos');
+        const pagosHeaders = [
+            'Cuenta', 'Factura', 'Cantidad', 'Cantidad USD', 'Cantidad Bs', 'Tasa Dolar', 'Referencia',
+            ...productNames.flatMap(name => [`${name}`, 'Precio']),
+            'Total de bultos',
         ];
+
+        ws2.addRow(pagosHeaders);
+        ws2.getRow(1).font = { bold: true };
+
         invoices.forEach(inv => {
-            sheet3.push([
-                inv.controlNumber,
-                inv.client.name,
-                inv.client.block.name,
-                inv.client.address,
-                inv.client.zone,
-                inv.dispatchDate,
-                inv.dueDate,
-                inv.totalAmount.toFixed(2),
-                inv.remaining.toFixed(2),
-                inv.status
-            ]);
-            // Detalles
-            sheet3.push(['Producto', 'Cantidad', 'Precio', 'Subtotal']);
-            inv.invoiceItems.forEach(det => {
-                sheet3.push([
-                    det.product.name,
-                    det.quantity,
-                    det.unitPrice.toFixed(2),
-                    det.subtotal.toFixed(2)
-                ]);
+            inv.InvoicePayment.forEach(({ payment }) => {
+                const currency = payment.account.method.currency;
+                const usdAmount = currency === 'USD' ? Number(payment.amount) : Number(payment.amount) / Number(payment.dolar.dolar);
+                const bsAmount = currency === 'BS' ? Number(payment.amount) : Number(payment.amount) * Number(payment.dolar.dolar);
+
+                const rowData: (string | number)[] = [
+                    payment.account.name,
+                    inv.controlNumber,
+                    `${Number(payment.amount).toFixed(2)} ${currency === 'USD' ? '$' : 'Bs'}`,
+                    usdAmount,
+                    bsAmount,
+                    Number(payment.dolar.dolar),
+                    payment.reference,
+                ];
+
+                for (const productName of productNames) {
+                    const found = inv.invoiceItems.find(item => item.product.name === productName);
+                    rowData.push(found ? found.quantity : '');
+                    rowData.push(found ? Number(found.unitPrice) : 0);
+                }
+
+                const totalBultos = inv.invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+                rowData.push(totalBultos);
+
+                const row = ws2.addRow(rowData);
+                if (currency === 'USD') {
+                    row.eachCell(cell => {
+                        cell.fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: 'dbeafe' },
+                        };
+                    });
+                }
             });
-            // Pagos
-            sheet3.push(['Pagos', 'Monto', 'Método', 'Moneda']);
-            inv.InvoicePayment.forEach(ip => {
-                sheet3.push([
-                    ip.payment.reference,
-                    `${ip.amount.toFixed(2)} $`,
-                    ip.payment.account.method.name,
-                    ip.payment.account.method.currency
-                ]);
-            });
-            sheet3.push([]); // Línea en blanco entre facturas
         });
 
-        // Crear el libro y las hojas
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet1), 'Facturas');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet2), 'Facturas y Detalles');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet3), 'Facturas, Detalles y Pagos');
-
-        // Generar el buffer
-        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const arrayBuffer = await workbook.xlsx.writeBuffer();
+        const buffer = Buffer.from(arrayBuffer); // <-- Conversión correcta
         return buffer;
     }
 

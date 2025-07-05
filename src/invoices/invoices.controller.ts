@@ -46,7 +46,7 @@ export class InvoicesController {
 
     @Post('/export')
     async exportInvoicesExcel(@Res() res: Response, @Body() query: DTODateRangeFilter) {
-        const buffer = await this.invoicesService.exportInvoicesToExcel(query);
+        const buffer = await this.invoicesService.exportInvoicesToExcelWithExcelJS(query);
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', 'attachment; filename=facturas.xlsx');
         res.send(buffer);
