@@ -6,6 +6,7 @@ import { InvoicesService } from 'src/invoices/invoices.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CollectionDTO, MessageDTO } from './collection.dto';
 import { IInvoice, ResponseInvoice } from 'src/invoices/invoice.dto';
+import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
 
 @Injectable()
 export class CollectionService {
@@ -13,7 +14,9 @@ export class CollectionService {
     constructor(
         private readonly prismaService: PrismaService,
         private readonly invoiceService: InvoicesService,
-        private readonly configService: ConfigService
+        private readonly whatsAppService: WhatsAppService,
+        private readonly configService: ConfigService,
+
     ) {
     }
 
@@ -137,62 +140,89 @@ export class CollectionService {
                 }
             });
 
-            const isValidPhone = (phone: string) => {
-                return typeof phone === 'string' && /^0\d{10}$/.test(phone);
-            };
+            const isValidPhone = (phone: string) =>
+                typeof phone === 'string' && /^0\d{10}$/.test(phone);
 
-            // Función para ajustar el número de teléfono
-            const adjustPhone = (phone: string) => {
-                return '58' + phone.slice(1);
-            };
+            const adjustPhone = (phone: string) => '58' + phone.slice(1);
 
-            for (const rem of reminder) {
-                const phone = rem.client.phone;
-                if (isValidPhone(phone)) {
-                    const adjustedPhone = adjustPhone(phone);
-                    await this.sendWhatsAppMessage(adjustedPhone, rem.message.content);
+            const chunkSize = 30;
+            const delayBetweenChunks = 90_000; // 1.5 minutos
 
-                    await this.prismaService.clientReminder.update({
-                        where: { id: rem.id },
-                        data: { sentAt: new Date() }
-                    });
-                } else {
-                    console.log(`Número de teléfono inválido para el cliente ${rem.client.name}: ${phone}`);
+            const delay = (ms: number) =>
+                new Promise(resolve => setTimeout(resolve, ms));
+
+            // Agrupar en lotes de 30
+            const chunks = [];
+            for (let i = 0; i < reminder.length; i += chunkSize) {
+                chunks.push(reminder.slice(i, i + chunkSize));
+            }
+
+            for (let i = 0; i < chunks.length; i++) {
+                const group = chunks[i];
+
+                const promises = group.map(async rem => {
+                    const phone = rem.client.phone;
+                    if (isValidPhone(phone)) {
+                        const adjustedPhone = adjustPhone(phone);
+                        try {
+                            await this.whatsAppService.sendMessage(adjustedPhone, rem.message.content);
+
+                            await this.prismaService.clientReminder.update({
+                                where: { id: rem.id },
+                                data: { sentAt: new Date() }
+                            });
+
+                            console.log(`Mensaje enviado a ${rem.client.name}`);
+                        } catch (err) {
+                            console.error(`Error enviando a ${rem.client.name}: ${err.message}`);
+                        }
+                    } else {
+                        console.warn(`Teléfono inválido para ${rem.client.name}: ${phone}`);
+                    }
+                });
+
+                await Promise.all(promises);
+
+                // No esperar después del último grupo
+                if (i < chunks.length - 1) {
+                    console.log(`Esperando ${delayBetweenChunks / 1000} segundos para siguiente lote...`);
+                    await delay(delayBetweenChunks);
                 }
             }
 
             baseResponse.message = 'Mensajes enviados exitosamente.'
             return baseResponse;
         } catch (err) {
-            badResponse.message = err.message;
-            return badResponse;
+            console.error('Error en envío masivo:', err);
+            return { message: 'Error enviando mensajes', error: err.message };
         }
     }
 
-    async sendReminder(clientId: number) {
-        const reminder = await this.prismaService.clientReminder.findFirst({
-            where: { clientId, send: true },
-            include: {
-                client: true,
-                message: true
-            }
-        });
 
-        if (!reminder) throw new Error('No hay recordatorio configurado.');
+    // async sendReminder(clientId: number) {
+    //     const reminder = await this.prismaService.clientReminder.findFirst({
+    //         where: { clientId, send: true },
+    //         include: {
+    //             client: true,
+    //             message: true
+    //         }
+    //     });
 
-        const phone = reminder.client.phone; // Asegúrate de tener el formato +58...
-        const message = reminder.message.content;
+    //     if (!reminder) throw new Error('No hay recordatorio configurado.');
 
-        const result = await this.sendWhatsAppMessage(phone, message);
+    //     const phone = reminder.client.phone; // Asegúrate de tener el formato +58...
+    //     const message = reminder.message.content;
 
-        await this.prismaService.clientReminder.update({
-            where: { id: reminder.id },
-            data: { sentAt: new Date() }
-        });
+    //     const result = await this.sendWhatsAppMessage(phone, message);
+    //     // const result = await this.whatsAppService.sendMessage(phone, message);
 
-        return result;
-    }
+    //     await this.prismaService.clientReminder.update({
+    //         where: { id: reminder.id },
+    //         data: { sentAt: new Date() }
+    //     });
 
+    //     return result;
+    // }
 
     async sendWhatsAppMessage(phone: string, message: string) {
         const WHATSAPP_TOKEN = this.configService.get<string>('WHATSAPP_TOKEN');

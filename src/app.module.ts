@@ -25,6 +25,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ExcelModule } from './excel/excel.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { CollectionModule } from './collection/collection.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { CollectionModule } from './collection/collection.module';
     ExcelModule,
     ExpensesModule,
     CollectionModule,
+    WhatsAppModule,
   ],
   controllers: [AppController],
   providers: [
