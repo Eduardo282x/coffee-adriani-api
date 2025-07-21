@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { AccountsDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
+import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
 import { ProductsService } from 'src/products/products.service';
 import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
@@ -311,7 +311,7 @@ export class PaymentsService {
                         }
                     })
 
-                    if(findClientReminder){
+                    if (findClientReminder) {
                         await this.prismaService.clientReminder.delete({
                             where: {
                                 id: findClientReminder.id,
@@ -322,6 +322,50 @@ export class PaymentsService {
             });
 
             baseResponse.message = `Pago Asociado a factura exitosamente.`
+            return baseResponse
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async payDisassociate(pay: PayDisassociateDTO) {
+        try {
+            const findPaymentAssociate = await this.prismaService.invoicePayment.findFirst({
+                where: { id: pay.id }
+            });
+
+            if (!findPaymentAssociate) {
+                throw new Error(`No se encontró la asociación de pago con ID ${pay.id}`);
+            }
+
+            await this.prismaService.invoice.update({
+                data: {
+                    remaining: { increment: findPaymentAssociate.amount },
+                    status: 'Pendiente'
+                },
+                where: { id: pay.invoiceId }
+            });
+
+            const findPayment = await this.prismaService.payment.findFirst({
+                where: { id: pay.paymentId },
+                include: { account: { include: { method: true } }, dolar: true }
+            });
+
+            const calculateRemaining = findPayment.account.method.currency == 'BS'
+                ? Number(findPaymentAssociate.amount) * Number(findPayment.dolar.dolar)
+                : Number(findPayment.amount);
+
+            await this.prismaService.payment.update({
+                data: { remaining: { increment: calculateRemaining } },
+                where: { id: findPayment.id }
+            });
+
+            await this.prismaService.invoicePayment.delete({
+                where: { id: pay.id }
+            });
+
+            baseResponse.message = `Pago Desasociado de factura exitosamente.`
             return baseResponse
         } catch (err) {
             badResponse.message = err.message;

@@ -32,6 +32,15 @@ export class PayInvoiceDTO {
     details: PayInvoiceDetailsDTO[];
 }
 
+export class PayDisassociateDTO {
+    @IsNumber()
+    paymentId: number;
+    @IsNumber()
+    invoiceId: number;
+    @IsNumber()
+    id: number;
+}
+
 export class AccountsDTO {
     @IsString()
     name: string;
