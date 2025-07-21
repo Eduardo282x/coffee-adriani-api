@@ -35,7 +35,7 @@ export class InventoryService {
         const getDolar = await this.productsService.getDolar();
 
         return await this.prismaService.historyInventory.findMany({
-            orderBy: { id: 'asc' },
+            orderBy: { id: 'desc' },
             include: {
                 product: true
             }
