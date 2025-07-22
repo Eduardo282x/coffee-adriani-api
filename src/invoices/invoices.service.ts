@@ -677,6 +677,19 @@ export class InvoicesService {
             return badResponse
         }
     }
+    async markPending(id: number) {
+        try {
+            await this.prismaService.invoice.update({
+                where: { id },
+                data: { status: 'Pendiente' }
+            })
+            baseResponse.message = 'Factura marcada como pendiente.'
+            return baseResponse;
+        } catch (err) {
+            baseResponse.message = err.message;
+            return badResponse
+        }
+    }
 
     async deleteInvoice(id: number) {
         try {
