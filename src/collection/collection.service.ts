@@ -159,7 +159,7 @@ export class CollectionService {
             const isValidPhone = (phone: string) =>
                 typeof phone === 'string' && /^0\d{10}$/.test(phone);
 
-            const adjustPhone = (phone: string) => '58' + phone.slice(1);
+            // const adjustPhone = (phone: string) => '58' + phone.slice(1);
 
             const chunkSize = 30;
             const delayBetweenChunks = 90_000; // 1.5 minutos
@@ -179,9 +179,9 @@ export class CollectionService {
                 const promises = group.map(async rem => {
                     const phone = rem.client.phone;
                     if (isValidPhone(phone)) {
-                        const adjustedPhone = adjustPhone(phone);
+                        // const adjustedPhone = adjustPhone(phone);
                         try {
-                            await this.whatsAppService.sendMessage(adjustedPhone, rem.message.content);
+                            await this.whatsAppService.sendMessage(phone, rem.message.content);
 
                             await this.prismaService.clientReminder.update({
                                 where: { id: rem.id },
