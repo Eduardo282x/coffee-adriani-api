@@ -4,7 +4,7 @@ import axios from 'axios';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CollectionDTO, MessageDTO } from './collection.dto';
+import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 import { IInvoice, ResponseInvoice } from 'src/invoices/invoice.dto';
 import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
 
@@ -84,6 +84,22 @@ export class CollectionService {
             });
 
             baseResponse.message = 'Mensaje actualizado exitosamente.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async updateMarkMessage(mark: MarkDTO) {
+        try {
+            await this.prismaService.clientReminder.updateMany({
+                data: {
+                    send: mark.send,
+                }
+            });
+
+            baseResponse.message = `Mensajes marcados para ${mark.send ? 'Enviar' : 'No enviar'}.`
             return baseResponse;
         } catch (err) {
             badResponse.message = err.message;

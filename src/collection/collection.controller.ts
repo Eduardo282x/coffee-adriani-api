@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
 import { CollectionService } from './collection.service';
-import { CollectionDTO, MessageDTO } from './collection.dto';
+import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 
 
 @Controller('collection')
@@ -29,6 +29,10 @@ export class CollectionController {
     @Post('/send-messages')
     async sendMessages() {
         return await this.collectionService.sendMessages();
+    }
+    @Put('/mark-message')
+    async updateMarkMessage(@Body() mark: MarkDTO) {
+        return await this.collectionService.updateMarkMessage(mark);
     }
     @Put('/messages/:id')
     async updateMessages(@Param('id', ParseIntPipe) id: number, @Body() message: MessageDTO) {

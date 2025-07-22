@@ -16,3 +16,9 @@ export class CollectionDTO {
     @IsNotEmpty({message: 'Este campo es necesario'})
     send: boolean;
 }
+
+export class MarkDTO {
+    @IsBoolean()
+    @IsNotEmpty({message: 'Este campo es necesario'})
+    send: boolean;
+}
