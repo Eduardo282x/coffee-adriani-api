@@ -156,6 +156,8 @@ export class CollectionService {
                 }
             });
 
+            return await this.whatsAppService.sendMessage(reminder[0].client.phone, reminder[0].message.content);
+
             const isValidPhone = (phone: string) =>
                 typeof phone === 'string' && /^0\d{10}$/.test(phone);
 
