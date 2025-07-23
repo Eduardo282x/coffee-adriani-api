@@ -33,7 +33,8 @@ export class CollectionService {
                     id: 'asc'
                 }
             }).then(item => item.map(data => {
-                const findClient = invoicesExpired.invoices.find(inv => inv.client.id == data.clientId);
+                const arrayInvoices = invoicesExpired.invoices && invoicesExpired.invoices.length > 0 ? invoicesExpired.invoices : []
+                const findClient = arrayInvoices.find(inv => inv.client.id == data.clientId);
 
                 if (!findClient || !findClient.invoices) {
                     return null;
@@ -156,13 +157,18 @@ export class CollectionService {
                 }
             });
 
-            return await this.whatsAppService.sendMessage(reminder[0].client.phone, reminder[0].message.content);
+            let responseMessages = []
 
-            const isValidPhone = (phone: string) =>
-                typeof phone === 'string' && /^0\d{10}$/.test(phone);
+            // const isValidPhone = (phone: string) =>
+            //     typeof phone === 'string' && /^0\d{10}$/.test(phone);
 
-            // const adjustPhone = (phone: string) => '58' + phone.slice(1);
-
+            const adjustPhone = (phone: string) => {
+                if (typeof phone !== 'string') return phone;
+                if (phone.startsWith('0') && phone.length === 11) {
+                    return '58' + phone.slice(1);
+                }
+                return phone;
+            };
             const chunkSize = 30;
             const delayBetweenChunks = 90_000; // 1.5 minutos
 
@@ -179,23 +185,23 @@ export class CollectionService {
                 const group = chunks[i];
 
                 const promises = group.map(async rem => {
-                    const phone = rem.client.phone;
-                    if (isValidPhone(phone)) {
-                        // const adjustedPhone = adjustPhone(phone);
-                        try {
-                            await this.whatsAppService.sendMessage(phone, rem.message.content);
+                    const phone = adjustPhone(rem.client.phone);
+                    // if (isValidPhone(phone)) {
+                    // const adjustedPhone = adjustPhone(phone);
+                    try {
+                        const response = await this.whatsAppService.sendMessage(phone, rem.message.content);
 
+                        if (response) {
+                            responseMessages.push(response);
                             await this.prismaService.clientReminder.update({
                                 where: { id: rem.id },
                                 data: { sentAt: new Date() }
                             });
-
                             console.log(`Mensaje enviado a ${rem.client.name}`);
-                        } catch (err) {
-                            console.error(`Error enviando a ${rem.client.name}: ${err.message}`);
                         }
-                    } else {
-                        console.warn(`Teléfono inválido para ${rem.client.name}: ${phone}`);
+
+                    } catch (err) {
+                        console.error(`Error enviando a ${rem.client.name}: ${err.message}`);
                     }
                 });
 
