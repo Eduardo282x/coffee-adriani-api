@@ -133,7 +133,7 @@ export interface InvoiceInvoice {
     updatedAt: Date;
     deleted: boolean;
     invoiceItems: InvoiceItem[];
-    totalAmountBs: string;
+    totalAmountBs: any;
 }
 
 export interface InvoiceItem {

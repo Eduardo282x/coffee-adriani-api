@@ -22,93 +22,101 @@ export class InvoicesService {
 
     }
 
-    async getInvoices(filter?: OptionalFilterInvoices): Promise<ResponseInvoice> {
-        const where: any = {};
-        if (filter && filter.status) {
-            where.status = filter.status as InvoiceStatus;
-        }
-
-        const dolar = await this.productService.getDolar();
-        const invoices = await this.prismaService.invoice.findMany({
-            include: {
-                client: {
-                    include: { block: true }
-                },
-                invoiceItems: {
-                    include: {
-                        product: true
-                    }
-                },
-                InvoicePayment: {
-                    include: { payment: { include: { account: true } } }
-                }
-            },
-            orderBy: {
-                dispatchDate: 'desc'
-            },
-            where
-        }).then(inv =>
-            inv.map(data => {
-                return {
-                    ...data,
-                    totalAmount: data.totalAmount.toFixed(2)
-                }
-            })
-        )
-
-        const groupedByClient = invoices.reduce((acc, invoice) => {
-            const clientId = invoice.client.id;
-
-            if (!acc[clientId]) {
-                acc[clientId] = {
-                    client: invoice.client,
-                    invoices: [],
-                };
+    async getInvoices(filter?: OptionalFilterInvoices): Promise<ResponseInvoice | DTOBaseResponse> {
+        try {
+            const where: any = {};
+            if (filter && filter.status) {
+                where.status = filter.status as InvoiceStatus;
             }
 
-            const invoiceWithoutClient = { ...invoice };
-            delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
-            // Ensure totalAmountBs is present and as a number (not string)
-            const invoiceWithDolar = {
-                ...invoiceWithoutClient,
-                totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)),
+            const dolar = await this.productService.getDolar();
+            const invoices = await this.prismaService.invoice.findMany({
+                include: {
+                    client: {
+                        include: { block: true }
+                    },
+                    invoiceItems: {
+                        include: {
+                            product: true
+                        }
+                    },
+                    InvoicePayment: {
+                        include: { payment: { include: { account: true } } }
+                    }
+                },
+                orderBy: {
+                    dispatchDate: 'desc'
+                },
+                where
+            }).then(inv =>
+                inv.map(data => {
+                    return {
+                        ...data,
+                        totalAmount: data.totalAmount.toFixed(2)
+                    }
+                })
+            )
+
+            const groupedByClient = invoices.reduce((acc, invoice) => {
+                const clientId = invoice.client.id;
+
+                if (!acc[clientId]) {
+                    acc[clientId] = {
+                        client: invoice.client,
+                        invoices: [],
+                    };
+                }
+
+                const invoiceWithoutClient = { ...invoice };
+                delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
+                // Ensure totalAmountBs is present and as a number (not string)
+                const invoiceWithDolar = {
+                    ...invoiceWithoutClient,
+                    totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)),
+                };
+                acc[clientId].invoices.push(invoiceWithDolar);
+
+                return acc;
+            }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
+
+            const result = Object.values(groupedByClient);
+
+            // const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
+
+            // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
+
+            // const totalPackageDet = Object.values(groupedByProduct);
+            const totalPackageDetCount = this.groupProductCountInvoices(invoices);
+
+            const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
+            const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
+
+            // const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
+            // const remainingCashInvoices = totalCashInvoices - debt;
+
+            // const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
+            // const paid = totalCashInvoicesPending - debtOld;
+
+            const realPending = totalCashInvoices - totalCashInvoicesPending;
+
+            return {
+                invoices: result,
+                package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
+                detPackage: totalPackageDetCount,
+                payments: {
+                    total: totalCashInvoices,
+                    totalPending: totalCashInvoicesPending,
+                    debt: 0,
+                    remaining: realPending,
+                },
             };
-            acc[clientId].invoices.push(invoiceWithDolar);
-
-            return acc;
-        }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
-
-        const result = Object.values(groupedByClient);
-
-        // const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
-
-        // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
-
-        // const totalPackageDet = Object.values(groupedByProduct);
-        const totalPackageDetCount = this.groupProductCountInvoices(invoices);
-
-        const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-
-        // const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        // const remainingCashInvoices = totalCashInvoices - debt;
-
-        // const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-        // const paid = totalCashInvoicesPending - debtOld;
-
-        const realPending = totalCashInvoices - totalCashInvoicesPending;
-
-        return {
-            invoices: result,
-            package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
-            detPackage: totalPackageDetCount,
-            payments: {
-                total: totalCashInvoices,
-                totalPending: totalCashInvoicesPending,
-                debt: 0,
-                remaining: realPending,
-            },
-        };
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'InvoiceService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
     }
 
     async getInvoicesPaid() {
@@ -169,92 +177,100 @@ export class InvoicesService {
         }
     }
 
-    async getInvoicesFilter(invoice: DTODateRangeFilter) {
+    async getInvoicesFilter(invoice: DTODateRangeFilter): Promise<ResponseInvoice | DTOBaseResponse> {
         // const dolar = await this.productService.getDolar();
-        const invoices = await this.prismaService.invoice.findMany({
-            include: {
-                client: {
-                    include: { block: true }
-                },
-                invoiceItems: {
-                    include: {
-                        product: true
+        try {
+            const invoices = await this.prismaService.invoice.findMany({
+                include: {
+                    client: {
+                        include: { block: true }
+                    },
+                    invoiceItems: {
+                        include: {
+                            product: true
+                        }
+                    },
+                    InvoicePayment: {
+                        include: { payment: { include: { account: true } } }
                     }
                 },
-                InvoicePayment: {
-                    include: { payment: { include: { account: true } } }
+                orderBy: {
+                    dispatchDate: 'desc'
+                },
+                where: {
+                    dispatchDate: {
+                        gte: invoice.startDate,
+                        lte: invoice.endDate
+                    }
                 }
-            },
-            orderBy: {
-                dispatchDate: 'desc'
-            },
-            where: {
-                dispatchDate: {
-                    gte: invoice.startDate,
-                    lte: invoice.endDate
+            }).then(inv =>
+                inv.map(data => {
+                    return {
+                        ...data,
+                        totalAmount: data.totalAmount.toFixed(2)
+                    }
+                })
+            )
+
+            const groupedByClient = invoices.reduce((acc, invoice) => {
+                const clientId = invoice.client.id;
+
+                if (!acc[clientId]) {
+                    acc[clientId] = {
+                        client: invoice.client,
+                        invoices: [],
+                    };
                 }
-            }
-        }).then(inv =>
-            inv.map(data => {
-                return {
-                    ...data,
-                    totalAmount: data.totalAmount.toFixed(2)
-                }
+
+                const invoiceWithoutClient = { ...invoice };
+                delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
+                // const invoiceWithDolar = {
+                //     ...invoiceWithoutClient,
+                //     totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
+                // }
+                acc[clientId].invoices.push(invoiceWithoutClient);
+
+                return acc;
+            }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
+
+            const result = Object.values(groupedByClient);
+
+            // const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
+
+            // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
+
+            // const totalPackageDet = Object.values(groupedByProduct);
+            const totalPackageDetCount = this.groupProductCountInvoices(invoices);
+
+            const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
+            const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
+
+            // const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
+            // const remainingCashInvoices = totalCashInvoices - debt;
+
+            // const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
+            // const paid = totalCashInvoicesPending - debtOld;
+
+            const realPending = totalCashInvoices - totalCashInvoicesPending;
+
+            return {
+                invoices: result,
+                package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
+                detPackage: totalPackageDetCount,
+                payments: {
+                    total: totalCashInvoices,
+                    totalPending: totalCashInvoicesPending,
+                    debt: 0,
+                    remaining: realPending,
+                },
+            };
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'InvoiceService' }
             })
-        )
-
-        const groupedByClient = invoices.reduce((acc, invoice) => {
-            const clientId = invoice.client.id;
-
-            if (!acc[clientId]) {
-                acc[clientId] = {
-                    client: invoice.client,
-                    invoices: [],
-                };
-            }
-
-            const invoiceWithoutClient = { ...invoice };
-            delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
-            // const invoiceWithDolar = {
-            //     ...invoiceWithoutClient,
-            //     totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
-            // }
-            acc[clientId].invoices.push(invoiceWithoutClient);
-
-            return acc;
-        }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: typeof invoices }>);
-
-        const result = Object.values(groupedByClient);
-
-        // const invoicesFilter = invoices.filter(item => item.status == 'Creada' || item.status == 'Pendiente' || item.status == 'Vencida')
-
-        // const groupedByProduct = this.groupProductInvoices(invoicesFilter);
-
-        // const totalPackageDet = Object.values(groupedByProduct);
-        const totalPackageDetCount = this.groupProductCountInvoices(invoices);
-
-        const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-
-        // const debt = invoices.filter(data => Number(data.remaining) < 2).reduce((acc, item) => acc + Number(item.totalAmount), 0)
-        // const remainingCashInvoices = totalCashInvoices - debt;
-
-        // const debtOld = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-        // const paid = totalCashInvoicesPending - debtOld;
-
-        const realPending = totalCashInvoices - totalCashInvoicesPending;
-
-        return {
-            invoices: result,
-            package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
-            detPackage: totalPackageDetCount,
-            payments: {
-                total: totalCashInvoices,
-                totalPending: totalCashInvoicesPending,
-                debt: 0,
-                remaining: realPending,
-            },
-        };
+            badResponse.message = err.message;
+            return badResponse;
+        }
     }
 
     async checkInvoice() {

@@ -33,7 +33,6 @@ export class CollectionService {
                     id: 'asc'
                 }
             }).then(item => item.map(data => {
-                console.log(invoicesExpired.invoices.length)
                 const arrayInvoices = invoicesExpired.invoices && invoicesExpired.invoices.length > 0 ? invoicesExpired.invoices : []
                 const findClient = arrayInvoices.find(inv => inv.client.id == data.clientId);
 
