@@ -12,7 +12,7 @@ export class WhatsAppService {
     }
     // private client: Client;
 
-    private readonly localServerUrl = `http://${this.configService.get('IP_LOCAL')}:3001/send-message`; // cambia <IP_LOCAL> por tu IP real
+    private readonly localServerUrl = `${this.configService.get<string>('IP_LOCAL')}/send-message`; // cambia <IP_LOCAL> por tu IP real
 
     async sendMessage(phone: string, message: string): Promise<string> {
         try {
