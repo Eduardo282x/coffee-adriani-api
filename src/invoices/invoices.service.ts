@@ -22,7 +22,7 @@ export class InvoicesService {
 
     }
 
-    async getInvoices(filter?: OptionalFilterInvoices) {
+    async getInvoices(filter?: OptionalFilterInvoices): Promise<ResponseInvoice> {
         const where: any = {};
         if (filter && filter.status) {
             where.status = filter.status as InvoiceStatus;
@@ -68,14 +68,15 @@ export class InvoicesService {
 
             const invoiceWithoutClient = { ...invoice };
             delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
+            // Ensure totalAmountBs is present and as a number (not string)
             const invoiceWithDolar = {
                 ...invoiceWithoutClient,
-                totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)).toFixed(2)
-            }
+                totalAmountBs: Number(Number(invoiceWithoutClient.totalAmount) * Number(dolar.dolar)),
+            };
             acc[clientId].invoices.push(invoiceWithDolar);
 
             return acc;
-        }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: typeof invoices }>);
+        }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
 
         const result = Object.values(groupedByClient);
 
@@ -119,9 +120,9 @@ export class InvoicesService {
         }
     }
 
-    async getInvoicesExpired() {
+    async getInvoicesExpired(): Promise<ResponseInvoice | DTOBaseResponse> {
         try {
-            return await this.getInvoices({ status: 'Vencida' })
+            return await this.getInvoices({ status: 'Vencida' }) as ResponseInvoice
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;

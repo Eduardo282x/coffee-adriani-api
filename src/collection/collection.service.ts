@@ -22,17 +22,18 @@ export class CollectionService {
 
     async getClientReminder() {
         try {
-            const invoicesExpired = await this.invoiceService.getInvoicesExpired() as unknown as ResponseInvoice;
+            const invoicesExpired: ResponseInvoice = await this.invoiceService.getInvoicesExpired() as ResponseInvoice;
 
             const response = await this.prismaService.clientReminder.findMany({
                 include: {
-                    client: { include: { block: true } },
+                    client: { include: { block: true,  } },
                     message: true
                 },
                 orderBy: {
                     id: 'asc'
                 }
             }).then(item => item.map(data => {
+                console.log(invoicesExpired.invoices.length)
                 const arrayInvoices = invoicesExpired.invoices && invoicesExpired.invoices.length > 0 ? invoicesExpired.invoices : []
                 const findClient = arrayInvoices.find(inv => inv.client.id == data.clientId);
 

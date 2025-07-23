@@ -86,7 +86,7 @@ export interface OptionalFilterInvoices {
 
 export interface ResponseInvoice {
     invoices: ResponseInvoiceInvoice[];
-    package: number;
+    package: any;
     detPackage: any;
     payments: any;
 }
