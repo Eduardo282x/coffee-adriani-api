@@ -27,6 +27,10 @@ client.on('ready', () => {
 
 client.initialize();
 
+app.get('/', (req, res) => {
+    res.send('Hola')
+})
+
 // Endpoint para enviar mensajes desde el servidor de Render
 app.post('/send-message', async (req, res) => {
     const { phone, message } = req.body;
