@@ -90,6 +90,37 @@ export class CollectionService {
             return badResponse;
         }
     }
+    async deleteMessages(id: number) {
+        try {
+            await this.prismaService.message.delete({
+                where: { id },
+            });
+
+            baseResponse.message = 'Mensaje eliminado exitosamente.'
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async markMessageClients(messageId: number) {
+        try {
+            const findMessageSelected = await this.prismaService.message.findFirst({ where: { id: messageId } })
+
+            await this.prismaService.clientReminder.updateMany({
+                data: {
+                    messageId
+                }
+            });
+
+            baseResponse.message = `Mensajes ${findMessageSelected.title} marcado para todos.`
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
 
     async updateMarkMessage(mark: MarkDTO) {
         try {
@@ -149,7 +180,7 @@ export class CollectionService {
     async sendMessages() {
         try {
             const reminder = await this.prismaService.clientReminder.findMany({
-                where: { send: true },
+                where: { send: true, sentAt: { not: new Date() } },
                 include: {
                     client: true,
                     message: true
@@ -159,7 +190,7 @@ export class CollectionService {
             let responseMessages = [];
             const getUrlWhatsApp = await this.prismaService.settings.findFirst({ where: { name: 'whatsApp' } })
 
-            if(!getUrlWhatsApp || getUrlWhatsApp.value.trim() == ''){
+            if (!getUrlWhatsApp || getUrlWhatsApp.value.trim() == '') {
                 badResponse.message = 'No se encontró una url para whatsApp.'
                 return badResponse;
             }
@@ -193,9 +224,9 @@ export class CollectionService {
                 const promises = group.map(async rem => {
                     const phone: string | null = adjustPhone(rem.client.phone);
 
-                    if(phone == null){
+                    if (phone == null) {
                         await this.prismaService.errorMessages.create({
-                            data:{
+                            data: {
                                 from: 'CollectionService WhatsApp',
                                 message: `Error al enviar mensaje al cliente ${rem.client.name} numero de teléfono ${rem.client.phone} no valido.`
                             }

@@ -292,7 +292,9 @@ export class PaymentsService {
                 await this.prismaService.payment.update({
                     data: { remaining: Number(calculateRemaining) },
                     where: { id: findPayment.id }
-                })
+                });
+
+                const statusInvoices = Number(findInvoice.remaining) - pay.amount <= 2 ? 'Pagado' : 'Pendiente';
 
                 await this.prismaService.invoice.update({
                     where: { id: findInvoice.id },
@@ -300,11 +302,11 @@ export class PaymentsService {
                         remaining: {
                             decrement: pay.amount,
                         },
-                        status: Number(findInvoice.remaining) - pay.amount <= 2 ? 'Pagado' : 'Pendiente',
+                        status: statusInvoices
                     },
                 });
 
-                if (Number(findInvoice.remaining) - pay.amount <= 2) {
+                if (statusInvoices == 'Pagado') {
                     const findClientReminder = await this.prismaService.clientReminder.findFirst({
                         where: {
                             clientId: findInvoice.clientId,

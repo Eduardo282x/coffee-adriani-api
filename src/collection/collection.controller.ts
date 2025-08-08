@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
 import { CollectionService } from './collection.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 
@@ -30,6 +30,10 @@ export class CollectionController {
     async sendMessages() {
         return await this.collectionService.sendMessages();
     }
+    @Put('/message-clients/:id')
+    async markMessageClients(@Param('id', ParseIntPipe) id: number) {
+        return await this.collectionService.markMessageClients(id);
+    }
     @Put('/mark-message')
     async updateMarkMessage(@Body() mark: MarkDTO) {
         return await this.collectionService.updateMarkMessage(mark);
@@ -41,5 +45,9 @@ export class CollectionController {
     @Put('/:id')
     async updateClientCollection(@Param('id', ParseIntPipe) id: number, @Body() data: CollectionDTO) {
         return await this.collectionService.updateClientCollection(id, data);
+    }
+    @Delete('/messages/:id')
+    async deleteMessages(@Param('id', ParseIntPipe) id: number) {
+        return await this.collectionService.deleteMessages(id);
     }
 }

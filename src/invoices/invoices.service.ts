@@ -289,6 +289,8 @@ export class InvoicesService {
                 }
             });
 
+            const clientReminderList = await this.prismaService.clientReminder.findMany();
+
             const invoicesModify = {
                 pending: 0,
                 expired: 0
@@ -304,11 +306,17 @@ export class InvoicesService {
                     invoicesModify.pending += 1;
                 }
 
-                if (this.isDateExpired(inv.dueDate) && (inv.status == 'Pendiente' || inv.status == 'Creada')) {
+                if (this.isDateExpired(inv.dueDate) && (inv.status == 'Pendiente' || inv.status == 'Creada' || inv.status == 'Vencida')) {
                     await this.prismaService.invoice.update({
                         where: { id: inv.id },
                         data: { status: 'Vencida' }
                     });
+
+                    const findClientReminder = clientReminderList.find(item => item.clientId == inv.clientId);
+
+                    if(findClientReminder){
+                        return;
+                    }
 
                     await this.prismaService.clientReminder.create({
                         data: {
@@ -325,7 +333,7 @@ export class InvoicesService {
             console.log(invoicesModify);
 
 
-            baseResponse.message = 'Facturas verificadas.'
+            baseResponse.message = 'Facturas verificadas y agregadas a cobranza.'
             return baseResponse;
         } catch (err) {
             badResponse.message = err.message;
