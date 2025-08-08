@@ -16,7 +16,6 @@ export class CollectionService {
         private readonly invoiceService: InvoicesService,
         private readonly whatsAppService: WhatsAppService,
         private readonly configService: ConfigService,
-
     ) {
     }
 
@@ -26,7 +25,7 @@ export class CollectionService {
 
             const response = await this.prismaService.clientReminder.findMany({
                 include: {
-                    client: { include: { block: true,  } },
+                    client: { include: { block: true, } },
                     message: true
                 },
                 orderBy: {
@@ -157,18 +156,25 @@ export class CollectionService {
                 }
             });
 
-            let responseMessages = []
+            let responseMessages = [];
+            const getUrlWhatsApp = await this.prismaService.settings.findFirst({ where: { name: 'whatsApp' } })
 
-            // const isValidPhone = (phone: string) =>
-            //     typeof phone === 'string' && /^0\d{10}$/.test(phone);
+            if(!getUrlWhatsApp || getUrlWhatsApp.value.trim() == ''){
+                badResponse.message = 'No se encontró una url para whatsApp.'
+                return badResponse;
+            }
 
-            const adjustPhone = (phone: string) => {
-                if (typeof phone !== 'string') return phone;
+            const adjustPhone = (phone: string): string | null => {
+                if (typeof phone !== 'string') return null;
+                if (phone.includes('-')) return null;
+                if (phone.length <= 5) return null;
+
                 if (phone.startsWith('0') && phone.length === 11) {
                     return '58' + phone.slice(1);
                 }
                 return phone;
             };
+
             const chunkSize = 30;
             const delayBetweenChunks = 90_000; // 1.5 minutos
 
@@ -185,12 +191,22 @@ export class CollectionService {
                 const group = chunks[i];
 
                 const promises = group.map(async rem => {
-                    const phone = adjustPhone(rem.client.phone);
-                    // if (isValidPhone(phone)) {
-                    // const adjustedPhone = adjustPhone(phone);
-                    try {
-                        const response = await this.whatsAppService.sendMessage(phone, rem.message.content);
+                    const phone: string | null = adjustPhone(rem.client.phone);
 
+                    if(phone == null){
+                        await this.prismaService.errorMessages.create({
+                            data:{
+                                from: 'CollectionService WhatsApp',
+                                message: `Error al enviar mensaje al cliente ${rem.client.name} numero de teléfono ${rem.client.phone} no valido.`
+                            }
+                        })
+
+                        return;
+                    }
+
+                    try {
+                        // const response = await this.whatsAppService.sendMessage(phone, rem.message.content);
+                        const response = await axios.post(getUrlWhatsApp.value, { phone, message: rem.message.content });
                         if (response) {
                             responseMessages.push(response);
                             await this.prismaService.clientReminder.update({
@@ -214,7 +230,14 @@ export class CollectionService {
                 }
             }
 
-            baseResponse.message = 'Mensajes enviados exitosamente.'
+            await this.prismaService.errorMessages.create({
+                data: {
+                    from: 'CollectionServiceWhatApp Success',
+                    message: `Mensajes enviados exitosamente a ${responseMessages.length} de ${reminder.length}.`
+                }
+            })
+
+            baseResponse.message = `Mensajes enviados exitosamente a ${responseMessages.length} de ${reminder.length}.`
             return baseResponse;
         } catch (err) {
             console.error('Error en envío masivo:', err);

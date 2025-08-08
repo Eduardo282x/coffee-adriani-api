@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
   // directUrl = env("DIRECT_URL")
 }
 
@@ -25,20 +25,21 @@ model Role {
 }
 
 model Client {
-  id             Int              @id @default(autoincrement())
-  name           String
-  rif            String
-  address        String
-  phone          String
-  zone           String
-  blockId        Int
-  block          Block            @relation(fields: [blockId], references: [id])
-  active         Boolean          @default(true)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  invoices       Invoice[]
-  Notification   Notification[]
-  ClientReminder ClientReminder[]
+  id                    Int                     @id @default(autoincrement())
+  name                  String
+  rif                   String
+  address               String
+  phone                 String
+  zone                  String
+  blockId               Int
+  block                 Block                   @relation(fields: [blockId], references: [id])
+  active                Boolean                 @default(true)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  invoices              Invoice[]
+  Notification          Notification[]
+  ClientReminder        ClientReminder[]
+  ClientReminderHistory ClientReminderHistory[]
 }
 
 model Block {
@@ -138,16 +139,16 @@ model HistoryDolar {
 }
 
 model InvoiceProduct {
-  id           Int                @id @default(autoincrement())
-  invoice      Invoice            @relation(fields: [invoiceId], references: [id])
+  id           Int     @id @default(autoincrement())
+  invoice      Invoice @relation(fields: [invoiceId], references: [id])
   invoiceId    Int
-  product      Product            @relation(fields: [productId], references: [id])
+  product      Product @relation(fields: [productId], references: [id])
   productId    Int
   quantity     Int
   // type         InvoiceTypeProduct @default(SALE)
-  unitPriceUSD Decimal            @default(0) @db.Decimal(10, 2)
-  unitPrice    Decimal            @db.Decimal(10, 2)
-  subtotal     Decimal            @db.Decimal(10, 2)
+  unitPriceUSD Decimal @default(0) @db.Decimal(10, 2)
+  unitPrice    Decimal @db.Decimal(10, 2)
+  subtotal     Decimal @db.Decimal(10, 2)
 
   @@unique([invoiceId, productId]) // No se puede repetir el producto en la misma factura
 }
@@ -260,12 +261,13 @@ model ErrorMessages {
 }
 
 model Message {
-  id             Int              @id @default(autoincrement())
-  title          String           @db.VarChar(100) // Título opcional
-  content        String           @db.Text // Mensaje largo con saltos de línea, emojis, etc.
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  ClientReminder ClientReminder[]
+  id                    Int                     @id @default(autoincrement())
+  title                 String                  @db.VarChar(100) // Título opcional
+  content               String                  @db.Text // Mensaje largo con saltos de línea, emojis, etc.
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  ClientReminder        ClientReminder[]
+  ClientReminderHistory ClientReminderHistory[]
 }
 
 model ClientReminder {
@@ -277,4 +279,22 @@ model ClientReminder {
   client    Client    @relation(fields: [clientId], references: [id])
   message   Message   @relation(fields: [messageId], references: [id])
   createdAt DateTime  @default(now())
+}
+
+model ClientReminderHistory {
+  id          Int       @id @default(autoincrement())
+  clientId    Int
+  messageId   Int
+  description String
+  sended      Boolean   @default(false) // Marcar si se va a enviar o no
+  sentAt      DateTime? // Fecha en la que realmente fue enviado (opcional)
+  client      Client    @relation(fields: [clientId], references: [id])
+  message     Message   @relation(fields: [messageId], references: [id])
+  createdAt   DateTime  @default(now())
+}
+
+model Settings {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value String
 }

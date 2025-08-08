@@ -3,20 +3,29 @@ import { ConfigService } from '@nestjs/config';
 // import { Client, LocalAuth } from 'whatsapp-web.js';
 // import * as qrcode from 'qrcode-terminal';
 import axios from 'axios';
+import { badResponse } from 'src/dto/base.dto';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class WhatsAppService {
 
-    constructor(private readonly configService: ConfigService) {
-        
+    constructor(private readonly prismaService: PrismaService) {
+
     }
     // private client: Client;
 
-    private readonly localServerUrl = `${this.configService.get<string>('IP_LOCAL')}/send-message`; // cambia <IP_LOCAL> por tu IP real
+    // private readonly localServerUrl = `${this.configService.get<string>('IP_LOCAL')}/send-message`; // cambia <IP_LOCAL> por tu IP real
 
-    async sendMessage(phone: string, message: string): Promise<string> {
+    async sendMessage(phone: string, message: string) {
+        const getUrlWhatsApp = await this.prismaService.settings.findFirst({ where: { name: 'whatsApp' } })
+
+        if (!getUrlWhatsApp || getUrlWhatsApp.value.trim() == '') {
+            badResponse.message = 'No se encontró una url para whatsApp.'
+            return badResponse;
+        }
+
         try {
-            await axios.post(this.localServerUrl, { phone, message });
+            await axios.post(getUrlWhatsApp.value, { phone, message });
             return `Mensaje enviado a ${phone}`;
         } catch (error) {
             console.error(`Error al enviar mensaje a ${phone}:`, error.message);
