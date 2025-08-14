@@ -249,7 +249,17 @@ export class CollectionService {
                                 from: 'CollectionService WhatsApp',
                                 message: `Error al enviar mensaje al cliente ${rem.client.name} numero de teléfono ${rem.client.phone} no valido.`
                             }
-                        })
+                        });
+
+                        await this.prismaService.clientReminderHistory.create({
+                            data: {
+                                clientId: rem.client.id,
+                                messageId: rem.message.id,
+                                description: `Cliente ${rem.client.name} numero de teléfono ${rem.client.phone} no valido.`,
+                                sended: false,
+                                sentAt: new Date()
+                            }
+                        });
 
                         return;
                     }
@@ -262,6 +272,15 @@ export class CollectionService {
                             await this.prismaService.clientReminder.update({
                                 where: { id: rem.id },
                                 data: { sentAt: new Date() }
+                            });
+                            await this.prismaService.clientReminderHistory.create({
+                                data: {
+                                    clientId: rem.client.id,
+                                    messageId: rem.message.id,
+                                    description: '',
+                                    sended: true,
+                                    sentAt: new Date()
+                                }
                             });
                             console.log(`Mensaje enviado a ${rem.client.name}`);
                         }
