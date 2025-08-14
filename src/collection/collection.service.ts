@@ -179,8 +179,27 @@ export class CollectionService {
 
     async sendMessages() {
         try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // inicio del día
+
+            const tomorrow = new Date(today);
+            tomorrow.setDate(today.getDate() + 1);
+
             const reminder = await this.prismaService.clientReminder.findMany({
-                where: { send: true, sentAt: { not: new Date() } },
+                where: {
+                    send: true,
+                    OR: [
+                        { sentAt: null }, // nunca enviados
+                        {
+                            NOT: {
+                                sentAt: {
+                                    gte: today,
+                                    lt: tomorrow, // excluye si fue enviado entre el inicio de hoy y mañana
+                                },
+                            },
+                        },
+                    ],
+                },
                 include: {
                     client: true,
                     message: true
