@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import { badResponse, baseResponse } from 'src/dto/base.dto';
+import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
@@ -265,9 +265,9 @@ export class CollectionService {
                     }
 
                     try {
-                        // const response = await this.whatsAppService.sendMessage(phone, rem.message.content);
-                        const response = await axios.post(getUrlWhatsApp.value, { phone, message: rem.message.content });
-                        if (response) {
+                        const response: DTOBaseResponse = await this.whatsAppService.sendMessage(phone, rem.message.content);
+                        // const response = await axios.post(getUrlWhatsApp.value, { phone, message: rem.message.content });
+                        if (response.success) {
                             responseMessages.push(response);
                             await this.prismaService.clientReminder.update({
                                 where: { id: rem.id },
@@ -283,6 +283,13 @@ export class CollectionService {
                                 }
                             });
                             console.log(`Mensaje enviado a ${rem.client.name}`);
+                        } else {
+                            await this.prismaService.errorMessages.create({
+                                data: {
+                                    from: 'CollectionService WhatsApp',
+                                    message: response.message
+                                }
+                            })
                         }
 
                     } catch (err) {

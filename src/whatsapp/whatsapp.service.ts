@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 // import { Client, LocalAuth } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
+import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 // import axios from 'axios';
 // import { badResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -55,9 +56,15 @@ export class WhatsAppService {
         await this.client.initialize();
     }
 
-    async sendMessage(phone: string, message: string): Promise<string> {
-        const chatId = `${phone}@c.us`;
-        await this.client.sendMessage(chatId, message);
-        return `Mensaje enviado a ${phone}`;
+    async sendMessage(phone: string, message: string): Promise<DTOBaseResponse> {
+        try {
+            const chatId = `${phone}@c.us`;
+            await this.client.sendMessage(chatId, message);
+            baseResponse.message = `Mensaje enviado a ${phone}`;
+            return baseResponse;
+        } catch (err) {
+            badResponse.message = `Ha ocurrido un error ${err}`;
+            return badResponse;
+        }
     }
 }
