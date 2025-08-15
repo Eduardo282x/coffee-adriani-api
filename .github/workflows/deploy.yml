@@ -10,6 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Debug secrets
+      run: |
+        echo "Host: ${{ secrets.VPS_HOST }}"
+        echo "Username: ${{ secrets.VPS_USERNAME }}"
+        echo "Port: ${{ secrets.VPS_PORT }}"
+        echo "Key exists: ${{ secrets.VPS_SSH_KEY != '' }}"
+
     - name: Deploy to server
       uses: appleboy/ssh-action@v1.0.0
       with:
