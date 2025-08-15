@@ -11,7 +11,7 @@ export class ProductsService {
     constructor(private readonly prismaService: PrismaService) { }
 
     async getDolar() {
-        return await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } })
+        return await this.prismaService.historyDolar.findFirst({ orderBy: { id: 'desc' } })
     }
 
     async saveDolarAutomatic() {
