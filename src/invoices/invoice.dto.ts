@@ -1,5 +1,5 @@
 import { Transform, Type } from "class-transformer";
-import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from "class-validator";
 import { DTOInventory } from "src/inventory/inventory.dto";
 import { InvoiceStatus } from "@prisma/client";
 
@@ -25,8 +25,14 @@ export class DTOInvoice {
 
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => DTOInventory)
-    details: DTOInventory[]
+    @Type(() => DetailInvoices)
+    details: DetailInvoices[]
+}
+
+export class DetailInvoices extends DTOInventory {
+    @IsString()
+    @IsOptional()
+    type: 'GIFT' | 'SALE';
 }
 
 export interface IInvoice {

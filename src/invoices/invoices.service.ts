@@ -544,6 +544,7 @@ export class InvoicesService {
                     invoiceId: saveInvoice.id,
                     productId: det.productId,
                     quantity: det.quantity,
+                    type: det.type || 'SALE', // Default to 'SALE' if not provided
                     unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
                     unitPriceUSD: Number(findProduct.priceUSD),
                     subtotal: Number(newInvoice.priceUSD ? Number(findProduct.priceUSD) * det.quantity : Number(findProduct.price) * det.quantity),
@@ -565,13 +566,15 @@ export class InvoicesService {
                     }
                     await this.inventoryService.updateInventory(dataInventory, findInventory.id)
                 }
-            })
+            });
+
+            const calculateTotalInvoice = dataDetailsInvoice.filter(item => item.type == 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
 
             await this.prismaService.invoice.update({
                 where: { id: saveInvoice.id },
                 data: {
-                    totalAmount: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0),
-                    remaining: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0),
+                    totalAmount: calculateTotalInvoice,
+                    remaining: calculateTotalInvoice,
                 }
             })
 
@@ -622,6 +625,7 @@ export class InvoicesService {
                     invoiceId: id,
                     productId: det.productId,
                     quantity: det.quantity,
+                    type: det.type || 'SALE', // Default to 'SALE' if not provided
                     unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
                     unitPriceUSD: Number(findProduct.priceUSD),
                     subtotal: Number(newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity),
@@ -636,10 +640,12 @@ export class InvoicesService {
                 data: dataDetailsInvoice
             });
 
+            const totalAmount = dataDetailsInvoice.filter(item => item.type == 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0)
+
             await this.prismaService.invoice.update({
                 data: {
-                    totalAmount: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0),
-                    remaining: dataDetailsInvoice.reduce((acc, item) => acc + Number(item.subtotal), 0)
+                    totalAmount: totalAmount,
+                    remaining: totalAmount
                 },
                 where: { id }
             })
