@@ -11,7 +11,6 @@ export class ProductsService {
     constructor(private readonly prismaService: PrismaService) { }
 
     async getDolar() {
-        console.log('Muestra ultima tasa agregada.');
         return await this.prismaService.historyDolar.findFirst({ orderBy: { id: 'desc' } })
     }
 

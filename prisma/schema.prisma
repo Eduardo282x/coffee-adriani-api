@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -29,6 +29,7 @@ model Client {
   name                  String
   rif                   String
   address               String
+  addressSecondary      String?
   phone                 String
   zone                  String
   blockId               Int

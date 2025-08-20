@@ -14,6 +14,10 @@ export class CollectionController {
     async getClientCollection() {
         return await this.collectionService.getClientReminder();
     }
+    @Get('/history')
+    async getClientReminderHistory() {
+        return await this.collectionService.getClientReminderHistory();
+    }
     @Get('/add')
     async addClientToCollection() {
         return await this.collectionService.addClientToCollection();

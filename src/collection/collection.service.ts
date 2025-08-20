@@ -1,11 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
-import { IInvoice, ResponseInvoice } from 'src/invoices/invoice.dto';
+import { ResponseInvoice } from 'src/invoices/invoice.dto';
 import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
 
 @Injectable()
@@ -15,7 +13,6 @@ export class CollectionService {
         private readonly prismaService: PrismaService,
         private readonly invoiceService: InvoicesService,
         private readonly whatsAppService: WhatsAppService,
-        private readonly configService: ConfigService,
     ) {
     }
 
@@ -46,6 +43,25 @@ export class CollectionService {
             }));
 
             return response.filter(data => data !== null);
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async getClientReminderHistory() {
+        try {
+            const response = await this.prismaService.clientReminderHistory.findMany({
+                include: {
+                    client: true,
+                    message: true
+                },
+                orderBy: {
+                    id: 'desc'
+                }
+            });
+
+            return response;
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
@@ -203,16 +219,12 @@ export class CollectionService {
                 include: {
                     client: true,
                     message: true
-                }
+                },
             });
 
+            const removeDuplicates = [...new Map(reminder.map(item => [item.client.phone, item])).values()];
+            
             let responseMessages = [];
-            const getUrlWhatsApp = await this.prismaService.settings.findFirst({ where: { name: 'whatsApp' } })
-
-            if (!getUrlWhatsApp || getUrlWhatsApp.value.trim() == '') {
-                badResponse.message = 'No se encontró una url para whatsApp.'
-                return badResponse;
-            }
 
             const adjustPhone = (phone: string): string | null => {
                 if (typeof phone !== 'string') return null;
@@ -233,8 +245,8 @@ export class CollectionService {
 
             // Agrupar en lotes de 30
             const chunks = [];
-            for (let i = 0; i < reminder.length; i += chunkSize) {
-                chunks.push(reminder.slice(i, i + chunkSize));
+            for (let i = 0; i < removeDuplicates.length; i += chunkSize) {
+                chunks.push(removeDuplicates.slice(i, i + chunkSize));
             }
 
             for (let i = 0; i < chunks.length; i++) {
@@ -266,7 +278,6 @@ export class CollectionService {
 
                     try {
                         const response: DTOBaseResponse = await this.whatsAppService.sendMessage(phone, rem.message.content);
-                        // const response = await axios.post(getUrlWhatsApp.value, { phone, message: rem.message.content });
                         if (response.success) {
                             responseMessages.push(response);
                             await this.prismaService.clientReminder.update({
@@ -309,97 +320,15 @@ export class CollectionService {
             await this.prismaService.errorMessages.create({
                 data: {
                     from: 'CollectionServiceWhatApp Success',
-                    message: `Mensajes enviados exitosamente a ${responseMessages.length} de ${reminder.length}.`
+                    message: `Mensajes enviados exitosamente a ${responseMessages.length} de ${removeDuplicates.length}.`
                 }
             })
 
-            baseResponse.message = `Mensajes enviados exitosamente a ${responseMessages.length} de ${reminder.length}.`
+            baseResponse.message = `Mensajes enviados exitosamente a ${responseMessages.length} de ${removeDuplicates.length}.`
             return baseResponse;
         } catch (err) {
             console.error('Error en envío masivo:', err);
             return { message: 'Error enviando mensajes', error: err.message };
-        }
-    }
-
-
-    // async sendReminder(clientId: number) {
-    //     const reminder = await this.prismaService.clientReminder.findFirst({
-    //         where: { clientId, send: true },
-    //         include: {
-    //             client: true,
-    //             message: true
-    //         }
-    //     });
-
-    //     if (!reminder) throw new Error('No hay recordatorio configurado.');
-
-    //     const phone = reminder.client.phone; // Asegúrate de tener el formato +58...
-    //     const message = reminder.message.content;
-
-    //     const result = await this.sendWhatsAppMessage(phone, message);
-    //     // const result = await this.whatsAppService.sendMessage(phone, message);
-
-    //     await this.prismaService.clientReminder.update({
-    //         where: { id: reminder.id },
-    //         data: { sentAt: new Date() }
-    //     });
-
-    //     return result;
-    // }
-
-    async sendWhatsAppMessage(phone: string, message: string) {
-        const WHATSAPP_TOKEN = this.configService.get<string>('WHATSAPP_TOKEN');
-        const WHATSAPP_PHONE_ID = this.configService.get<string>('WHATSAPP_PHONE_ID');
-
-        try {
-            const url = `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/messages`;
-
-            const response = await axios.post(
-                url,
-                {
-                    messaging_product: 'whatsapp',
-                    to: phone,
-                    type: 'text',
-                    text: {
-                        body: message
-                    }
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-                        'Content-Type': 'application/json'
-                    }
-                }
-            );
-
-            return response.data;
-        } catch (error) {
-            console.error('Error al enviar mensaje por WhatsApp:', error.response?.data || error.message);
-            throw error;
-        }
-    }
-
-    async sendWhatsAppMessageTwilio(phone: string, message: string) {
-        const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
-        const authToken = this.configService.get<string>('TWILIO_ACCOUNT_TOKEN');
-        const phoneNumberProvider = this.configService.get<string>('TWILIO_NUMBER_TEXT');
-
-        try {
-            const client = require('twilio')(accountSid, authToken);
-
-            client.messages
-                .create({
-                    body: message,
-                    from: `whatsapp:+${phoneNumberProvider}`,
-                    to: `whatsapp:+${phone}`
-                })
-                .then(message => console.log(message.sid))
-                .done();
-
-            // return response.data;
-        } catch (error) {
-            console.error('Error al enviar mensaje por WhatsApp:', error.response?.data || error.message);
-            throw error;
         }
     }
 }
