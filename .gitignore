@@ -21,6 +21,7 @@ lerna-debug.log*
 
 # WhatsApp Folders
 /.wwebjs_auth
+/.wwebjs_cache
 
 # IDEs and editors
 /.idea
