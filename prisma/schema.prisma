@@ -146,18 +146,18 @@ model InvoiceProduct {
   product      Product @relation(fields: [productId], references: [id])
   productId    Int
   quantity     Int
-  // type         InvoiceTypeProduct @default(SALE)
+  type         InvoiceTypeProduct @default(SALE)
   unitPriceUSD Decimal @default(0) @db.Decimal(10, 2)
   unitPrice    Decimal @db.Decimal(10, 2)
   subtotal     Decimal @db.Decimal(10, 2)
 
-  @@unique([invoiceId, productId]) // No se puede repetir el producto en la misma factura
+  @@unique([invoiceId, productId, type]) // No se puede repetir el producto en la misma factura
 }
 
-// enum InvoiceTypeProduct {
-//   GIFT
-//   SALE
-// }
+enum InvoiceTypeProduct {
+  GIFT
+  SALE
+}
 
 model AccountsPayments {
   id        Int           @id @default(autoincrement())
