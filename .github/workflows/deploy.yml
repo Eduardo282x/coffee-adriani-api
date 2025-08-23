@@ -28,6 +28,6 @@ jobs:
         script: |
           cd /root/backend/coffee-adriani-api
           git pull
-          npm install --force
+          npm install --legacy-peer-deps && npx prisma generate && npm run build
           pm2 restart coffee-adriani-api || pm2 start "npm run start:prod" --name "coffee-adriani-api"
           pm2 save
