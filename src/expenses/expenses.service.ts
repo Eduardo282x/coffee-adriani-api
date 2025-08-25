@@ -51,6 +51,11 @@ export class ExpensesService {
                         gte: expenseFilter.startDate,
                         lte: expenseFilter.endDate,
                     },
+                    invoiceItems: {
+                        none: {
+                            type: 'GIFT'
+                        }
+                    }
                 },
                 include: {
                     invoiceItems: {
@@ -73,6 +78,9 @@ export class ExpensesService {
                     },
                 },
             });
+
+            console.log(invoices.length);
+            
 
             const historyProducts = await this.prismaService.historyProduct.findMany({});
 
@@ -271,15 +279,20 @@ export class ExpensesService {
             const invoices = await this.prismaService.invoice.findMany({
                 where: {
                     status: 'Pagado',
-                    remaining: {
-                        not: 0
-                    },
+                    OR: [
+                        { remaining: { not: 0 } },
+                        {
+                            invoiceItems: {
+                                some: { type: 'GIFT' }
+                            }
+                        }
+                    ],
                     dispatchDate: {
                         gte: expenseFilter.startDate,
                         lte: expenseFilter.endDate
                     }
                 },
-                include: { client: true }
+                include: { client: true, invoiceItems: { include: { product: true } } }
             })
 
             return invoices;
