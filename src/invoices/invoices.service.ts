@@ -721,6 +721,19 @@ export class InvoicesService {
             return badResponse
         }
     }
+    async markClean(id: number) {
+        try {
+            await this.prismaService.invoice.update({
+                where: { id },
+                data: { remaining: 0 }
+            })
+            baseResponse.message = 'Factura Limpiada.'
+            return baseResponse;
+        } catch (err) {
+            baseResponse.message = err.message;
+            return badResponse
+        }
+    }
 
     async deleteInvoice(id: number) {
         try {

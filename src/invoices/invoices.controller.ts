@@ -70,6 +70,10 @@ export class InvoicesController {
     async markPending(@Param('id', ParseIntPipe) id: number) {
         return await this.invoicesService.markPending(id);
     }
+    @Put('/clean/:id')
+    async markClean(@Param('id', ParseIntPipe) id: number) {
+        return await this.invoicesService.markClean(id);
+    }
 
     @Put('/:id')
     async updateInvoice(@Param('id', ParseIntPipe) id: number, @Body() updatedInvoice: DTOInvoice) {
