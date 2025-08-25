@@ -8,6 +8,9 @@ export class DTOClients {
     rif: string;
     @IsString()
     address: string;
+    @IsString()
+    @IsOptional()
+    addressSecondary: string;
     @IsOptional()
     @IsString()
     // @IsPhoneNumber('VE')

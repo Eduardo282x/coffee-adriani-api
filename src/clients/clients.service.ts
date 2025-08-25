@@ -130,6 +130,7 @@ export class ClientsService {
                     name: newClient.name,
                     rif: newClient.rif,
                     address: newClient.address,
+                    addressSecondary: newClient.addressSecondary,
                     phone: newClient.phone ? newClient.phone : '',
                     zone: newClient.zone,
                     blockId: newClient.blockId,
@@ -156,6 +157,7 @@ export class ClientsService {
                     name: client.name,
                     rif: client.rif,
                     address: client.address,
+                    addressSecondary: client.addressSecondary,
                     phone: client.phone,
                     zone: client.zone,
                     blockId: client.blockId,
@@ -186,13 +188,13 @@ export class ClientsService {
 
     async reportClients(client: DTOReportClients): Promise<Buffer | DTOBaseResponse> {
         try {
-            const where: any = { active: true };
+            const where: any = {};
 
             if (client.zone) {
                 where.zone = { equals: client.zone, mode: 'insensitive' };
             }
 
-            if (client.blockId) {
+            if (client.blockId && client.blockId != 0) {
                 where.blockId = client.blockId;
             }
 
