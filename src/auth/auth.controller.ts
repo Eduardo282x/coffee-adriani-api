@@ -13,4 +13,8 @@ export class AuthController {
     async authLogin(@Body() credentials: DTOLogin) {
         return await this.authService.login(credentials);
     }
+    @Post('/recover')
+    async authRecover(@Body() credentials: DTOLogin) {
+        return await this.authService.recover(credentials);
+    }
 }

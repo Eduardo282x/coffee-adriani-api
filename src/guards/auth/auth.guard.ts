@@ -10,7 +10,7 @@ export class AuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request: Request = context.switchToHttp().getRequest();
 
-    if (request.url === '/api/auth' || request.url === '/api/mainload' ) return true;
+    if (request.url === '/api/auth' || request.url === '/api/auth/recover' || request.url === '/api/mainload' ) return true;
 
     const authHeader = request.headers['authorization'];
     if (!authHeader) throw new UnauthorizedException('Token no enviado');

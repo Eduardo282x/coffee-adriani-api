@@ -55,4 +55,35 @@ export class AuthService {
             return badResponse;
         }
     }
+
+    async recover(credentials: DTOLogin): Promise<DTOBaseResponse> {
+        try {
+            const findUser = await this.prismaService.users.findFirst({
+                where: {
+                    username: credentials.username,
+                }
+            })
+
+            if (!findUser) {
+                badResponse.message = 'Usuario no encontrados.';
+                return badResponse;
+            }
+
+            const updateUser = await this.prismaService.users.update({
+                where: { id: findUser.id },
+                data: { password: credentials.password },
+                include: { roles: true }
+            })
+
+            baseResponse.message = `Contraseña Recuperada.`;
+
+            return baseResponse;
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'AuthService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
 }
