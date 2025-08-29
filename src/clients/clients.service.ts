@@ -6,7 +6,7 @@ import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
 import * as PDFDocument from 'pdfkit';
 // import * as fs from 'fs';
 import * as stream from 'stream';
-import { PassThrough } from 'stream';
+import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class ClientsService {
@@ -21,6 +21,58 @@ export class ClientsService {
             include: { block: true },
             orderBy: { id: 'asc' }
         })
+    }
+
+    async getClientExcel(): Promise<Buffer> {
+        const clients = await this.prismaService.client.findMany({
+            where: { active: true },
+            include: { block: true },
+            orderBy: { id: 'asc' }
+        });
+
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Clientes');
+
+        // Cabecera
+        worksheet.addRow([
+            'ID',
+            'Nombre',
+            'RIF',
+            'Dirección',
+            'Dirección Secundaria',
+            'Teléfono',
+            'Zona',
+            'Bloque',
+            'Activo',
+        ]);
+
+        // Datos
+        clients.forEach(cli => {
+            worksheet.addRow([
+                cli.id,
+                cli.name,
+                cli.rif,
+                cli.address,
+                cli.addressSecondary || '',
+                cli.phone,
+                cli.zone,
+                cli.block ? cli.block.name : '',
+                cli.active ? 'Sí' : 'No',
+            ]);
+        });
+
+        // Ajustar ancho de columnas automáticamente
+        worksheet.columns.forEach(column => {
+            let maxLength = 10;
+            column.eachCell({ includeEmpty: true }, cell => {
+                maxLength = Math.max(maxLength, (cell.value ? cell.value.toString().length : 0));
+            });
+            column.width = maxLength + 2;
+        });
+
+        const arrayBuffer = await workbook.xlsx.writeBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        return Buffer.from(buffer);
     }
 
     async formatNumberClients() {

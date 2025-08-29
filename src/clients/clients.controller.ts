@@ -17,11 +17,18 @@ export class ClientsController {
     async formatNumberClients() {
         return await this.clientService.formatNumberClients();
     }
+    @Get('/excel')
+    async getClientExcel(@Res() res: Response) {
+        const buffer = await this.clientService.getClientExcel();
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=clientes.xlsx');
+        res.send(buffer);
+    }
     @Post()
     async createClients(@Body() client: DTOClients) {
         return await this.clientService.createClients(client);
     }
-    
+
     @Post('/report')
     async reportClients(@Body() report: DTOReportClients, @Res() res: Response) {
         try {
