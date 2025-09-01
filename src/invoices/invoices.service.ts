@@ -1048,7 +1048,7 @@ export class InvoicesService {
         const ws1 = workbook.addWorksheet('Facturas');
 
         const baseHeaders = [
-            'N° Control', 'Cliente', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
+            'N° Control', 'Cliente', 'Teléfono','Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
         ];
 
         const productHeaders = productNames.flatMap(name => [`${name}`, `Precio`]);
@@ -1064,6 +1064,7 @@ export class InvoicesService {
             const rowData: (string | number | Date)[] = [
                 inv.controlNumber,
                 inv.client.name,
+                inv.client.phone,
                 inv.client.block.name,
                 inv.client.address,
                 inv.client.zone,
@@ -1101,7 +1102,7 @@ export class InvoicesService {
             };
             const fillColor = colorMap[inv.status as keyof typeof colorMap];
             if (fillColor) {
-                row.getCell(10).fill = {
+                row.fill = {
                     type: 'pattern',
                     pattern: 'solid',
                     fgColor: { argb: fillColor },
