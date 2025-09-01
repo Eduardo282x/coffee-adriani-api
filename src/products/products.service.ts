@@ -15,12 +15,17 @@ export class ProductsService {
     }
 
     async saveDolarAutomatic() {
-        const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
-        const parseResponse = {
-            dolar: response.price,
-            date: parseCustomDate(response.last_update)
+        try {
+            const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
+            const parseResponse = {
+                dolar: response.price,
+                date: parseCustomDate(response.last_update)
+            }
+            return await this.saveDolar(parseResponse);
+        } catch (err) {
+            badResponse.message = 'Error al obtener el precio del dolar en estos momentos.'
+            return badResponse;
         }
-        return await this.saveDolar(parseResponse);
     }
 
     async saveDolar(dolar: DTODolar) {
@@ -45,7 +50,7 @@ export class ProductsService {
     async getProducts() {
         try {
             const getDolar = await this.getDolar();
-            
+
             return await this.prismaService.product.findMany({
                 orderBy: { id: 'asc' }
             }).then(res =>
