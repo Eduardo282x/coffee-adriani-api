@@ -1,7 +1,7 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Res } from '@nestjs/common';
 import { CollectionService } from './collection.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
-
+import { Response } from 'express';
 
 @Controller('collection')
 export class CollectionController {
@@ -26,6 +26,16 @@ export class CollectionController {
     async getMessages() {
         return await this.collectionService.getMessages();
     }
+
+
+    @Get('/export')
+    async exportInvoicesExcel(@Res() res: Response) {
+        const buffer = await this.collectionService.exportExcelCollection();
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=Cobranza.xlsx');
+        res.send(buffer);
+    }
+
     @Post('/messages')
     async createMessages(@Body() message: MessageDTO) {
         return await this.collectionService.createMessages(message);

@@ -5,6 +5,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 import { ResponseInvoice } from 'src/invoices/invoice.dto';
 import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
+import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class CollectionService {
@@ -20,29 +21,47 @@ export class CollectionService {
         try {
             const invoicesExpired: ResponseInvoice = await this.invoiceService.getInvoicesExpired() as ResponseInvoice;
 
-            const response = await this.prismaService.clientReminder.findMany({
+            // Crear un Map para búsquedas O(1) en lugar de find() O(n)
+            const invoicesMap = new Map();
+            if (invoicesExpired.invoices && invoicesExpired.invoices.length > 0) {
+                invoicesExpired.invoices.forEach(inv => {
+                    if (inv.client?.id && inv.invoices) {
+                        invoicesMap.set(inv.client.id, inv.invoices);
+                    }
+                });
+            }
+
+            const clientReminders = await this.prismaService.clientReminder.findMany({
                 include: {
-                    client: { include: { block: true, } },
+                    client: { include: { block: true } },
                     message: true
                 },
                 orderBy: {
                     id: 'asc'
                 }
-            }).then(item => item.map(data => {
-                const arrayInvoices = invoicesExpired.invoices && invoicesExpired.invoices.length > 0 ? invoicesExpired.invoices : []
-                const findClient = arrayInvoices.find(inv => inv.client.id == data.clientId);
+            });
 
-                if (!findClient || !findClient.invoices) {
-                    return null;
-                }
-                return {
-                    ...data,
-                    invoices: findClient.invoices,
-                    total: findClient.invoices.reduce((acc, inv) => acc + Number(inv.totalAmount), 0)
-                }
-            }));
+            // Procesar solo los clientes que tienen facturas vencidas
+            const response = clientReminders
+                .map(data => {
+                    const clientInvoices = invoicesMap.get(data.clientId);
 
-            return response.filter(data => data !== null);
+                    if (!clientInvoices) {
+                        return null;
+                    }
+
+                    // Calcular total una sola vez
+                    const total = clientInvoices.reduce((acc, inv) => acc + Number(inv.totalAmount), 0);
+
+                    return {
+                        ...data,
+                        invoices: clientInvoices,
+                        total
+                    };
+                })
+                .filter(Boolean); // Más eficiente que comparar con null
+
+            return response;
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
@@ -68,6 +87,94 @@ export class CollectionService {
         }
     }
 
+    async exportExcelCollection() {
+        const collection = await this.prismaService.clientReminder.findMany({
+            include: {
+                client: { include: { block: true, } },
+                message: true
+            },
+            orderBy: {
+                id: 'asc'
+            }
+        });
+
+        const invoicesClients = await this.prismaService.invoice.findMany({
+            where: {
+                clientId: {
+                    in: collection.map(col => col.clientId)
+                },
+                status: 'Vencida'
+            },
+            include: {
+                client: { include: { block: true } },
+            },
+            orderBy: {
+                clientId: 'asc'
+            }
+        })
+
+        const workbook = new ExcelJS.Workbook();
+
+        // Hoja 1 - Cobranza
+        const ws1 = workbook.addWorksheet('Cobranza');
+
+        const headerCollection = [
+            'Cliente', 'Teléfono', 'Bloque', 'Dirección', 'Zona', 'Mensaje', 'Enviar'
+        ];
+
+        ws1.addRow(headerCollection);
+        ws1.getRow(1).font = { bold: true };
+
+        collection.map(item => {
+            const rowData = [
+                item.client.name,
+                item.client.phone,
+                item.client.block.name,
+                item.client.address,
+                item.client.zone,
+                item.message.content,
+                item.send ? 'Sí' : 'No'
+            ]
+
+            const row = ws1.addRow(rowData);
+
+            row.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: item.send ? 'dbeafe' : 'ffe2e2' },
+            };
+        })
+
+        const ws2 = workbook.addWorksheet('Facturas');
+
+        const headerInvoices = [
+            'N° Control', 'Cliente', 'Teléfono', 'Bloque', 'Dirección', 'Zona', 'Estado', 'Fecha Despacho', 'Fecha Vencimiento', 'Total', 'Debe'
+        ];
+
+        ws2.addRow(headerInvoices);
+        ws2.getRow(1).font = { bold: true };
+
+        invoicesClients.map(item => {
+            const rowData = [
+                item.controlNumber,
+                item.client.name,
+                item.client.phone,
+                item.client.block.name,
+                item.client.address,
+                item.client.zone,
+                item.status,
+                item.dispatchDate,
+                item.dueDate,
+                Number(item.totalAmount),
+                Number(item.remaining)
+            ]
+            ws2.addRow(rowData);
+        });
+
+        const arrayBuffer = await workbook.xlsx.writeBuffer();
+        const buffer = Buffer.from(arrayBuffer); // <-- Conversión correcta
+        return buffer;
+    }
     async getMessages() {
         return await this.prismaService.message.findMany({
             orderBy: { id: 'asc' }
@@ -223,7 +330,7 @@ export class CollectionService {
             });
 
             const removeDuplicates = [...new Map(reminder.map(item => [item.client.phone, item])).values()];
-            
+
             let responseMessages = [];
 
             const adjustPhone = (phone: string): string | null => {
