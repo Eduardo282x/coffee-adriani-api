@@ -314,7 +314,7 @@ export class InvoicesService {
 
                     const findClientReminder = clientReminderList.find(item => item.clientId == inv.clientId);
 
-                    if(findClientReminder){
+                    if (findClientReminder) {
                         return;
                     }
 
@@ -555,18 +555,14 @@ export class InvoicesService {
             })
 
             newInvoice.details.map(async (det) => {
-                const findInventory = inventory.find(inv => inv.productId === det.productId);
-
-                if (findInventory) {
-                    const dataInventory = {
-                        productId: findInventory.productId,
-                        price: det.price,
-                        priceUSD: det.priceUSD,
-                        quantity: findInventory.quantity - det.quantity,
-                        description: `Salida de producto por factura ${saveInvoice.controlNumber}`
-                    }
-                    await this.inventoryService.updateInventory(dataInventory, findInventory.id)
+                const dataInventory = {
+                    productId: det.productId,
+                    price: det.price,
+                    priceUSD: det.priceUSD,
+                    quantity: det.quantity,
+                    description: `Salida de producto por factura ${saveInvoice.controlNumber}`
                 }
+                await this.inventoryService.updateInventoryInvoice(dataInventory)
             });
 
             const calculateTotalInvoice = dataDetailsInvoice.filter(item => item.type == 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
@@ -1048,7 +1044,7 @@ export class InvoicesService {
         const ws1 = workbook.addWorksheet('Facturas');
 
         const baseHeaders = [
-            'N° Control', 'Cliente', 'Teléfono','Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
+            'N° Control', 'Cliente', 'Teléfono', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
         ];
 
         const productHeaders = productNames.flatMap(name => [`${name}`, `Precio`]);

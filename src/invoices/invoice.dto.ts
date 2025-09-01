@@ -1,5 +1,5 @@
 import { Transform, Type } from "class-transformer";
-import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, ValidateNested } from "class-validator";
 import { DTOInventory } from "src/inventory/inventory.dto";
 import { InvoiceStatus } from "@prisma/client";
 
@@ -33,6 +33,12 @@ export class DetailInvoices extends DTOInventory {
     @IsString()
     @IsOptional()
     type: 'GIFT' | 'SALE';
+    @IsNumber()
+    @IsPositive()
+    price: number;
+    @IsNumber()
+    @IsPositive()
+    priceUSD: number;
 }
 
 export interface IInvoice {

@@ -83,7 +83,8 @@ export class InventoryService {
                     productId: inventory.productId,
                     quantity: inventory.quantity,
                     movementType: 'IN',
-                    description: `Entrada de mercancía`
+                    description: `Entrada de mercancía`,
+                    movementDate: new Date(inventory.date)
                 }
             })
 
@@ -127,6 +128,42 @@ export class InventoryService {
                 badResponse.message = 'No se encontró el producto en el inventario.';
                 return badResponse;
             }
+
+            baseResponse.message = 'Producto actualizado en inventario.'
+            return baseResponse
+        }
+        catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'inventoryService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async updateInventoryInvoice(inventory: DTOInventory) {
+        try {
+            const findProductInventory = await this.prismaService.inventory.findFirst({
+                where: {productId: inventory.productId}
+            })
+
+            const findProductInInventory = await this.prismaService.inventory.update({
+                where: { id: findProductInventory.id },
+                data: {
+                    quantity: {
+                        decrement: inventory.quantity
+                    }
+                },
+            });
+
+            await this.prismaService.historyInventory.create({
+                data: {
+                    productId: findProductInInventory.productId,
+                    quantity: inventory.quantity,
+                    description: inventory.description,
+                    movementType: 'OUT'
+                }
+            });
 
             baseResponse.message = 'Producto actualizado en inventario.'
             return baseResponse
