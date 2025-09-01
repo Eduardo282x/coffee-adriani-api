@@ -6,6 +6,12 @@ export class DTOInventory {
     productId: number;
     @IsNumber()
     @IsPositive()
+    price: number;
+    @IsNumber()
+    @IsPositive()
+    priceUSD: number;
+    @IsNumber()
+    @IsPositive()
     quantity: number;
 
     @IsString()

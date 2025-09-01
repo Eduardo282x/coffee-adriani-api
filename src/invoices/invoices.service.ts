@@ -539,15 +539,14 @@ export class InvoicesService {
             })
 
             const dataDetailsInvoice = newInvoice.details.map(det => {
-                const findProduct = products.find(prod => prod.id === det.productId);
                 return {
                     invoiceId: saveInvoice.id,
                     productId: det.productId,
                     quantity: det.quantity,
                     type: det.type || 'SALE', // Default to 'SALE' if not provided
-                    unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
-                    unitPriceUSD: Number(findProduct.priceUSD),
-                    subtotal: Number(newInvoice.priceUSD ? Number(findProduct.priceUSD) * det.quantity : Number(findProduct.price) * det.quantity),
+                    unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+                    unitPriceUSD: Number(det.priceUSD),
+                    subtotal: Number(newInvoice.priceUSD ? Number(det.priceUSD) * det.quantity : Number(det.price) * det.quantity),
                 }
             })
 
@@ -561,6 +560,8 @@ export class InvoicesService {
                 if (findInventory) {
                     const dataInventory = {
                         productId: findInventory.productId,
+                        price: det.price,
+                        priceUSD: det.priceUSD,
                         quantity: findInventory.quantity - det.quantity,
                         description: `Salida de producto por factura ${saveInvoice.controlNumber}`
                     }
@@ -620,16 +621,14 @@ export class InvoicesService {
 
             // if (invoice.invoiceItems.length === newInvoice.details.length) {
             const dataDetailsInvoice = newInvoice.details.map(det => {
-                const findProduct = products.find(prod => prod.id === det.productId);
-
                 return {
                     invoiceId: id,
                     productId: det.productId,
                     quantity: det.quantity,
                     type: det.type || 'SALE', // Default to 'SALE' if not provided
-                    unitPrice: Number(newInvoice.priceUSD ? findProduct.priceUSD : findProduct.price),
-                    unitPriceUSD: Number(findProduct.priceUSD),
-                    subtotal: Number(newInvoice.priceUSD ? findProduct.priceUSD : Number(findProduct.price) * det.quantity),
+                    unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+                    unitPriceUSD: Number(det.priceUSD),
+                    subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
                 }
             });
 
