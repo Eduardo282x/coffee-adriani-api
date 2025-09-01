@@ -158,7 +158,7 @@ export class InvoicesService {
             }).then(item => item.map(data => {
                 return {
                     ...data,
-                    specialPrice: data.invoiceItems.reduce((acc, det) => acc + (Number(det.unitPriceUSD) * det.quantity), 0),
+                    specialPrice: data.invoiceItems.filter(item => item.type == 'SALE').reduce((acc, det) => acc + (Number(det.unitPriceUSD) * det.quantity), 0),
                 }
             }))
 

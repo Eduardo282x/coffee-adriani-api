@@ -14,15 +14,6 @@ export class PaymentDTO {
     paymentDate: Date;
 }
 
-export class PayInvoiceDetailsDTO {
-    @IsNumber()
-    @IsNotEmpty({ message: 'La numero de factura debe ser numero' })
-    invoiceId: number;
-    @IsNumber()
-    @IsNotEmpty({ message: 'La cantidad debe ser numero' })
-    amount: number;
-}
-
 export class PayInvoiceDTO {
     @IsNumber()
     paymentId: number;
@@ -30,6 +21,15 @@ export class PayInvoiceDTO {
     @ValidateNested({ each: true })
     @Type(() => PayInvoiceDetailsDTO)
     details: PayInvoiceDetailsDTO[];
+}
+
+export class PayInvoiceDetailsDTO {
+    @IsNumber()
+    @IsNotEmpty({ message: 'La numero de factura debe ser numero' })
+    invoiceId: number;
+    @IsNumber()
+    @IsNotEmpty({ message: 'La cantidad debe ser numero' })
+    amount: number;
 }
 
 export class PayDisassociateDTO {

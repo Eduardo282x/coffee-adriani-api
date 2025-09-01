@@ -235,96 +235,202 @@ export class PaymentsService {
                 include: { account: { include: { method: true } }, dolar: true }
             });
 
-            if (Number(totalInvoices) > Number(findPayment.amount)) {
-                badResponse.message = 'La cantidad a pagar excede la cantidad del pago.'
+            if (!findPayment) {
+                badResponse.message = 'Pago no encontrado.';
                 return badResponse;
             }
 
-            pay.details.map(async (pay) => {
-                let findInvoice = await this.prismaService.invoice.findFirst({
-                    where: { id: pay.invoiceId },
+            if (Number(totalInvoices) > Number(findPayment.amount)) {
+                badResponse.message = 'La cantidad a pagar excede la cantidad del pago.';
+                return badResponse;
+            }
+
+            // Procesar cada detalle de pago secuencialmente para evitar problemas de concurrencia
+            for (const payDetail of pay.details) {
+                const findInvoice = await this.prismaService.invoice.findFirst({
+                    where: { id: payDetail.invoiceId },
                     include: { invoiceItems: true }
                 });
 
                 if (!findInvoice) {
-                    throw new Error(`Factura con ID ${pay.invoiceId} no encontrada.`);
+                    throw new Error(`Factura con ID ${payDetail.invoiceId} no encontrada.`);
                 }
 
                 if (findInvoice.status === 'Pagado') {
                     throw new Error(`La factura #${findInvoice.controlNumber} ya está pagada.`);
                 }
 
-                // const totalAmountPay = findPayment.account.method.currency === 'BS'
-                //     ? pay.amount / Number(findPayment.dolar.dolar)
-                //     : pay.amount
+                // Buscar el último pago de esta factura para determinar el tipo de moneda
+                const findLastPaymentInvoice = await this.prismaService.invoicePayment.findFirst({
+                    where: {
+                        invoiceId: payDetail.invoiceId
+                    },
+                    orderBy: {
+                        createdAt: 'desc'
+                    }
+                });
 
-                if (findPayment.account.method.currency == 'USD' && Number(findInvoice.remaining) == Number(findInvoice.totalAmount)) {
-                    const newTotalUSD = findInvoice.invoiceItems.reduce((acc, item) => acc + (Number(item.unitPriceUSD) * item.quantity), 0)
-                    findInvoice = await this.prismaService.invoice.update({
-                        data: { totalAmount: Number(newTotalUSD).toFixed(2), remaining: Number(newTotalUSD).toFixed(2) },
-                        include: { invoiceItems: true },
-                        where: { id: findInvoice.id }
+                let typeLastPay = '';
+                if (findLastPaymentInvoice) {
+                    const lastPayment = await this.prismaService.payment.findFirst({
+                        where: {
+                            id: findLastPaymentInvoice.paymentId
+                        },
+                        include: {
+                            account: {
+                                include: {
+                                    method: true
+                                }
+                            }
+                        }
                     });
-
-                    findInvoice.invoiceItems.map(async (item) => {
-                        await this.prismaService.invoiceProduct.update({
-                            data: {
-                                unitPrice: item.unitPriceUSD,
-                                subtotal: Number(item.unitPriceUSD) * item.quantity
-                            },
-                            where: { id: item.id }
-                        })
-                    })
+                    typeLastPay = lastPayment.account.method.currency;
                 }
 
+                // Recalcular total si el pago actual es en USD
+                if (findPayment.account.method.currency === 'USD') {
+                    // Obtener el primer elemento para los cálculos (asumiendo precios uniformes)
+                    const firstElement = findInvoice.invoiceItems.filter(item => item.type !== 'GIFT')[0];
+                    if (!firstElement) {
+                        throw new Error(`No se encontraron elementos en la factura ${findInvoice.controlNumber}`);
+                    }
+
+                    // Calcular total de bultos en la factura
+                    const cantidadBultosTotal = findInvoice.invoiceItems.filter(item => item.type !== 'GIFT').reduce((acc, item) => acc + item.quantity, 0);
+
+                    let nuevoTotal = 0;
+                    let nuevoPagadoTotal = 0;
+
+                    // Si existe historial de pagos, usar tu lógica de nuevoTotal2
+                    if (findLastPaymentInvoice && typeLastPay !== '') {
+                        // Calcular bultos que faltan por pagar basándose en el último tipo de pago
+                        const calculateBultosPagados = typeLastPay === 'USD'
+                            ? Number(firstElement.unitPriceUSD)
+                            : Number(firstElement.unitPrice);
+
+                        const bultosFaltanPagar = Number(findInvoice.remaining) / calculateBultosPagados;
+
+                        // Calcular cuántos bultos corresponden al pago actual en USD
+                        const bultosPagoUSD = payDetail.amount / Number(firstElement.unitPriceUSD);
+
+                        // Validar que no se exceda la cantidad de bultos que faltan por pagar
+                        if (bultosPagoUSD > bultosFaltanPagar) {
+                            throw new Error(`El pago excede la cantidad de bultos restantes (${bultosFaltanPagar.toFixed(2)}) en la factura.`);
+                        }
+
+                        // Aplicar tu lógica de nuevoTotal2
+                        const bultosYaPagados = cantidadBultosTotal - bultosFaltanPagar;
+                        const recalculateBS2 = (bultosYaPagados * Number(firstElement.unitPrice)) +
+                            ((bultosFaltanPagar - bultosPagoUSD) * Number(firstElement.unitPrice));
+                        const recalculateUSD2 = bultosPagoUSD * Number(firstElement.unitPriceUSD);
+                        nuevoTotal = recalculateBS2 + recalculateUSD2;
+
+                        // El pagado total es lo que ya se había pagado más este pago
+                        nuevoPagadoTotal = Number(findInvoice.totalAmount) - Number(findInvoice.remaining) + payDetail.amount;
+                    } else {
+                        // Primera vez pagando en USD - lógica original
+                        const totalPagado = Number(findInvoice.totalAmount) - Number(findInvoice.remaining);
+                        nuevoPagadoTotal = totalPagado + payDetail.amount;
+
+                        // Calcular bultos pagados en USD (incluyendo este pago)
+                        const bultosPagadosUSD = nuevoPagadoTotal / Number(firstElement.unitPriceUSD);
+
+                        // Validar que no se exceda la cantidad de bultos
+                        if (bultosPagadosUSD > cantidadBultosTotal) {
+                            throw new Error(`El pago excede la cantidad total de productos en la factura.`);
+                        }
+
+                        // Calcular bultos restantes que se pagarán en BS
+                        const cantidadBultosBS = cantidadBultosTotal - bultosPagadosUSD;
+
+                        // Recalcular totales
+                        const recalculateBS = cantidadBultosBS * Number(firstElement.unitPrice);
+                        const recalculateUSD = bultosPagadosUSD * Number(firstElement.unitPriceUSD);
+                        nuevoTotal = recalculateBS + recalculateUSD;
+                    }
+
+                    // Validaciones del nuevo total
+                    const totalEnUSD = cantidadBultosTotal * Number(firstElement.unitPriceUSD);
+                    const totalEnBS = cantidadBultosTotal * Number(firstElement.unitPrice);
+
+                    if (nuevoTotal < totalEnUSD || nuevoTotal > totalEnBS) {
+                        throw new Error(`El nuevo total calculado (${nuevoTotal.toFixed(2)}) no está en el rango válido entre USD total (${totalEnUSD}) y BS total (${totalEnBS}).`);
+                    }
+
+                    // Calcular nuevo restante
+                    const nuevoRestante = nuevoTotal - nuevoPagadoTotal;
+
+                    // Actualizar la factura con el nuevo total y restante
+                    await this.prismaService.invoice.update({
+                        where: { id: findInvoice.id },
+                        data: {
+                            totalAmount: nuevoTotal,
+                            remaining: nuevoRestante,
+                            status: nuevoRestante <= 2 ? 'Pagado' : 'Pendiente'
+                        }
+                    });
+
+                    // Si la factura queda pagada, eliminar recordatorio del cliente
+                    if (nuevoRestante <= 2) {
+                        const findClientReminder = await this.prismaService.clientReminder.findFirst({
+                            where: { clientId: findInvoice.clientId }
+                        });
+
+                        if (findClientReminder) {
+                            await this.prismaService.clientReminder.delete({
+                                where: { id: findClientReminder.id }
+                            });
+                        }
+                    }
+                } else {
+                    // Pago en BS - solo actualizar remaining y status
+                    const nuevoRestante = Number(findInvoice.remaining) - payDetail.amount;
+                    const statusInvoice = nuevoRestante <= 2 ? 'Pagado' : 'Pendiente';
+
+                    await this.prismaService.invoice.update({
+                        where: { id: findInvoice.id },
+                        data: {
+                            remaining: nuevoRestante,
+                            status: statusInvoice
+                        }
+                    });
+
+                    // Si la factura queda pagada, eliminar recordatorio del cliente
+                    if (statusInvoice === 'Pagado') {
+                        const findClientReminder = await this.prismaService.clientReminder.findFirst({
+                            where: { clientId: findInvoice.clientId }
+                        });
+
+                        if (findClientReminder) {
+                            await this.prismaService.clientReminder.delete({
+                                where: { id: findClientReminder.id }
+                            });
+                        }
+                    }
+                }
+
+                // Crear el registro de pago
                 await this.prismaService.invoicePayment.create({
                     data: {
                         invoiceId: findInvoice.id,
                         paymentId: findPayment.id,
-                        amount: pay.amount
+                        amount: payDetail.amount
                     }
                 });
 
-                const calculateRemaining = findPayment.account.method.currency == 'BS'
-                    ? ((Number(findPayment.amount) / Number(findPayment.dolar.dolar)) - pay.amount) * Number(findPayment.dolar.dolar)
-                    : Number(findPayment.amount) - pay.amount;
-
+                // Actualizar el remaining del pago
                 await this.prismaService.payment.update({
-                    data: { remaining: Number(calculateRemaining) },
-                    where: { id: findPayment.id }
-                });
-
-                const statusInvoices = Number(findInvoice.remaining) - pay.amount <= 2 ? 'Pagado' : 'Pendiente';
-
-                await this.prismaService.invoice.update({
-                    where: { id: findInvoice.id },
+                    where: { id: findPayment.id },
                     data: {
                         remaining: {
-                            decrement: pay.amount,
-                        },
-                        status: statusInvoices
-                    },
-                });
-
-                if (statusInvoices == 'Pagado') {
-                    const findClientReminder = await this.prismaService.clientReminder.findFirst({
-                        where: {
-                            clientId: findInvoice.clientId,
+                            decrement: payDetail.amount
                         }
-                    })
-
-                    if (findClientReminder) {
-                        await this.prismaService.clientReminder.delete({
-                            where: {
-                                id: findClientReminder.id,
-                            }
-                        })
                     }
-                }
-            });
+                });
+            }
 
-            baseResponse.message = `Pago Asociado a factura exitosamente.`
-            return baseResponse
+            baseResponse.message = 'Pago asociado a factura exitosamente.';
+            return baseResponse;
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
