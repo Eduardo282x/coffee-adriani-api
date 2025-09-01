@@ -573,6 +573,7 @@ export class InvoicesService {
             await this.prismaService.invoice.update({
                 where: { id: saveInvoice.id },
                 data: {
+                    status: calculateTotalInvoice == 0 ? 'Pagado' : 'Creada',
                     totalAmount: calculateTotalInvoice,
                     remaining: calculateTotalInvoice,
                 }
