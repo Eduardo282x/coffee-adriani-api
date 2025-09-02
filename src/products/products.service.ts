@@ -16,10 +16,11 @@ export class ProductsService {
 
     async saveDolarAutomatic() {
         try {
-            const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
+            // const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
+            const response: Dolar = await axios.get('https://ve.dolarapi.com/v1/dolares/oficial').then(res => res.data);
             const parseResponse = {
-                dolar: response.price,
-                date: parseCustomDate(response.last_update)
+                dolar: response.promedio,
+                date: new Date(response.fechaActualizacion)
             }
             return await this.saveDolar(parseResponse);
         } catch (err) {

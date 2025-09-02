@@ -9,10 +9,12 @@ export interface Dolar {
     image: string;
     last_update: string;
     percent: number;
+    promedio: number;
     price: number;
     price_old: number;
     symbol: string;
     title: string;
+    fechaActualizacion: string;
 }
 
 @Injectable()
