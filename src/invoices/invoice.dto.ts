@@ -93,7 +93,7 @@ export interface Product {
 
 
 export interface OptionalFilterInvoices {
-    status: InvoiceStatus
+    status: InvoiceStatus;
 }
 
 export interface ResponseInvoice {

@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { DTOInvoice } from './invoice.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 import { Response } from 'express';
+import { InvoiceStatus } from '@prisma/client';
 
 @Controller('invoices')
 export class InvoicesController {
@@ -12,6 +13,29 @@ export class InvoicesController {
     @Get()
     async getInvoices() {
         return await this.invoicesService.getInvoices();
+    }
+    @Get('/paginated')
+    async getInvoicesPaginated(
+        @Query('page', ParseIntPipe) page: number,
+        @Query('limit', ParseIntPipe) limit: number,
+        @Query('startDate') startDate: string,
+        @Query('endDate') endDate: string,
+        @Query('search') search?: string,
+        @Query('blockId') blockId?: string,
+        @Query('status') status?: string,
+    ) {
+        return await this.invoicesService.getInvoicesPaginated(page, limit, startDate, endDate, search, blockId, status);
+    }
+    @Get('/statistics')
+    async getInvoiceStatistics(
+        @Query('startDate') startDate: string,
+        @Query('endDate') endDate: string,
+    ) {
+        return await this.invoicesService.getInvoiceStatistics(startDate, endDate);
+    }
+    @Get('/details/:id')
+    async getInvoiceDetails(@Param('id', ParseIntPipe) invoiceId: number) {
+        return await this.invoicesService.getInvoiceDetails(invoiceId);
     }
 
     @Get('/expired')
