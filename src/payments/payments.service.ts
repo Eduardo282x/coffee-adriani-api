@@ -14,6 +14,7 @@ export class PaymentsService {
         private readonly prismaService: PrismaService,
         private readonly productService: ProductsService
     ) { }
+    
 
     async getPayments() {
         const dataPayments = await this.prismaService.payment.findMany({
@@ -418,12 +419,16 @@ export class PaymentsService {
                     }
                 });
 
+                const calculateRemaining = findPayment.account.method.currency === 'BS'
+                    ? Number(payDetail.amount) * Number(findPayment.dolar.dolar)
+                    : Number(payDetail.amount);
+
                 // Actualizar el remaining del pago
                 await this.prismaService.payment.update({
                     where: { id: findPayment.id },
                     data: {
                         remaining: {
-                            decrement: payDetail.amount
+                            decrement: calculateRemaining
                         }
                     }
                 });
