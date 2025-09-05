@@ -30,8 +30,11 @@ export class InvoicesController {
     async getInvoiceStatistics(
         @Query('startDate') startDate: string,
         @Query('endDate') endDate: string,
+        @Query('search') search?: string,
+        @Query('blockId') blockId?: string,
+        @Query('status') status?: string,
     ) {
-        return await this.invoicesService.getInvoiceStatistics(startDate, endDate);
+        return await this.invoicesService.getInvoiceStatistics(startDate, endDate, search, blockId, status);
     }
     @Get('/details/:id')
     async getInvoiceDetails(@Param('id', ParseIntPipe) invoiceId: number) {

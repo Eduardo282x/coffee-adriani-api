@@ -137,15 +137,47 @@ export class InvoicesService {
     async getInvoiceStatistics(
         startDate?: string,
         endDate?: string,
+        search?: string,
+        blockId?: string,
+        status?: string,
     ) {
         try {
             const where: any = {};
+            if (status) {
+                where.status = status as InvoiceStatus
+            }
+
+            if (search) {
+                where.OR = [
+                    {
+                        client: {
+                            name: {
+                                contains: search,
+                                mode: 'insensitive'
+                            }
+                        }
+                    },
+                    {
+                        controlNumber: {
+                            contains: search,
+                            mode: 'insensitive'
+                        }
+                    }
+                ]
+            }
+            if (blockId) {
+                where.client = {
+                    blockId: Number(blockId)
+                };
+            }
+
             if (startDate && endDate) {
                 where.dispatchDate = {
                     gte: new Date(startDate),
                     lte: new Date(endDate)
                 }
             }
+
 
             // Obtener productos y tasa de cambio actual
             const [products, currentDolar] = await Promise.all([
