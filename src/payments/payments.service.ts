@@ -7,6 +7,23 @@ import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
 import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 
+// Añadir estos métodos al PaymentsService existente
+
+interface PaymentFilterPaginate extends PaymentFilter {
+    page: number;
+    limit: number;
+}
+
+interface PaymentFilter {
+    startDate?: Date;
+    endDate?: Date;
+    accountId?: number;
+    methodId?: number;
+    associated?: boolean;
+    type?: string;
+    credit?: 'credit' | 'noCredit';
+}
+
 @Injectable()
 export class PaymentsService {
 
@@ -14,7 +31,368 @@ export class PaymentsService {
         private readonly prismaService: PrismaService,
         private readonly productService: ProductsService
     ) { }
-    
+
+    // NUEVOS MÉTODOS OPTIMIZADOS EN PaymentsService
+
+    async getPaymentsPaginated(filters: PaymentFilterPaginate) {
+        try {
+            const { page, limit, startDate, endDate, accountId, methodId, associated, type, credit } = filters;
+            const skip = (page - 1) * limit;
+
+            // Construir where clause dinámicamente
+            const where: any = {};
+
+            if (startDate && endDate) {
+                where.paymentDate = {
+                    gte: startDate,
+                    lte: endDate
+                };
+            }
+
+            if (accountId) {
+                where.accountId = accountId;
+            }
+
+            if (credit) {
+                if (credit == 'credit') {
+                    where.InvoicePayment = {
+                        some: {}
+                    }
+                    where.AND = {
+                        remaining: {
+                            gt: 0
+                        }
+                    }
+                } else {
+                    where.InvoicePayment = {
+                        none: {}
+                    }
+                }
+            }
+
+            if (type) {
+                where.InvoicePayment = {
+                    some: {
+                        invoice: {
+                            invoiceItems: {
+                                some: {
+                                    product: {
+                                        type: type
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (methodId) {
+                where.account = {
+                    methodId: methodId
+                };
+            }
+
+            if (associated !== undefined) {
+                if (associated) {
+                    where.InvoicePayment = {
+                        some: {}
+                    };
+                } else {
+                    where.InvoicePayment = {
+                        none: {}
+                    };
+                }
+            }
+
+            console.log(where);
+            
+
+            // Consulta principal con paginación
+            const [payments, totalCount] = await Promise.all([
+                this.prismaService.payment.findMany({
+                    include: {
+                        dolar: true,
+                        account: {
+                            include: { method: true }
+                        },
+                        InvoicePayment: {
+                            include: {
+                                invoice: {
+                                    include: {
+                                        client: {
+                                            include: { block: true }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    },
+                    where,
+                    orderBy: { paymentDate: 'desc' },
+                    skip,
+                    take: limit
+                }),
+                this.prismaService.payment.count({ where })
+            ]);
+
+            // Procesar datos
+            const processedPayments = payments.map(data => ({
+                ...data,
+                associated: data.InvoicePayment.length > 0,
+                amount: data.amount.toFixed(2),
+                amountUSD: data.account.method.currency === 'USD'
+                    ? data.amount.toFixed(2)
+                    : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
+                amountBs: data.account.method.currency === 'BS'
+                    ? data.amount.toFixed(2)
+                    : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
+                remaining: data.remaining.toFixed(2),
+                remainingUSD: data.account.method.currency === 'USD'
+                    ? data.remaining.toFixed(2)
+                    : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
+                credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
+            }));
+
+            // Calcular paginación
+            const totalPages = Math.ceil(totalCount / limit);
+            const hasNext = page < totalPages;
+            const hasPrev = page > 1;
+
+            return {
+                payments: processedPayments,
+                pagination: {
+                    page,
+                    limit,
+                    totalCount,
+                    totalPages,
+                    hasNext,
+                    hasPrev
+                }
+            };
+        } catch (error) {
+            throw new Error(`Error al obtener pagos paginados: ${error.message}`);
+        }
+    }
+
+    async getPaymentsStatistics(filters: PaymentFilter) {
+        try {
+            const { startDate, endDate, accountId, methodId, associated, type, credit } = filters;
+
+            // Construir where clause dinámicamente
+            const where: any = {};
+
+            if (startDate && endDate) {
+                where.paymentDate = {
+                    gte: startDate,
+                    lte: endDate
+                };
+            }
+
+            if (credit) {
+                if (credit == 'credit') {
+                    where.InvoicePayment = {
+                        some: {}
+                    }
+                    where.AND = {
+                        remaining: {
+                            gt: 0
+                        }
+                    }
+                } else {
+                    where.InvoicePayment = {
+                        none: {}
+                    }
+                }
+            }
+
+            if (type) {
+                where.InvoicePayment = {
+                    some: {
+                        invoice: {
+                            invoiceItems: {
+                                some: {
+                                    product: {
+                                        type: type
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (accountId) {
+                where.accountId = accountId;
+            }
+
+            if (methodId) {
+                where.account = {
+                    methodId: methodId
+                };
+            }
+
+            if (associated !== undefined) {
+                if (associated) {
+                    where.InvoicePayment = {
+                        some: {}
+                    };
+                } else {
+                    where.InvoicePayment = {
+                        none: {}
+                    };
+                }
+            }
+
+            const payments = await this.prismaService.payment.findMany({
+                include: {
+                    dolar: true,
+                    account: {
+                        include: { method: true }
+                    }
+                },
+                where
+            });
+
+            // Calcular estadísticas
+            const totalAmountBs = payments
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + Number(data.amount), 0);
+
+            const totalAmountBsInUSD = payments
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + (Number(data.amount) / Number(data.dolar.dolar)), 0);
+
+            const totalAmountUSD = payments
+                .filter(item => item.account.method.currency === 'USD')
+                .reduce((acc, data) => acc + Number(data.amount), 0);
+
+            const totalRemainingBs = payments
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + Number(data.remaining), 0);
+
+            const totalRemainingBsInUSD = payments
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + (Number(data.remaining) / Number(data.dolar.dolar)), 0);
+
+            const totalRemainingUSD = payments
+                .filter(item => item.account.method.currency === 'USD')
+                .reduce((acc, data) => acc + Number(data.remaining), 0);
+
+            const associatedPayments = await this.prismaService.payment.count({
+                where: {
+                    ...where,
+                    InvoicePayment: {
+                        some: {}
+                    }
+                }
+            });
+
+            const unassociatedPayments = await this.prismaService.payment.count({
+                where: {
+                    ...where,
+                    InvoicePayment: {
+                        none: {}
+                    }
+                }
+            });
+
+            // Estadísticas por método de pago
+            const paymentsByMethod = await this.prismaService.payment.groupBy({
+                by: ['accountId'],
+                where,
+                _sum: {
+                    amount: true
+                },
+                _count: {
+                    id: true
+                }
+            });
+
+            // Obtener detalles de las cuentas
+            const accountsDetails = await this.prismaService.accountsPayments.findMany({
+                include: { method: true }
+            });
+
+            const methodStatistics = paymentsByMethod.map(stat => {
+                const account = accountsDetails.find(acc => acc.id === stat.accountId);
+                return {
+                    accountId: stat.accountId,
+                    accountName: account ? `${account.bank} - ${account.name}` : 'Desconocido',
+                    method: account?.method.name || 'Desconocido',
+                    currency: account?.method.currency || 'Desconocido',
+                    totalAmount: stat._sum.amount || 0,
+                    count: stat._count.id
+                };
+            });
+
+            return {
+                totals: {
+                    totalBs: totalAmountBs,
+                    totalUSD: totalAmountUSD,
+                    total: totalAmountBsInUSD + totalAmountUSD,
+                    remaining: totalRemainingBsInUSD + totalRemainingUSD,
+                    totalRemainingBs,
+                    totalRemainingUSD
+                },
+                counts: {
+                    total: payments.length,
+                    associated: associatedPayments,
+                    unassociated: unassociatedPayments
+                },
+                byMethod: methodStatistics
+            };
+        } catch (error) {
+            throw new Error(`Error al obtener estadísticas de pagos: ${error.message}`);
+        }
+    }
+
+    async getPaymentDetails(paymentId: number) {
+        try {
+            const payment = await this.prismaService.payment.findUnique({
+                where: { id: paymentId },
+                include: {
+                    dolar: true,
+                    account: {
+                        include: { method: true }
+                    },
+                    InvoicePayment: {
+                        include: {
+                            invoice: {
+                                include: {
+                                    client: {
+                                        include: { block: true }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!payment) {
+                throw new Error('Pago no encontrado');
+            }
+
+            return {
+                ...payment,
+                associated: payment.InvoicePayment.length > 0,
+                amount: payment.amount.toFixed(2),
+                amountUSD: payment.account.method.currency === 'USD'
+                    ? payment.amount.toFixed(2)
+                    : (Number(payment.amount) / Number(payment.dolar.dolar)).toFixed(2),
+                amountBs: payment.account.method.currency === 'BS'
+                    ? payment.amount.toFixed(2)
+                    : (Number(payment.amount) * Number(payment.dolar.dolar)).toFixed(2),
+                remaining: payment.remaining.toFixed(2),
+                remainingUSD: payment.account.method.currency === 'USD'
+                    ? payment.remaining.toFixed(2)
+                    : (Number(payment.remaining) / Number(payment.dolar.dolar)).toFixed(2),
+                credit: payment.InvoicePayment.length > 0 && Number(payment.remaining) > 0
+            };
+        } catch (error) {
+            throw new Error(`Error al obtener detalles del pago: ${error.message}`);
+        }
+    }
 
     async getPayments() {
         const dataPayments = await this.prismaService.payment.findMany({

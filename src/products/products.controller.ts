@@ -13,6 +13,10 @@ export class ProductsController {
     async getProducts() {
         return await this.productService.getProducts();
     }
+    @Get('/type')
+    async getTypeProduct() {
+        return await this.productService.getTypeProduct();
+    }
     @Get('/history')
     async getProductHistory() {
         return await this.productService.getProductHistory();

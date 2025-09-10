@@ -14,6 +14,12 @@ export class ProductsService {
         return await this.prismaService.historyDolar.findFirst({ orderBy: { id: 'desc' } })
     }
 
+    async getTypeProduct() {
+        return await this.prismaService.product.groupBy({
+            by: ['type'] 
+        })
+    }
+
     async saveDolarAutomatic() {
         try {
             // const response: Dolar = await axios.get('https://pydolarve.org/api/v2/tipo-cambio?currency=usd&format_date=default&rounded_price=true').then(res => res.data);
@@ -108,7 +114,8 @@ export class ProductsService {
                     priceUSD: product.priceUSD,
                     amount: product.amount,
                     purchasePrice: product.purchasePrice,
-                    purchasePriceUSD: product.purchasePriceUSD
+                    purchasePriceUSD: product.purchasePriceUSD,
+                    type: product.type,
                 }
             })
 
@@ -145,7 +152,8 @@ export class ProductsService {
                     priceUSD: product.priceUSD,
                     amount: product.amount,
                     purchasePrice: product.purchasePrice,
-                    purchasePriceUSD: product.purchasePriceUSD
+                    purchasePriceUSD: product.purchasePriceUSD,
+                    type: product.type
                 }
             })
 

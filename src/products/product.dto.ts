@@ -6,6 +6,8 @@ export class DTOProducts {
     name: string;
     @IsString()
     presentation: string;
+    @IsString()
+    type: string;
     @IsNumber()
     @IsPositive()
     @Min(0)
