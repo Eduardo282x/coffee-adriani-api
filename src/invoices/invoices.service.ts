@@ -38,7 +38,22 @@ export class InvoicesService {
 
             if (filter?.status || status) {
                 const setStatusFilter = filter ? filter.status : status;
-                where.status = setStatusFilter as InvoiceStatus
+                if (status == 'Abonadas') {
+                    where.OR = [
+                        {
+                            status: {
+                                notIn: ['Cancelada', 'Pagado']
+                            }
+                        },
+                    ];
+                    where.AND = {
+                        InvoicePayment: {
+                            some: {}
+                        }
+                    };
+                } else {
+                    where.status = setStatusFilter as InvoiceStatus
+                }
             }
 
             if (search) {
@@ -144,7 +159,22 @@ export class InvoicesService {
         try {
             const where: any = {};
             if (status) {
-                where.status = status as InvoiceStatus
+                if (status == 'Abonadas') {
+                    where.OR = [
+                        {
+                            status: {
+                                notIn: ['Cancelada', 'Pagado']
+                            }
+                        },
+                    ];
+                    where.AND = {
+                        InvoicePayment: {
+                            some: {}
+                        }
+                    };
+                } else {
+                    where.status = status as InvoiceStatus
+                }
             }
 
             if (search) {
