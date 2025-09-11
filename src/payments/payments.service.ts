@@ -21,6 +21,8 @@ interface PaymentFilter {
     methodId?: number;
     associated?: boolean;
     type?: string;
+    typeDescription?: string;
+    search?: string;
     credit?: 'credit' | 'noCredit';
 }
 
@@ -36,7 +38,7 @@ export class PaymentsService {
 
     async getPaymentsPaginated(filters: PaymentFilterPaginate) {
         try {
-            const { page, limit, startDate, endDate, accountId, methodId, associated, type, credit } = filters;
+            const { page, limit, startDate, endDate, accountId, methodId, associated, type, typeDescription, credit, search } = filters;
             const skip = (page - 1) * limit;
 
             // Construir where clause dinámicamente
@@ -71,19 +73,63 @@ export class PaymentsService {
             }
 
             if (type) {
-                where.InvoicePayment = {
-                    some: {
-                        invoice: {
-                            invoiceItems: {
-                                some: {
-                                    product: {
-                                        type: type
+                where.OR = [
+                    {
+                        InvoicePayment: {
+                            none: {}
+                        }
+                    },
+                    {
+                        InvoicePayment: {
+                            some: {
+                                invoice: {
+                                    invoiceItems: {
+                                        some: {
+                                            product: {
+                                                type: type
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
+                ]
+            }
+
+            if (search) {
+                const searchAsNumber = parseFloat(search);
+                const isValidNumber = !isNaN(searchAsNumber);
+
+                where.OR = [
+                    {
+                        account: {
+                            name: {
+                                contains: search,
+                                mode: 'insensitive'
+                            }
+                        }
+                    },
+                    {
+                        reference: {
+                            contains: search,
+                            mode: 'insensitive'
+                        }
+                    },
+                    ...(isValidNumber ? [{
+                        amount: {
+                            gte: searchAsNumber,
+                            lt: searchAsNumber + 1
+                        }
+                    }] : [])
+                ]
+            }
+
+            if (typeDescription) {
+                where.description = {
+                    contains: typeDescription,
+                    mode: 'insensitive'
+                };
             }
 
             if (methodId) {
@@ -105,7 +151,7 @@ export class PaymentsService {
             }
 
             console.log(where);
-            
+
 
             // Consulta principal con paginación
             const [payments, totalCount] = await Promise.all([
@@ -176,7 +222,7 @@ export class PaymentsService {
 
     async getPaymentsStatistics(filters: PaymentFilter) {
         try {
-            const { startDate, endDate, accountId, methodId, associated, type, credit } = filters;
+            const { startDate, endDate, accountId, methodId, associated, type, typeDescription, credit, search } = filters;
 
             // Construir where clause dinámicamente
             const where: any = {};
@@ -206,21 +252,63 @@ export class PaymentsService {
             }
 
             if (type) {
-                where.InvoicePayment = {
-                    some: {
-                        invoice: {
-                            invoiceItems: {
-                                some: {
-                                    product: {
-                                        type: type
+                where.OR = [
+                    {
+                        InvoicePayment: {
+                            none: {}
+                        }
+                    },
+                    {
+                        InvoicePayment: {
+                            some: {
+                                invoice: {
+                                    invoiceItems: {
+                                        some: {
+                                            product: {
+                                                type: type
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
+                ]
             }
 
+            if (search) {
+                const searchAsNumber = parseFloat(search);
+                const isValidNumber = !isNaN(searchAsNumber);
+
+                where.OR = [
+                    {
+                        account: {
+                            name: {
+                                contains: search,
+                                mode: 'insensitive'
+                            }
+                        }
+                    },
+                    {
+                        reference: {
+                            contains: search,
+                            mode: 'insensitive'
+                        }
+                    },
+                    ...(isValidNumber ? [{
+                        amount: {
+                            gte: searchAsNumber,
+                            lt: searchAsNumber + 1
+                        }
+                    }] : [])
+                ]
+            }
+            if (typeDescription) {
+                where.description = {
+                    contains: typeDescription,
+                    mode: 'insensitive'
+                };
+            }
             if (accountId) {
                 where.accountId = accountId;
             }
@@ -521,6 +609,16 @@ export class PaymentsService {
     async getPaymentsMethod() {
         return await this.prismaService.paymentMethod.findMany()
     }
+    async getTypeDescription() {
+        return await this.prismaService.payment.groupBy({
+            by: ['description'],
+            where: {
+                description: {
+                    not: ''
+                }
+            }
+        })
+    }
 
     getBanks() {
         return BankData;
@@ -540,6 +638,7 @@ export class PaymentsService {
                     remaining: payment.amount,
                     reference: payment.reference,
                     dolarId: getDolar.id,
+                    description: payment.description,
                     paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
@@ -569,6 +668,7 @@ export class PaymentsService {
                     remaining: payment.amount,
                     reference: payment.reference,
                     dolarId: getDolar.id,
+                    description: payment.description,
                     paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
@@ -1154,7 +1254,6 @@ export class PaymentsService {
                     amountParse: parseAmountPay,
                     other: findPaymentsBs,
                 };
-                console.log(dataFilter);
 
                 throw new Error(`No se encontró el pago para la factura #${item.controlNumber}`);
             }

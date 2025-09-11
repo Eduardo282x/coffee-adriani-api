@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
@@ -20,10 +20,12 @@ export class PaymentsController {
         @Query('limit') limit?: string,
         @Query('startDate') startDate?: string,
         @Query('endDate') endDate?: string,
+        @Query('search') search?: string,
         @Query('accountId') accountId?: string,
         @Query('methodId') methodId?: string,
         @Query('associated') associated?: string,
         @Query('type') type?: string,
+        @Query('typeDescription') typeDescription?: string,
         @Query('credit') credit?: 'credit' | 'noCredit'
     ) {
         return await this.paymentService.getPaymentsPaginated({
@@ -33,8 +35,10 @@ export class PaymentsController {
             endDate: endDate ? new Date(endDate) : undefined,
             accountId: accountId ? parseInt(accountId) : undefined,
             methodId: methodId ? parseInt(methodId) : undefined,
+            search: search as string,
             associated: associated === 'true' ? true : associated === 'false' ? false : undefined,
             type: type as string,
+            typeDescription: typeDescription as string,
             credit: credit as 'credit' | 'noCredit',
         });
     }
@@ -47,7 +51,9 @@ export class PaymentsController {
         @Query('methodId') methodId?: string,
         @Query('associated') associated?: string,
         @Query('credit') credit?: 'credit' | 'noCredit',
-        @Query('type') type?: string
+        @Query('search') search?: string,
+        @Query('type') type?: string,
+        @Query('typeDescription') typeDescription?: string,
     ) {
         return await this.paymentService.getPaymentsStatistics({
             startDate: startDate ? new Date(startDate) : undefined,
@@ -55,14 +61,21 @@ export class PaymentsController {
             accountId: accountId ? parseInt(accountId) : undefined,
             methodId: methodId ? parseInt(methodId) : undefined,
             associated: associated === 'true' ? true : associated === 'false' ? false : undefined,
+            search: search as string,
             type: type as string,
+            typeDescription: typeDescription as string,
             credit: credit as 'credit' | 'noCredit',
         });
     }
 
     @Get('/details/:id')
-    async getPaymentDetails(@Param('id') id: string) {
-        return await this.paymentService.getPaymentDetails(parseInt(id));
+    async getPaymentDetails(@Param('id', ParseIntPipe) id: number) {
+        return await this.paymentService.getPaymentDetails(id);
+    }
+    
+    @Get('/descriptions')
+    async getTypeDescription() {
+        return await this.paymentService.getTypeDescription();
     }
 
     // ENDPOINTS EXISTENTES

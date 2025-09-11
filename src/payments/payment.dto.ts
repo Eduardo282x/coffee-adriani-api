@@ -1,9 +1,12 @@
 import { Transform, Type } from "class-transformer";
-import { IsArray, IsDate, IsNotEmpty, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsDate, IsNotEmpty, IsOptional, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
 
 export class PaymentDTO {
     @IsString()
     reference: string;
+    @IsString()
+    @IsOptional()
+    description?: string;
     @IsNumber()
     @IsPositive()
     amount: number;

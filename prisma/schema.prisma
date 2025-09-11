@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -81,10 +81,10 @@ enum InvoiceStatus {
 }
 
 model Product {
-  id                 Int                @id @default(autoincrement())
-  name               String
-  presentation       String
-  type               String             @default("Cafe")
+  id           Int    @id @default(autoincrement())
+  name         String
+  presentation String
+  type         String @default("Cafe")
 
   purchasePrice      Decimal            @db.Decimal(10, 2)
   purchasePriceUSD   Decimal            @default(0) @db.Decimal(10, 2)
@@ -179,6 +179,7 @@ model Payment {
   accountId      Int
   account        AccountsPayments @relation(fields: [accountId], references: [id])
   reference      String
+  description    String           @default("")
   dolarId        Int
   dolar          HistoryDolar     @relation(fields: [dolarId], references: [id])
   paymentDate    DateTime
