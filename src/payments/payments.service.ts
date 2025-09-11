@@ -150,9 +150,6 @@ export class PaymentsService {
                 }
             }
 
-            console.log(where);
-
-
             // Consulta principal con paginación
             const [payments, totalCount] = await Promise.all([
                 this.prismaService.payment.findMany({

@@ -79,9 +79,6 @@ export class ExpensesService {
                 },
             });
 
-            console.log(invoices.length);
-            
-
             const historyProducts = await this.prismaService.historyProduct.findMany({});
 
             let totalMonthGain = 0;

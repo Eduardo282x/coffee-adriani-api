@@ -301,7 +301,7 @@ export class InvoicesService {
                 // Procesar cada producto de la factura
                 for (const item of invoice.invoiceItems) {
                     // Solo contar productos de venta, no regalos
-                    if (item.type === 'GIFT') continue;
+                    // if (item.type === 'GIFT') continue;
 
                     const product = products.find(p => p.id === item.productId);
                     if (!product) continue;
@@ -797,11 +797,59 @@ export class InvoicesService {
                 }
             });
 
-            console.log(invoicesModify);
-
-
             baseResponse.message = 'Facturas verificadas y agregadas a cobranza.'
             return baseResponse;
+        } catch (err) {
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async checkInvoicePayments(invoiceId: number) {
+        try {
+            const findInvoice = await this.prismaService.invoice.findFirst({
+                where: { id: invoiceId }
+            });
+
+            if (!findInvoice) {
+                badResponse.message = 'No se encontró la factura';
+                return badResponse;
+            }
+
+            const findPaymentInvoice = await this.prismaService.invoicePayment.findMany({
+                where: { invoiceId: invoiceId }
+            });
+
+            const calculateRemaining = findPaymentInvoice.reduce((acc, item) => acc + Number(item.amount), 0);
+            const newRemaining = Number(findInvoice.totalAmount) - calculateRemaining;
+            await this.prismaService.invoice.update({
+                data: {
+                    remaining: newRemaining,
+                    status: newRemaining < 2 ? 'Pagado' : findInvoice.status
+                }, where: {
+                    id: invoiceId
+                }
+            });
+
+            const findInvoicesClient = await this.prismaService.invoice.findMany({
+                where: {
+                    clientId: findInvoice.clientId,
+                    status: 'Vencida'
+                }
+            });
+
+            if (!findInvoicesClient) {
+                const findClientReminder = await this.prismaService.clientReminder.findFirst({
+                    where: { clientId: findInvoice.clientId }
+                });
+
+                if (findClientReminder) {
+                    await this.prismaService.clientReminder.delete({
+                        where: { id: findClientReminder.id }
+                    })
+                }
+            }
+
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
@@ -1145,9 +1193,6 @@ export class InvoicesService {
                     })
                 }
             })
-
-            console.log(getDetailsInvoice.length);
-            console.log(notFound);
 
             baseResponse.message = 'Detalles actualizados.'
             return baseResponse;

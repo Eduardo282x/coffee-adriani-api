@@ -66,6 +66,11 @@ export class InvoicesController {
         return await this.invoicesService.checkInvoice();
     }
 
+    @Post('/check-invoice/:id')
+    async checkInvoicePayments(@Param('id', ParseIntPipe) id: number) {
+        return await this.invoicesService.checkInvoicePayments(id);
+    }
+
     @Post('/filter')
     async getInvoicesFilter(@Body() invoice: DTODateRangeFilter) {
         return await this.invoicesService.getInvoicesFilter(invoice);
