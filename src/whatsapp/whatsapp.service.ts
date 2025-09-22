@@ -9,7 +9,7 @@ export class WhatsAppService {
     private client: Client;
 
     async onModuleInit() {
-        this.initializeWhatsAppAsync();
+        // this.initializeWhatsAppAsync();
     }
 
     private async initializeWhatsAppAsync() {
@@ -48,7 +48,11 @@ export class WhatsAppService {
                 console.log('WhatsApp Client disconnected:', reason);
             });
 
-            await this.client.initialize();
+            try {
+                await this.client.initialize();
+            } catch (initError) {
+                console.error('Error during WhatsApp client initialization:', initError);
+            }
 
             console.log('WhatsApp initialization completed successfully.');
 

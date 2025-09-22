@@ -83,7 +83,7 @@ export class DashboardService {
     };
   }
 
-  async generateInventoryAndInvoicesExcel(filter: DTODateRangeFilter) {
+  async generateInventoryAndInvoicesExcel(filter: DTODateRangeFilter): Promise<Buffer> {
     // 1. Obtener productos y movimientos de inventario en el rango
     const productos = await this.prismaService.product.findMany();
     const movimientos = await this.prismaService.historyInventory.findMany({
@@ -100,13 +100,26 @@ export class DashboardService {
     // 2. Obtener facturas en el rango
     const facturas = await this.prismaService.invoice.findMany({
       where: {
-        createdAt: { gte: filter.startDate, lte: filter.endDate }
+        dispatchDate: {
+          gte: filter.startDate,
+          lte: filter.endDate
+        }
       },
       include: {
         client: { include: { block: true } },
-        invoiceItems: { include: { product: true } }
+        invoiceItems: { include: { product: true } },
+        InvoicePayment: {
+          include: {
+            payment: {
+              include: {
+                account: true,
+                dolar: true
+              }
+            }
+          }
+        }
       },
-      orderBy: { createdAt: 'asc' }
+      orderBy: { dispatchDate: 'asc' }
     });
 
     // 3. Preparar fechas del rango
@@ -122,12 +135,14 @@ export class DashboardService {
     dias.forEach(d => {
       header.push(`${format(d, "EEEE dd/MM/yyyy", { locale: es })}`);
     });
+    header.push('Total Despachado');
+    header.push('Inventario Actual');
     wsInv.addRow(header);
 
-    // Calcular inventario inicial (antes del rango)
+    // Calcular inventario inicial (antes del rango) - esto se mantiene igual
     const inventarioInicial = {};
     for (const p of productos) {
-      // Sumar movimientos antes del rango
+      // Sumar movimientos antes del rango para obtener inventario inicial
       const movsAntes = await this.prismaService.historyInventory.aggregate({
         where: {
           productId: p.id,
@@ -138,21 +153,49 @@ export class DashboardService {
       inventarioInicial[p.id] = (p.amount || 0) + (movsAntes._sum.quantity || 0);
     }
 
+    // Agrupar facturas por día y producto
+    const despachosPorDiaYProducto = {};
+
+    // Inicializar estructura de datos
+    dias.forEach(dia => {
+      const fechaKey = format(dia, 'yyyy-MM-dd');
+      despachosPorDiaYProducto[fechaKey] = {};
+      productos.forEach(producto => {
+        despachosPorDiaYProducto[fechaKey][producto.id] = 0;
+      });
+    });
+
+    // Procesar facturas y agrupar por día y producto
+    facturas.forEach(factura => {
+      const fechaDespacho = format(factura.dispatchDate, 'yyyy-MM-dd');
+
+      // Solo procesar si la fecha está en nuestro rango
+      if (despachosPorDiaYProducto[fechaDespacho]) {
+        factura.invoiceItems.forEach(item => {
+          if (despachosPorDiaYProducto[fechaDespacho][item.productId] !== undefined) {
+            despachosPorDiaYProducto[fechaDespacho][item.productId] += item.quantity;
+          }
+        });
+      }
+    });
+
     // Para cada producto, calcular inventario y despachos por día
     for (const p of productos) {
-      let fila = [p.name, inventarioInicial[p.id]];
+      let fila = [`${p.name} ${p.presentation}`, inventarioInicial[p.id]];
       let inventarioActual = inventarioInicial[p.id];
+      let totalDespachado = 0;
+
       for (const dia of dias) {
-        // Movimientos de salida (despachos) ese día
-        const movsDia = movimientos.filter(m =>
-          m.productId === p.id &&
-          format(m.movementDate, 'yyyy-MM-dd') === format(dia, 'yyyy-MM-dd') &&
-          m.movementType === 'OUT'
-        );
-        const cantidadDespachada = movsDia.reduce((acc, m) => acc + m.quantity, 0);
+        const fechaKey = format(dia, 'yyyy-MM-dd');
+        const cantidadDespachada = despachosPorDiaYProducto[fechaKey][p.id] || 0;
+
         fila.push(cantidadDespachada);
         inventarioActual -= cantidadDespachada;
+        totalDespachado += cantidadDespachada;
       }
+
+      fila.push(totalDespachado); // Total despachado
+      fila.push(inventarioActual); // Inventario actual
       wsInv.addRow(fila);
     }
 
@@ -184,6 +227,204 @@ export class DashboardService {
         ...productos.map(p => prodMap[p.name] ?? '')
       ]);
     }
+
+
+
+
+
+    //Pagos
+
+    // 3. Obtener todos los pagos en el rango de fechas (adicional para pagos no asociados a facturas del período)
+    const pagosEnRango = await this.prismaService.payment.findMany({
+      where: {
+        paymentDate: {
+          gte: filter.startDate,
+          lte: filter.endDate
+        }
+      },
+      include: {
+        account: true,
+        dolar: true,
+        InvoicePayment: {
+          include: {
+            invoice: {
+              include: {
+                invoiceItems: {
+                  include: { product: true }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { paymentDate: 'asc' }
+    });
+
+    // --- NUEVA HOJA PAGOS ---
+    const wsPagos = workbook.addWorksheet('Análisis de Pagos');
+
+    // Cabecera principal de pagos
+    const headerPagos = [
+      'Fecha Pago', 'Referencia', 'Cuenta', 'Monto ($)', 'Tasa Dólar', 'Monto (Bs)',
+      'Estado', 'Descripción', 'Factura Asociada', 'Total Factura ($)',
+      'Cantidad Total Items', 'Monto Asignado ($)', 'Equivalente en Items', 'Porcentaje Pagado'
+    ];
+    wsPagos.addRow(headerPagos);
+
+    // Variables para totales
+    let totalPagado = 0;
+    let totalItemsPagados = 0;
+    let totalFacturasAfectadas = new Set();
+
+    // Procesar cada pago
+    for (const pago of pagosEnRango) {
+      const montoPagoUSD = parseFloat(pago.amount.toString());
+      const montoPagoBS = montoPagoUSD * parseFloat(pago.dolar.dolar.toString());
+
+      totalPagado += montoPagoUSD;
+
+      if (pago.InvoicePayment.length === 0) {
+        // Pago sin factura asociada
+        wsPagos.addRow([
+          format(pago.paymentDate, 'dd/MM/yyyy'),
+          pago.reference,
+          pago.account.name,
+          montoPagoUSD.toFixed(2),
+          parseFloat(pago.dolar.dolar.toString()).toFixed(2),
+          montoPagoBS.toFixed(2),
+          pago.status,
+          pago.description,
+          'Sin factura asociada',
+          '-',
+          '-',
+          '-',
+          '-',
+          '-'
+        ]);
+      } else {
+        // Pago con facturas asociadas
+        for (const invoicePayment of pago.InvoicePayment) {
+          const factura = invoicePayment.invoice;
+          const montoAsignado = parseFloat(invoicePayment.amount.toString());
+          const totalFactura = parseFloat(factura.totalAmount.toString());
+
+          // Calcular cantidad total de items en la factura
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+
+          // Calcular equivalente en items basado en el pago
+          const porcentajePagado = montoAsignado / totalFactura;
+          const equivalenteItems = cantidadTotalItems * porcentajePagado;
+
+          totalItemsPagados += equivalenteItems;
+          totalFacturasAfectadas.add(factura.id);
+
+          wsPagos.addRow([
+            format(pago.paymentDate, 'dd/MM/yyyy'),
+            pago.reference,
+            pago.account.name,
+            montoPagoUSD.toFixed(2),
+            parseFloat(pago.dolar.dolar.toString()).toFixed(2),
+            montoPagoBS.toFixed(2),
+            pago.status,
+            pago.description,
+            `#${factura.controlNumber}`,
+            totalFactura.toFixed(2),
+            cantidadTotalItems,
+            montoAsignado.toFixed(2),
+            equivalenteItems.toFixed(2),
+            `${(porcentajePagado * 100).toFixed(1)}%`
+          ]);
+        }
+      }
+    }
+
+    // Agregar filas de totales
+    wsPagos.addRow([]); // Fila vacía
+    wsPagos.addRow(['=== RESUMEN GENERAL ===']);
+    wsPagos.addRow(['Total Pagado ($):', totalPagado.toFixed(2)]);
+    wsPagos.addRow(['Total Items Equivalentes:', totalItemsPagados.toFixed(2)]);
+    wsPagos.addRow(['Facturas Afectadas:', totalFacturasAfectadas.size]);
+
+    // --- HOJA RESUMEN POR PRODUCTO PAGADO ---
+    const wsResumenProductos = workbook.addWorksheet('Productos Pagados');
+
+    // Cabecera
+    const headerProductos = ['Producto', 'Cantidad Pagada', 'Precio Promedio ($)', 'Monto Total Pagado ($)'];
+    wsResumenProductos.addRow(headerProductos);
+
+    // Calcular resumen por producto
+    type ProductoResumen = {
+      cantidadPagada: number;
+      montoTotalPagado: number;
+      precioPromedio: number;
+    };
+    const productosResumen: Record<string, ProductoResumen> = {};
+
+    for (const pago of pagosEnRango) {
+      for (const invoicePayment of pago.InvoicePayment) {
+        const factura = invoicePayment.invoice;
+        const montoAsignado = parseFloat(invoicePayment.amount.toString());
+        const totalFactura = parseFloat(factura.totalAmount.toString());
+        const porcentajePagado = montoAsignado / totalFactura;
+
+        for (const item of factura.invoiceItems) {
+          const productoKey = `${item.product.name} ${item.product.presentation}`;
+          const cantidadPagada = item.quantity * porcentajePagado;
+          const montoPagadoProducto = parseFloat(item.unitPrice.toString()) * cantidadPagada;
+
+          if (!productosResumen[productoKey]) {
+            productosResumen[productoKey] = {
+              cantidadPagada: 0,
+              montoTotalPagado: 0,
+              precioPromedio: parseFloat(item.unitPrice.toString())
+            };
+          }
+
+          productosResumen[productoKey].cantidadPagada += cantidadPagada;
+          productosResumen[productoKey].montoTotalPagado += montoPagadoProducto;
+          // Recalcular precio promedio
+          productosResumen[productoKey].precioPromedio =
+            productosResumen[productoKey].montoTotalPagado / productosResumen[productoKey].cantidadPagada;
+        }
+      }
+    }
+
+    // Agregar filas de productos
+    let totalGeneralProductos = 0;
+    for (const [nombreProducto, datos] of Object.entries(productosResumen)) {
+      wsResumenProductos.addRow([
+        nombreProducto,
+        datos.cantidadPagada.toFixed(2),
+        datos.precioPromedio.toFixed(2),
+        datos.montoTotalPagado.toFixed(2)
+      ]);
+      totalGeneralProductos += datos.montoTotalPagado;
+    }
+
+    // Fila de total
+    wsResumenProductos.addRow([]);
+    wsResumenProductos.addRow(['TOTAL GENERAL', '', '', totalGeneralProductos.toFixed(2)]);
+
+    // Aplicar estilos a las hojas
+    [wsPagos, wsResumenProductos].forEach(ws => {
+      // Aplicar estilos a la primera fila (cabeceras)
+      const headerRow = ws.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '4472C4' } };
+      headerRow.alignment = { horizontal: 'center' };
+
+      // Ajustar ancho de columnas
+      ws.columns.forEach(column => {
+        let maxLength = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const columnLength = cell.value ? cell.value.toString().length : 10;
+          if (columnLength > maxLength) {
+            maxLength = columnLength;
+          }
+        });
+        column.width = Math.min(Math.max(maxLength + 2, 10), 50);
+      });
+    });
 
     // 5. Exportar a buffer
     const arrayBuffer = await workbook.xlsx.writeBuffer();

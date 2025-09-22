@@ -17,7 +17,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     @SubscribeMessage('message')
     handleMessage(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
-        console.log(data);
         client.broadcast.emit('message', data)
     }
 }

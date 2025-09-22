@@ -4,6 +4,7 @@ import { DTOInvoice } from './invoice.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 import { Response } from 'express';
 import { InvoiceStatus } from '@prisma/client';
+import { ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 
 @Controller('invoices')
 export class InvoicesController {
@@ -11,15 +12,24 @@ export class InvoicesController {
     constructor(private readonly invoicesService: InvoicesService) { }
 
     @Get()
+    @ApiBearerAuth('JWT-auth')
     async getInvoices() {
         return await this.invoicesService.getInvoices();
     }
     @Get('/paginated')
+    @ApiBearerAuth('JWT-auth')
+    @ApiQuery({ name: 'page', type: Number, required: true, description: 'Número de página' })
+    @ApiQuery({ name: 'limit', type: Number, required: true, description: 'Límite de elementos por página' })
+    @ApiQuery({ name: 'startDate', type: String, required: false, description: 'Fecha de inicio (opcional)' })
+    @ApiQuery({ name: 'endDate', type: String, required: false, description: 'Fecha de fin (opcional)' })
+    @ApiQuery({ name: 'search', type: String, required: false, description: 'Término de búsqueda (opcional)' })
+    @ApiQuery({ name: 'blockId', type: String, required: false, description: 'ID del bloque (opcional)' })
+    @ApiQuery({ name: 'status', type: String, required: false, description: 'Estado (opcional)' })
     async getInvoicesPaginated(
         @Query('page', ParseIntPipe) page: number,
         @Query('limit', ParseIntPipe) limit: number,
-        @Query('startDate') startDate: string,
-        @Query('endDate') endDate: string,
+        @Query('startDate') startDate?: string,
+        @Query('endDate') endDate?: string,
         @Query('search') search?: string,
         @Query('blockId') blockId?: string,
         @Query('status') status?: string,
@@ -27,6 +37,12 @@ export class InvoicesController {
         return await this.invoicesService.getInvoicesPaginated(page, limit, startDate, endDate, search, blockId, status);
     }
     @Get('/statistics')
+    @ApiBearerAuth('JWT-auth')
+    @ApiQuery({ name: 'startDate', type: String, required: false, description: 'Fecha de inicio (opcional)' })
+    @ApiQuery({ name: 'endDate', type: String, required: false, description: 'Fecha de fin (opcional)' })
+    @ApiQuery({ name: 'search', type: String, required: false, description: 'Término de búsqueda (opcional)' })
+    @ApiQuery({ name: 'blockId', type: String, required: false, description: 'ID del bloque (opcional)' })
+    @ApiQuery({ name: 'status', type: String, required: false, description: 'Estado (opcional)' })
     async getInvoiceStatistics(
         @Query('startDate') startDate: string,
         @Query('endDate') endDate: string,

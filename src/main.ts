@@ -5,6 +5,7 @@ import { AuthGuard } from './guards/auth/auth.guard';
 import { JwtService } from '@nestjs/jwt';
 import { RolesGuard } from './guards/roles/roles.guard';
 import { AllExceptionsFilter } from './filters/exception.filter';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -27,6 +28,28 @@ async function bootstrap() {
       return new BadRequestException(`Errores de validación: ${message}`);
     },
   }));
+
+  const config = new DocumentBuilder()
+    .setTitle('Cafe-adriani')
+    .setDescription('Cafe Adriani description')
+    .setVersion('1.0')
+    .addTag('coffee')
+    // Agregar configuración de seguridad Bearer
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'Enter JWT token',
+        in: 'header',
+      },
+      'JWT-auth', // Este nombre es importante, lo usarás en los decoradores
+    )
+    .build();
+  const documentFactory = () => SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, documentFactory);
+
   await app.listen(3000);
   console.log('🚀 Application is running on: http://localhost:3000');
 }
