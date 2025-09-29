@@ -38,9 +38,9 @@ model Client {
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   invoices              Invoice[]
-  Notification          Notification[]
   ClientReminder        ClientReminder[]
   ClientReminderHistory ClientReminderHistory[]
+  Notification          Notification[]
 }
 
 model Block {
@@ -68,7 +68,6 @@ model Invoice {
   updatedAt      DateTime         @updatedAt
   deleted        Boolean          @default(false)
   invoiceItems   InvoiceProduct[]
-  Notification   Notification[]
   InvoicePayment InvoicePayment[]
 }
 
@@ -222,19 +221,12 @@ enum Currency {
 
 model Notification {
   id        Int              @id @default(autoincrement())
-  invoice   Invoice          @relation(fields: [invoiceId], references: [id])
-  invoiceId Int
-  type      NotificationType
+  type      String
   message   String
   seen      Boolean          @default(false)
   createdAt DateTime         @default(now())
-  Client    Client?          @relation(fields: [clientId], references: [id])
-  clientId  Int?
-}
-
-enum NotificationType {
-  OVERDUE
-  PAYMENT_CONFIRMATION
+  Client    Client           @relation(fields: [clientId], references: [id])
+  clientId  Int
 }
 
 model Seller {

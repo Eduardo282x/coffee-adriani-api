@@ -12,6 +12,11 @@ export class DashboardController {
   async getDashboardData(@Body() dateRange: DTODateRangeFilter) {
     return await this.dashboardService.getDashboardData(dateRange);
   }
+  
+  @Post('/clients-demand')
+  async getClientsDemandReport(@Body() dateRange: DTODateRangeFilter) {
+    return await this.dashboardService.getClientsDemandReport(dateRange);
+  }
 
   @Post('/export')
   async downloadExcel(@Body() filter: DTODateRangeFilter, @Res() res: Response) {

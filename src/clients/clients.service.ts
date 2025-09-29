@@ -7,6 +7,8 @@ import * as PDFDocument from 'pdfkit';
 // import * as fs from 'fs';
 import * as stream from 'stream';
 import * as ExcelJS from 'exceljs';
+import { addDays } from 'date-fns/addDays';
+import { format } from 'date-fns/format';
 
 @Injectable()
 export class ClientsService {
@@ -374,6 +376,62 @@ export class ClientsService {
             })
             badResponse.message = err.message;
             return badResponse;
+        }
+    }
+
+    async generateInactivityNotifications() {
+        try {
+            const clients = await this.prismaService.client.findMany({
+                include: {
+                    invoices: {
+                        orderBy: { dueDate: 'desc' },
+                        take: 1, // traer solo la última factura por cliente
+                    },
+                },
+            });
+
+            const now = new Date();
+            let created = 0;
+
+            for (const client of clients) {
+                const lastInvoice = client.invoices && client.invoices[0];
+                if (!lastInvoice) continue;
+
+                const threshold = addDays(new Date(lastInvoice.dueDate), 7);
+                if (threshold > now) continue; // todavía no cumple la semana desde el vencimiento
+
+                // Evitar duplicados: si ya existe una notificación de tipo 'inactivity'
+                // generada desde la última factura, saltar
+                const exists = await this.prismaService.notification.findFirst({
+                    where: {
+                        clientId: client.id,
+                        type: 'inactivity',
+                        createdAt: { gte: lastInvoice.dueDate }, // creada desde la última factura
+                    },
+                });
+                if (exists) continue;
+
+                const message = `Cliente sin pedidos desde la fecha de vencimiento ${format(
+                    new Date(lastInvoice.dueDate),
+                    'dd/MM/yyyy',
+                )}`;
+
+                await this.prismaService.notification.create({
+                    data: {
+                        clientId: client.id,
+                        type: 'inactivity',
+                        message,
+                        seen: false,
+                    },
+                });
+
+                created++;
+            }
+        } catch (error) {
+            await this.prismaService.errorMessages.create({
+                data: { message: error.message, from: 'ClientService - InactivityNotifications' }
+            })
+            console.error('Error generating inactivity notifications:', error);
         }
     }
 }

@@ -9,6 +9,8 @@ import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/ex
 import { InvoiceStatus } from '@prisma/client';
 // import * as XLSX from 'xlsx';
 import * as ExcelJS from 'exceljs';
+import { addDays } from 'date-fns/addDays';
+import { format } from 'date-fns/format';
 
 @Injectable()
 export class InvoicesService {
@@ -797,11 +799,87 @@ export class InvoicesService {
                 }
             });
 
+            await this.generateInactivityNotifications();
             baseResponse.message = 'Facturas verificadas y agregadas a cobranza.'
             return baseResponse;
         } catch (err) {
             badResponse.message = err.message;
             return badResponse;
+        }
+    }
+
+    async generateInactivityNotifications(daysAfterDue = 7) {
+        console.log('Iniciando generación de notificaciones de inactividad...');
+        
+        try {
+            const clients = await this.prismaService.client.findMany({
+                include: {
+                    invoices: {
+                        orderBy: { dueDate: 'desc' },
+                        take: 1, // traer solo la última factura por cliente
+                    },
+                },
+            });
+
+            const now = new Date();
+            const createdList: {
+                clientId: number;
+                clientName: string;
+                lastDue: Date;
+                notificationId: number;
+            }[] = [];
+
+            for (const client of clients) {
+                const lastInvoice = client.invoices && client.invoices[0];
+                if (!lastInvoice) continue;
+
+                const threshold = addDays(new Date(lastInvoice.dueDate), daysAfterDue);
+                if (threshold > now) continue; // aún no cumple el tiempo de inactividad
+
+                // Evitar duplicados: notificación 'inactivity' creada desde la última factura
+                const existing = await this.prismaService.notification.findFirst({
+                    where: {
+                        clientId: client.id,
+                        type: 'inactivity',
+                        createdAt: { gte: lastInvoice.dueDate },
+                    },
+                });
+                if (existing) continue;
+
+                const message = `El cliente ${client.name} no ha realizado pedidos desde ${format(new Date(lastInvoice.dueDate), 'dd/MM/yyyy')}`;
+
+                const created = await this.prismaService.notification.create({
+                    data: {
+                        clientId: client.id,
+                        type: 'inactivity',
+                        message,
+                        seen: false,
+                    },
+                });
+
+                createdList.push({
+                    clientId: client.id,
+                    clientName: client.name,
+                    lastDue: lastInvoice.dueDate,
+                    notificationId: created.id,
+                });
+            }
+
+            return {
+                success: true,
+                created: createdList.length,
+                details: createdList,
+            };
+        } catch (err) {
+            // Registrar error en la tabla de errores si existe
+            try {
+                await this.prismaService.errorMessages.create({
+                    data: { message: err.message || String(err), from: 'NotificationsService.generateInactivityNotifications' },
+                });
+            } catch {
+                // no-op
+            }
+            return { success: false, message: err.message || String(err) };
         }
     }
 

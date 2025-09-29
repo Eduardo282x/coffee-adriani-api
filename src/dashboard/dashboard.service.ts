@@ -243,7 +243,7 @@ export class DashboardService {
         }
       },
       include: {
-        account: true,
+        account: { include: { method: true } },
         dolar: true,
         InvoicePayment: {
           include: {
@@ -265,7 +265,7 @@ export class DashboardService {
 
     // Cabecera principal de pagos
     const headerPagos = [
-      'Fecha Pago', 'Referencia', 'Cuenta', 'Monto ($)', 'Tasa Dólar', 'Monto (Bs)',
+      'Fecha Pago', 'Referencia', 'Cuenta', 'Metodo', 'Monto ($)', 'Tasa Dólar', 'Monto (Bs)',
       'Estado', 'Descripción', 'Factura Asociada', 'Total Factura ($)',
       'Cantidad Total Items', 'Monto Asignado ($)', 'Equivalente en Items', 'Porcentaje Pagado'
     ];
@@ -289,6 +289,7 @@ export class DashboardService {
           format(pago.paymentDate, 'dd/MM/yyyy'),
           pago.reference,
           pago.account.name,
+          pago.account.method.name,
           montoPagoUSD.toFixed(2),
           parseFloat(pago.dolar.dolar.toString()).toFixed(2),
           montoPagoBS.toFixed(2),
@@ -430,5 +431,76 @@ export class DashboardService {
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     const buffer = Buffer.from(arrayBuffer);
     return buffer;
+  }
+
+  async getClientsDemandReport(filter: DTODateRangeFilter) {
+    // Obtener facturas en el rango con items y cliente
+    const invoices = await this.prismaService.invoice.findMany({
+      where: {
+        dispatchDate: {
+          gte: filter.startDate,
+          lte: filter.endDate
+        }
+      },
+      include: {
+        client: true,
+        invoiceItems: true
+      }
+    });
+
+    // Agregar por cliente: cantidad de facturas, total items (bultos) y total monto
+    const map = new Map<number, {
+      clientId: number;
+      clientName: string;
+      invoicesCount: number;
+      totalItems: number;
+      totalAmount: number;
+    }>();
+
+    for (const inv of invoices) {
+      const clientId = inv.clientId;
+      const itemsCount = inv.invoiceItems.reduce((s, it) => s + Number(it.quantity), 0);
+      const totalAmount = Number(inv.totalAmount || 0);
+
+      if (!map.has(clientId)) {
+        map.set(clientId, {
+          clientId,
+          clientName: inv.client?.name || 'Sin nombre',
+          invoicesCount: 1,
+          totalItems: itemsCount,
+          totalAmount
+        });
+      } else {
+        const entry = map.get(clientId)!;
+        entry.invoicesCount += 1;
+        entry.totalItems += itemsCount;
+        entry.totalAmount += totalAmount;
+      }
+    }
+
+    // Convertir a array y ordenar por totalItems descendente
+    const clientsArray = Array.from(map.values()).sort((a, b) => b.totalItems - a.totalItems);
+
+    // Top N (ej. 20)
+    const topClients = clientsArray.slice(0, 20);
+
+    // Crear buckets: 0-20, 21-100, 101+
+    const buckets = {
+      '0-20': [] as typeof clientsArray,
+      '21-100': [] as typeof clientsArray,
+      '101+': [] as typeof clientsArray
+    };
+
+    for (const c of clientsArray) {
+      if (c.totalItems <= 20) buckets['0-20'].push(c);
+      else if (c.totalItems <= 100) buckets['21-100'].push(c);
+      else buckets['101+'].push(c);
+    }
+
+    return {
+      topClients,
+      buckets,
+      totalClientsConsidered: clientsArray.length
+    };
   }
 }

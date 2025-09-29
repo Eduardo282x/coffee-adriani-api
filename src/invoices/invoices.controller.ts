@@ -81,6 +81,10 @@ export class InvoicesController {
     async checkInvoice() {
         return await this.invoicesService.checkInvoice();
     }
+    @Post('/check-client-inactivity')
+    async generateInactivityNotifications() {
+        return await this.invoicesService.generateInactivityNotifications();
+    }
 
     @Post('/check-invoice/:id')
     async checkInvoicePayments(@Param('id', ParseIntPipe) id: number) {
