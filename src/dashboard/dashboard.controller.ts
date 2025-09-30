@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 import { Response } from 'express';
@@ -12,10 +12,10 @@ export class DashboardController {
   async getDashboardData(@Body() dateRange: DTODateRangeFilter) {
     return await this.dashboardService.getDashboardData(dateRange);
   }
-  
-  @Post('/clients-demand')
-  async getClientsDemandReport(@Body() dateRange: DTODateRangeFilter) {
-    return await this.dashboardService.getClientsDemandReport(dateRange);
+
+  @Get('/clients-demand')
+  async getClientsDemandReport() {
+    return await this.dashboardService.getClientsDemandReport();
   }
 
   @Post('/export')

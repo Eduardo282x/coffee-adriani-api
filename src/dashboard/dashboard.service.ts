@@ -433,15 +433,15 @@ export class DashboardService {
     return buffer;
   }
 
-  async getClientsDemandReport(filter: DTODateRangeFilter) {
+  async getClientsDemandReport() {
     // Obtener facturas en el rango con items y cliente
     const invoices = await this.prismaService.invoice.findMany({
-      where: {
-        dispatchDate: {
-          gte: filter.startDate,
-          lte: filter.endDate
-        }
-      },
+      // where: {
+      //   dispatchDate: {
+      //     gte: filter.startDate,
+      //     lte: filter.endDate
+      //   }
+      // },
       include: {
         client: true,
         invoiceItems: true
@@ -482,7 +482,7 @@ export class DashboardService {
     const clientsArray = Array.from(map.values()).sort((a, b) => b.totalItems - a.totalItems);
 
     // Top N (ej. 20)
-    const topClients = clientsArray.slice(0, 20);
+    const topClients = clientsArray;
 
     // Crear buckets: 0-20, 21-100, 101+
     const buckets = {
