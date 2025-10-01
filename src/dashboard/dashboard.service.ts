@@ -86,16 +86,6 @@ export class DashboardService {
   async generateInventoryAndInvoicesExcel(filter: DTODateRangeFilter): Promise<Buffer> {
     // 1. Obtener productos y movimientos de inventario en el rango
     const productos = await this.prismaService.product.findMany();
-    const movimientos = await this.prismaService.historyInventory.findMany({
-      where: {
-        movementDate: {
-          gte: filter.startDate,
-          lte: filter.endDate,
-        },
-      },
-      include: { product: true },
-      orderBy: { movementDate: 'asc' }
-    });
 
     // 2. Obtener facturas en el rango
     const facturas = await this.prismaService.invoice.findMany({
@@ -127,6 +117,233 @@ export class DashboardService {
 
     // 4. Crear workbook y hojas
     const workbook = new ExcelJS.Workbook();
+
+    // ==================================================================
+    // --- HOJA 1: REPORTE SEMANAL (Nueva hoja con formato personalizado) ---
+    // ==================================================================
+    const wsReporte = workbook.addWorksheet('Reporte Semanal');
+
+    // Configurar anchos de columnas
+    wsReporte.columns = [
+      { width: 25 }, // A
+      { width: 20 }, // B
+      { width: 15 }, // C
+      { width: 15 }, // D
+      { width: 15 }  // E
+    ];
+
+    // TÍTULO Y FECHA
+    // wsReporte.mergeCells('A1:E1');
+    const titleCell = wsReporte.getCell('C3');
+    titleCell.value = 'Reporte semanal';
+    titleCell.font = { bold: true, size: 14 };
+    // titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    // titleCell.fill = { type: 'pattern', pattern: 'solid'};
+
+    // Fecha
+    // wsReporte.mergeCells('C2:E2');
+    wsReporte.getCell('D2').value = 'Fecha';
+    wsReporte.getCell('D2').font = { bold: true };
+    wsReporte.getCell('D3').value = `${format(filter.startDate, 'dd/MM/yyyy')} - ${format(filter.endDate, 'dd/MM/yyyy')}`;
+    wsReporte.getCell('D3').alignment = { horizontal: 'center' };
+
+    // CALCULAR DATOS PARA EL REPORTE
+    const pagosEnRango = await this.prismaService.payment.findMany({
+      where: {
+        paymentDate: {
+          gte: filter.startDate,
+          lte: addDays(filter.endDate, 1)
+        }
+      },
+      include: {
+        account: { include: { method: true } },
+        dolar: true,
+        InvoicePayment: {
+          include: {
+            invoice: {
+              include: {
+                invoiceItems: {
+                  include: { product: true }
+                }
+              }
+            }
+          }
+        }
+      },
+      orderBy: { paymentDate: 'asc' }
+    });
+
+    // console.log(filter);
+
+
+    // 1. Sumatoria de pagos en dólares/divisas
+    const pagosDivisas = pagosEnRango
+      .filter(p => p.account.method.name.toLowerCase().includes('divisa') ||
+        p.account.method.name.toLowerCase().includes('dolar') ||
+        p.account.method.name.toLowerCase().includes('efectivo'))
+      .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
+
+    // 2. Sumatoria de transferencias en Bs
+    const pagosTransferencias = pagosEnRango
+      .filter(p => p.account.method.name.toLowerCase().includes('transferencia') ||
+        p.account.method.name.toLowerCase().includes('pago movil') ||
+        p.account.method.name.toLowerCase().includes('bs'))
+      .reduce((sum, p) => sum + (parseFloat(p.amount.toString()) / parseFloat(p.dolar.dolar.toString())), 0);
+
+    // 3. Pagos sin asociar (sin facturas)
+    const pagosSinAsociar = pagosEnRango
+      .filter(p => p.InvoicePayment.length === 0)
+      .reduce((sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)), 0);
+
+    // SECCIÓN: Ingresos de la semana
+    wsReporte.getCell('C5').value = 'Ingresos de la semana';
+    // wsReporte.getCell('C5').font = { bold: true };
+
+    wsReporte.getCell('B6').value = 'Divisas:';
+    wsReporte.getCell('B6').font = { bold: true };
+    wsReporte.getCell('B7').value = pagosDivisas.toFixed(2);
+
+    wsReporte.getCell('C6').value = 'Transferencia:';
+    wsReporte.getCell('C6').font = { bold: true };
+    wsReporte.getCell('C7').value = pagosTransferencias.toFixed(2);
+
+    wsReporte.getCell('D6').value = 'Sin asociar:';
+    wsReporte.getCell('D6').font = { bold: true };
+    wsReporte.getCell('D7').value = pagosSinAsociar.toFixed(2);
+
+    // Calcular bultos pagados y por cobrar
+    let bultosPagados = 0;
+    // let bultosPorCobrar = 0;
+
+    for (const factura of facturas) {
+      const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalFactura = parseFloat(factura.totalAmount.toString());
+      const pendiente = parseFloat(factura.remaining.toString());
+
+      if (totalFactura > 0) {
+        const porcentajePagado = (totalFactura - pendiente) / totalFactura;
+        bultosPagados += totalBultosFactura * porcentajePagado;
+        // bultosPorCobrar += totalBultosFactura * (1 - porcentajePagado);
+      }
+    }
+
+    // SECCIÓN: Bultos Pagados y Ganancias
+    wsReporte.getCell('B8').value = 'Bultos Pagados:';
+    wsReporte.getCell('B8').font = { bold: true };
+    wsReporte.getCell('B9').value = bultosPagados.toFixed(2);
+
+    wsReporte.getCell('D8').value = 'Ganancias:';
+    wsReporte.getCell(`D8`).font = { bold: true };
+    // wsReporte.getCell('E9').value = (pagosDivisas + (pagosTransferencias / parseFloat((await this.prismaService.historyDolar.findFirst({ orderBy: { date: 'desc' } }))?.dolar.toString() || '1'))).toFixed(2);
+
+    // SECCIÓN: Inventario y Despachados de la semana
+    wsReporte.getCell('B11').value = 'Inventario:';
+    wsReporte.getCell('B11').font = { bold: true };
+    wsReporte.getCell('D11').value = 'Despachados de la semana:';
+    wsReporte.getCell('D11').font = { bold: true };
+
+    // Calcular inventario actual y despachados por producto
+    let rowIndex = 12;
+    const productosEspeciales = ['Gourmet 100 y 200', 'Especial 250', 'Premium 100 y 200', 'Grano Kg'];
+    const despachados = {};
+
+    // Calcular despachados
+    facturas.forEach(factura => {
+      factura.invoiceItems.forEach(item => {
+        const nombreProducto = `${item.product.name} ${item.product.presentation}`;
+        if (!despachados[nombreProducto]) {
+          despachados[nombreProducto] = 0;
+        }
+        despachados[nombreProducto] += item.quantity;
+      });
+    });
+
+    for (const nombreProd of productosEspeciales) {
+      const producto = productos.find(p => `${p.name} ${p.presentation}`.includes(nombreProd.split(' ')[0]));
+
+      wsReporte.getCell(`B${rowIndex}`).value = `${nombreProd}:`;
+      wsReporte.getCell(`C${rowIndex}`).value = producto ? producto.amount : 0;
+      wsReporte.getCell(`D${rowIndex}`).value = despachados[nombreProd] || 0;
+
+      rowIndex++;
+    }
+
+
+    // Total
+    const totalInventario = productos.reduce((sum, p) => sum + p.amount, 0);
+    const totalDespachado: number = Object.values(despachados).reduce((sum: number, val: any) => sum + val, 0) as number;
+
+    wsReporte.getCell(`B16`).value = 'Total:';
+    wsReporte.getCell(`B16`).font = { bold: true };
+    // wsReporte.getCell(`B17`).value = totalInventario;
+    wsReporte.getCell(`D${rowIndex}`).value = totalDespachado;
+
+    const bultosPorCobrar = totalDespachado - bultosPagados;
+    wsReporte.getCell(`B18`).value = 'Bultos por cobrar:';
+    wsReporte.getCell(`B18`).font = { bold: true };
+    wsReporte.getCell(`B19`).value = bultosPorCobrar.toFixed(2);
+
+    rowIndex += 2;
+
+    // SECCIÓN: Bultos por cobrar y Deuda por cobrar
+    const deudaPorCobrar = facturas.reduce((sum, f) => sum + parseFloat(f.remaining.toString()), 0);
+    wsReporte.getCell(`D18`).value = 'Deuda por cobrar:';
+    wsReporte.getCell(`D18`).font = { bold: true };
+    wsReporte.getCell(`D19`).value = deudaPorCobrar.toFixed(2);
+
+    // SECCIÓN: Bultos del centro
+    wsReporte.getCell(`B20`).value = 'Bultos del centro';
+    wsReporte.getCell(`B20`).font = { bold: true };
+    wsReporte.getCell(`D20`).value = 'Bultos perdidos:';
+    wsReporte.getCell(`D20`).font = { bold: true };
+
+    // Filtrar facturas del bloque "Centro"
+    const facturasCentro = facturas.filter(f =>
+      f.client.block.name.toLowerCase().includes('centro')
+    );
+
+    let bultosDespachadosCentro = 0;
+    let bultosPagadosCentro = 0;
+    let bultosPendientesCentro = 0;
+
+    for (const factura of facturasCentro) {
+      const totalBultos = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalFactura = parseFloat(factura.totalAmount.toString());
+      const pendiente = parseFloat(factura.remaining.toString());
+
+      bultosDespachadosCentro += totalBultos;
+
+      if (totalFactura > 0) {
+        const porcentajePagado = (totalFactura - pendiente) / totalFactura;
+        bultosPagadosCentro += totalBultos * porcentajePagado;
+        bultosPendientesCentro += totalBultos * (1 - porcentajePagado);
+      }
+    }
+
+    wsReporte.getCell(`B21`).value = 'Despachados:';
+    wsReporte.getCell(`B21`).font = { bold: true };
+    wsReporte.getCell(`C21`).value = bultosDespachadosCentro.toFixed(2);
+
+    wsReporte.getCell(`B22`).value = 'Pagos:';
+    wsReporte.getCell(`B22`).font = { bold: true };
+    wsReporte.getCell(`C22`).value = bultosPagadosCentro.toFixed(2);
+
+    wsReporte.getCell(`B23`).value = 'Pendientes:';
+    wsReporte.getCell(`B23`).font = { bold: true };
+    wsReporte.getCell(`C23`).value = bultosPendientesCentro.toFixed(2);
+
+    // Aplicar bordes a toda la sección del reporte
+    for (let row = 2; row <= 25; row++) {
+      for (let col = 2; col <= 4; col++) {
+        const cell = wsReporte.getCell(row, col);
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      }
+    }
 
     // --- HOJA INVENTARIO ---
     const wsInv = workbook.addWorksheet('Inventario');
@@ -227,46 +444,17 @@ export class DashboardService {
         ...productos.map(p => prodMap[p.name] ?? '')
       ]);
     }
-
-
-
-
-
     //Pagos
 
     // 3. Obtener todos los pagos en el rango de fechas (adicional para pagos no asociados a facturas del período)
-    const pagosEnRango = await this.prismaService.payment.findMany({
-      where: {
-        paymentDate: {
-          gte: filter.startDate,
-          lte: filter.endDate
-        }
-      },
-      include: {
-        account: { include: { method: true } },
-        dolar: true,
-        InvoicePayment: {
-          include: {
-            invoice: {
-              include: {
-                invoiceItems: {
-                  include: { product: true }
-                }
-              }
-            }
-          }
-        }
-      },
-      orderBy: { paymentDate: 'asc' }
-    });
 
     // --- NUEVA HOJA PAGOS ---
     const wsPagos = workbook.addWorksheet('Análisis de Pagos');
 
     // Cabecera principal de pagos
     const headerPagos = [
-      'Fecha Pago', 'Referencia', 'Cuenta', 'Metodo', 'Monto ($)', 'Tasa Dólar', 'Monto (Bs)',
-      'Estado', 'Descripción', 'Factura Asociada', 'Total Factura ($)',
+      'Fecha Pago', 'Referencia', 'Cuenta', 'Método', 'Monto ($)', 'Tasa Dólar', 'Monto (Bs)',
+      'Descripción', 'Factura Asociada', 'Total Factura ($)',
       'Cantidad Total Items', 'Monto Asignado ($)', 'Equivalente en Items', 'Porcentaje Pagado'
     ];
     wsPagos.addRow(headerPagos);
@@ -278,8 +466,8 @@ export class DashboardService {
 
     // Procesar cada pago
     for (const pago of pagosEnRango) {
-      const montoPagoUSD = parseFloat(pago.amount.toString());
-      const montoPagoBS = montoPagoUSD * parseFloat(pago.dolar.dolar.toString());
+      const montoPagoUSD = pago.account.method.currency == 'USD' ? parseFloat(pago.amount.toString()) : (Number(pago.amount) / Number(pago.dolar.dolar));
+      const montoPagoBS = pago.account.method.currency == 'BS' ? parseFloat(pago.amount.toString()) : (Number(pago.amount) * Number(pago.dolar.dolar));
 
       totalPagado += montoPagoUSD;
 
@@ -293,7 +481,6 @@ export class DashboardService {
           montoPagoUSD.toFixed(2),
           parseFloat(pago.dolar.dolar.toString()).toFixed(2),
           montoPagoBS.toFixed(2),
-          pago.status,
           pago.description,
           'Sin factura asociada',
           '-',
@@ -323,10 +510,10 @@ export class DashboardService {
             format(pago.paymentDate, 'dd/MM/yyyy'),
             pago.reference,
             pago.account.name,
+            pago.account.method.name,
             montoPagoUSD.toFixed(2),
             parseFloat(pago.dolar.dolar.toString()).toFixed(2),
             montoPagoBS.toFixed(2),
-            pago.status,
             pago.description,
             `#${factura.controlNumber}`,
             totalFactura.toFixed(2),
