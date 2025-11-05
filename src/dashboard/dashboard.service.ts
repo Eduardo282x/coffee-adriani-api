@@ -247,30 +247,38 @@ export class DashboardService {
     const productosEspeciales = ['Gourmet 100 y 200', 'Especial 250', 'Premium 100 y 200', 'Grano Kg'];
     const despachados = {};
 
-    // Calcular despachados
+    // Mapeo para agrupar productos por categoría
+    const categoryProducto = {
+      'Cafe Gourmet': 'Gourmet 100 y 200',
+      'Cafe Premium': 'Premium 100 y 200',
+      'Cafe Especial': 'Especial 250',
+      'Cafe en Grano': 'Grano Kg'
+    };
+
+    // Calcular despachados agrupados por categoría
     facturas.forEach(factura => {
       factura.invoiceItems.forEach(item => {
-        const nombreProducto = `${item.product.name} ${item.product.presentation}`;
-        if (!despachados[nombreProducto]) {
-          despachados[nombreProducto] = 0;
+        const nombreProducto = item.product.name; // Solo el nombre, sin presentación
+        const category = categoryProducto[nombreProducto];
+
+        if (category) {
+          if (!despachados[category]) {
+            despachados[category] = 0;
+          }
+
+          despachados[category] += item.quantity;
         }
-        despachados[nombreProducto] += item.quantity;
       });
     });
 
+    // Escribir en el Excel
     for (const nombreProd of productosEspeciales) {
-      const producto = productos.find(p => `${p.name} ${p.presentation}`.includes(nombreProd.split(' ')[0]));
-
       wsReporte.getCell(`B${rowIndex}`).value = `${nombreProd}:`;
-      wsReporte.getCell(`C${rowIndex}`).value = producto ? producto.amount : 0;
       wsReporte.getCell(`D${rowIndex}`).value = despachados[nombreProd] || 0;
-
       rowIndex++;
     }
 
-
     // Total
-    const totalInventario = productos.reduce((sum, p) => sum + p.amount, 0);
     const totalDespachado: number = Object.values(despachados).reduce((sum: number, val: any) => sum + val, 0) as number;
 
     wsReporte.getCell(`B16`).value = 'Total:';
