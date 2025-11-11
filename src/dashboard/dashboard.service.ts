@@ -230,19 +230,19 @@ export class DashboardService {
 
     // Calcular bultos pagados y por cobrar
     let bultosPagados = 0;
-    // let bultosPorCobrar = 0;
+    let bultosPagadosEnRango = 0;
 
-    // for (const factura of facturas) {
-    //   const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
-    //   const totalFactura = parseFloat(factura.totalAmount.toString());
-    //   const pendiente = parseFloat(factura.remaining.toString());
+    for (const factura of facturas) {
+      const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalFactura = parseFloat(factura.totalAmount.toString());
+      const pendiente = parseFloat(factura.remaining.toString());
 
-    //   if (totalFactura > 0) {
-    //     const porcentajePagado = (totalFactura - pendiente) / totalFactura;
-    //     bultosPagados += totalBultosFactura * porcentajePagado;
-    //     // bultosPorCobrar += totalBultosFactura * (1 - porcentajePagado);
-    //   }
-    // }
+      if (totalFactura > 0) {
+        const porcentajePagado = (totalFactura - pendiente) / totalFactura;
+        bultosPagadosEnRango += totalBultosFactura * porcentajePagado;
+        // bultosPorCobrar += totalBultosFactura * (1 - porcentajePagado);
+      }
+    }
 
     for (const pago of pagosEnRango) {
       for (const invoicePayment of pago.InvoicePayment) {
@@ -320,7 +320,7 @@ export class DashboardService {
     // wsReporte.getCell(`B17`).value = totalInventario;
     wsReporte.getCell(`D${rowIndex}`).value = totalDespachado;
 
-    const bultosPorCobrar = totalDespachado - bultosPagados;
+    const bultosPorCobrar = totalDespachado - bultosPagadosEnRango;
     wsReporte.getCell(`B18`).value = 'Bultos por cobrar:';
     wsReporte.getCell(`B18`).font = { bold: true };
     wsReporte.getCell(`B19`).value = bultosPorCobrar.toFixed(2);
