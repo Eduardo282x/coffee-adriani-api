@@ -836,7 +836,7 @@ export class InvoicesService {
                     },
                 });
 
-                const message = `Cliente sin pedidos desde la fecha de vencimiento ${format(
+                const message = `El Cliente ${client.name} no tiene pedidos desde ${format(
                     new Date(lastInvoice.dueDate),
                     'dd/MM/yyyy',
                 )}`;
