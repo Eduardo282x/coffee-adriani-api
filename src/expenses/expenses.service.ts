@@ -13,7 +13,7 @@ export class ExpensesService {
     async getExpensesFilter(expenseFilter: ExpensesDTO) {
         try {
             const invoices = await this.getInvoicesRemaining(expenseFilter);
-            const invoicesEarns = await this.getInvoicesEarn(expenseFilter);
+            const invoicesEarns = await this.getInvoicesEarnV2(expenseFilter);
             const payments = await this.getPayments(expenseFilter);
             const paymentsNoAssociated = await this.getPaymentsNoAssociated(expenseFilter) as any[];
 
@@ -186,7 +186,7 @@ export class ExpensesService {
                 createdAt: {
                     gte: expenseFilter.startDate,
                     lte: expenseFilter.endDate,
-                },
+                }
             }
         });
 
@@ -284,9 +284,13 @@ export class ExpensesService {
                             }
                         }
                     ],
-                    dispatchDate: {
-                        gte: expenseFilter.startDate,
-                        lte: expenseFilter.endDate
+                    InvoicePayment: {
+                        some: {
+                            createdAt: {
+                                gte: expenseFilter.startDate,
+                                lte: expenseFilter.endDate
+                            }
+                        }
                     }
                 },
                 include: { client: true, invoiceItems: { include: { product: true } } }
@@ -306,9 +310,13 @@ export class ExpensesService {
                     account: {
                         name: { contains: 'Gastos' }
                     },
-                    paymentDate: {
-                        gte: expenseFilter.startDate,
-                        lte: expenseFilter.endDate
+                    InvoicePayment: {
+                        some: {
+                            createdAt: {
+                                gte: expenseFilter.startDate,
+                                lte: expenseFilter.endDate
+                            }
+                        }
                     }
                 },
                 include: {
