@@ -191,9 +191,26 @@ export class DashboardService {
       .reduce((sum, p) => sum + (parseFloat(p.amount.toString()) / parseFloat(p.dolar.dolar.toString())), 0);
 
     // 3. Pagos sin asociar (sin facturas)
-    const pagosSinAsociar = pagosEnRango
-      .filter(p => p.InvoicePayment.length === 0)
-      .reduce((sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)), 0);
+    // Pagos sin asociar hasta la fecha de cierre del reporte
+    const pagosSinAsociarTodos = await this.prismaService.payment.findMany({
+      where: {
+        paymentDate: {
+          lte: addDays(filter.endDate, 1) // Incluye el día de cierre
+        },
+        InvoicePayment: {
+          none: {} // Sin facturas asociadas
+        }
+      },
+      include: {
+        account: { include: { method: true } },
+        dolar: true
+      }
+    });
+
+    const totalPagosSinAsociar = pagosSinAsociarTodos.reduce(
+      (sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)),
+      0
+    );
 
     // SECCIÓN: Ingresos de la semana
     wsReporte.getCell('C5').value = 'Ingresos de la semana';
@@ -209,21 +226,38 @@ export class DashboardService {
 
     wsReporte.getCell('D6').value = 'Sin asociar:';
     wsReporte.getCell('D6').font = { bold: true };
-    wsReporte.getCell('D7').value = pagosSinAsociar.toFixed(2);
+    wsReporte.getCell('D7').value = totalPagosSinAsociar.toFixed(2);
 
     // Calcular bultos pagados y por cobrar
     let bultosPagados = 0;
     // let bultosPorCobrar = 0;
 
-    for (const factura of facturas) {
-      const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
-      const totalFactura = parseFloat(factura.totalAmount.toString());
-      const pendiente = parseFloat(factura.remaining.toString());
+    // for (const factura of facturas) {
+    //   const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+    //   const totalFactura = parseFloat(factura.totalAmount.toString());
+    //   const pendiente = parseFloat(factura.remaining.toString());
 
-      if (totalFactura > 0) {
-        const porcentajePagado = (totalFactura - pendiente) / totalFactura;
-        bultosPagados += totalBultosFactura * porcentajePagado;
-        // bultosPorCobrar += totalBultosFactura * (1 - porcentajePagado);
+    //   if (totalFactura > 0) {
+    //     const porcentajePagado = (totalFactura - pendiente) / totalFactura;
+    //     bultosPagados += totalBultosFactura * porcentajePagado;
+    //     // bultosPorCobrar += totalBultosFactura * (1 - porcentajePagado);
+    //   }
+    // }
+
+    for (const pago of pagosEnRango) {
+      for (const invoicePayment of pago.InvoicePayment) {
+        const factura = invoicePayment.invoice;
+        const montoAsignado = parseFloat(invoicePayment.amount.toString());
+        const totalFactura = parseFloat(factura.totalAmount.toString());
+
+        // Calcular cantidad total de items en la factura
+        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+
+        // Calcular porcentaje pagado de la factura por este pago
+        const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
+
+        // Sumar los bultos pagados proporcionalmente
+        bultosPagados += cantidadTotalItems * porcentajePagado;
       }
     }
 
