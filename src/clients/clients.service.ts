@@ -228,14 +228,55 @@ export class ClientsService {
 
     async deleteClients(id: number): Promise<DTOBaseResponse> {
         try {
+            // 1. Eliminar ClientReminderHistory
+            await this.prismaService.clientReminderHistory.deleteMany({
+                where: { clientId: id }
+            });
+
+            // 2. Eliminar ClientReminder
+            await this.prismaService.clientReminder.deleteMany({
+                where: { clientId: id }
+            });
+
+            // 3. Eliminar Notification
+            await this.prismaService.notification.deleteMany({
+                where: { clientId: id }
+            });
+
+            // 4. Eliminar facturas relacionadas y sus dependencias
+            const invoices = await this.prismaService.invoice.findMany({
+                where: { clientId: id },
+                select: { id: true }
+            });
+
+            for (const invoice of invoices) {
+                // 4.1 Eliminar InvoicePayment
+                await this.prismaService.invoicePayment.deleteMany({
+                    where: { invoiceId: invoice.id }
+                });
+                // 4.2 Eliminar InvoiceProduct
+                await this.prismaService.invoiceProduct.deleteMany({
+                    where: { invoiceId: invoice.id }
+                });
+            }
+
+            // 4.3 Eliminar Invoice
+            await this.prismaService.invoice.deleteMany({
+                where: { clientId: id }
+            });
+
+            // 5. Finalmente, eliminar el cliente
             await this.prismaService.client.delete({
                 where: { id }
-            })
+            });
 
-            baseResponse.message = 'Cliente eliminado exitosamente.'
+            baseResponse.message = 'Cliente y datos relacionados eliminados exitosamente.';
             return baseResponse;
         } catch (err) {
-            badResponse.message = err.message
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'ClientService' }
+            });
+            badResponse.message = err.message;
             return badResponse;
         }
     }
