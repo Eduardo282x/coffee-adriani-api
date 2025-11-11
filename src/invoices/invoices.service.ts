@@ -808,47 +808,40 @@ export class InvoicesService {
         }
     }
 
-    async generateInactivityNotifications(daysAfterDue = 7) {
-        console.log('Iniciando generación de notificaciones de inactividad...');
-        
+    async generateInactivityNotifications() {
         try {
             const clients = await this.prismaService.client.findMany({
                 include: {
                     invoices: {
                         orderBy: { dueDate: 'desc' },
-                        take: 1, // traer solo la última factura por cliente
+                        take: 1,
                     },
                 },
             });
 
             const now = new Date();
-            const createdList: {
-                clientId: number;
-                clientName: string;
-                lastDue: Date;
-                notificationId: number;
-            }[] = [];
 
             for (const client of clients) {
                 const lastInvoice = client.invoices && client.invoices[0];
                 if (!lastInvoice) continue;
 
-                const threshold = addDays(new Date(lastInvoice.dueDate), daysAfterDue);
-                if (threshold > now) continue; // aún no cumple el tiempo de inactividad
+                const threshold = addDays(new Date(lastInvoice.dueDate), 7);
+                if (threshold > now) continue;
 
-                // Evitar duplicados: notificación 'inactivity' creada desde la última factura
-                const existing = await this.prismaService.notification.findFirst({
+                // Eliminar notificaciones previas de inactividad para este cliente
+                await this.prismaService.notification.deleteMany({
                     where: {
                         clientId: client.id,
                         type: 'inactivity',
-                        createdAt: { gte: lastInvoice.dueDate },
                     },
                 });
-                if (existing) continue;
 
-                const message = `El cliente ${client.name} no ha realizado pedidos desde ${format(new Date(lastInvoice.dueDate), 'dd/MM/yyyy')}`;
+                const message = `Cliente sin pedidos desde la fecha de vencimiento ${format(
+                    new Date(lastInvoice.dueDate),
+                    'dd/MM/yyyy',
+                )}`;
 
-                const created = await this.prismaService.notification.create({
+                await this.prismaService.notification.create({
                     data: {
                         clientId: client.id,
                         type: 'inactivity',
@@ -856,30 +849,12 @@ export class InvoicesService {
                         seen: false,
                     },
                 });
-
-                createdList.push({
-                    clientId: client.id,
-                    clientName: client.name,
-                    lastDue: lastInvoice.dueDate,
-                    notificationId: created.id,
-                });
             }
-
-            return {
-                success: true,
-                created: createdList.length,
-                details: createdList,
-            };
-        } catch (err) {
-            // Registrar error en la tabla de errores si existe
-            try {
-                await this.prismaService.errorMessages.create({
-                    data: { message: err.message || String(err), from: 'NotificationsService.generateInactivityNotifications' },
-                });
-            } catch {
-                // no-op
-            }
-            return { success: false, message: err.message || String(err) };
+        } catch (error) {
+            await this.prismaService.errorMessages.create({
+                data: { message: error.message, from: 'ClientService - InactivityNotifications' }
+            });
+            console.error('Error generating inactivity notifications:', error);
         }
     }
 
@@ -1167,7 +1142,15 @@ export class InvoicesService {
                     totalAmount: calculateTotalInvoice,
                     remaining: calculateTotalInvoice,
                 }
-            })
+            });
+
+            // Eliminar notificación de inactividad si existe
+            await this.prismaService.notification.deleteMany({
+                where: {
+                    clientId: newInvoice.clientId,
+                    type: 'inactivity',
+                },
+            });
 
             baseResponse.message = 'Factura creada correctamente';
             return baseResponse;
