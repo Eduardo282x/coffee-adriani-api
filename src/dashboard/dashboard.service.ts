@@ -112,6 +112,59 @@ export class DashboardService {
       orderBy: { dispatchDate: 'asc' }
     });
 
+    // 2. Obtener facturas en el rango
+    const facturasCentros = await this.prismaService.invoice.findMany({
+      where: {
+        dispatchDate: {
+          lte: filter.endDate
+        },
+        client: {
+          block: {
+            name: {
+              contains: 'centro',
+              mode: 'insensitive'
+            }
+          }
+        }
+      },
+      include: {
+        client: { include: { block: true } },
+        invoiceItems: { include: { product: true } },
+        InvoicePayment: {
+          include: {
+            payment: {
+              include: {
+                account: true,
+                dolar: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { dispatchDate: 'asc' }
+    });
+
+    // Obtener todas las facturas hasta la fecha de cierre del reporte
+    const facturasHastaCierre = await this.prismaService.invoice.findMany({
+      where: {
+        dispatchDate: {
+          lte: addDays(filter.endDate, 1)
+        }
+      },
+      include: {
+        invoiceItems: true,
+        InvoicePayment: {
+          include: {
+            payment: {
+              include: {
+                account: { include: { method: true } }
+              }
+            }
+          }
+        }
+      }
+    });
+
     // 3. Preparar fechas del rango
     const dias = eachDayOfInterval({ start: filter.startDate, end: filter.endDate });
 
@@ -164,7 +217,8 @@ export class DashboardService {
               include: {
                 invoiceItems: {
                   include: { product: true }
-                }
+                },
+                client: { include: { block: true } }
               }
             }
           }
@@ -178,9 +232,8 @@ export class DashboardService {
 
     // 1. Sumatoria de pagos en dólares/divisas
     const pagosDivisas = pagosEnRango
-      .filter(p => p.account.method.name.toLowerCase().includes('divisa') ||
-        p.account.method.name.toLowerCase().includes('dolar') ||
-        p.account.method.name.toLowerCase().includes('efectivo'))
+      .filter(p => p.account.method.name.toLowerCase().includes('efectivo') &&
+        p.account.method.currency.toLowerCase().includes('usd'))
       .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0);
 
     // 2. Sumatoria de transferencias en Bs
@@ -312,6 +365,44 @@ export class DashboardService {
       rowIndex++;
     }
 
+    // Obtener tasa de cambio actual (si la necesitas)
+    const currentDolar = await this.prismaService.historyDolar.findFirst({
+      orderBy: { date: 'desc' }
+    });
+    const exchangeRateUsed = currentDolar?.dolar || 1;
+
+    let bultosPorCobrar = 0;
+
+    for (const factura of facturasHastaCierre) {
+      const invoiceTotal = Number(factura.totalAmount);
+      const invoiceRemaining = Number(factura.remaining);
+
+      // Analizar pagos por moneda
+      let totalPaidUSD = 0;
+      let totalPaidBS = 0;
+      for (const invPayment of factura.InvoicePayment) {
+        const paymentAmount = Number(invPayment.amount);
+        const paymentCurrency = invPayment.payment?.account?.method?.currency;
+        if (paymentCurrency === 'USD') {
+          totalPaidUSD += paymentAmount;
+        } else {
+          totalPaidBS += paymentAmount;
+        }
+      }
+
+      // Calcular proporción pendiente en BS
+      const totalPaid = totalPaidUSD + totalPaidBS;
+      const proportionBS = totalPaid > 0 ? totalPaidBS / totalPaid : 1;
+
+      for (const item of factura.invoiceItems) {
+        const totalBultosFactura = Number(item.quantity);
+        const pendiente = invoiceRemaining;
+        const porcentajePendiente = invoiceTotal > 0 ? pendiente / invoiceTotal : 0;
+        const bultosPendientes = totalBultosFactura * porcentajePendiente * proportionBS;
+        bultosPorCobrar += bultosPendientes;
+      }
+    }
+
     // Total
     const totalDespachado: number = Object.values(despachados).reduce((sum: number, val: any) => sum + val, 0) as number;
 
@@ -320,7 +411,7 @@ export class DashboardService {
     // wsReporte.getCell(`B17`).value = totalInventario;
     wsReporte.getCell(`D${rowIndex}`).value = totalDespachado;
 
-    const bultosPorCobrar = totalDespachado - bultosPagadosEnRango;
+    // const bultosPorCobrar = totalDespachado - bultosPagadosEnRango;
     wsReporte.getCell(`B18`).value = 'Bultos por cobrar:';
     wsReporte.getCell(`B18`).font = { bold: true };
     wsReporte.getCell(`B19`).value = bultosPorCobrar.toFixed(2);
@@ -328,7 +419,7 @@ export class DashboardService {
     rowIndex += 2;
 
     // SECCIÓN: Bultos por cobrar y Deuda por cobrar
-    const deudaPorCobrar = facturas.reduce((sum, f) => sum + parseFloat(f.remaining.toString()), 0);
+    const deudaPorCobrar = facturasHastaCierre.reduce((sum, f) => sum + parseFloat(f.remaining.toString()), 0);
     wsReporte.getCell(`D18`).value = 'Deuda por cobrar:';
     wsReporte.getCell(`D18`).font = { bold: true };
     wsReporte.getCell(`D19`).value = deudaPorCobrar.toFixed(2);
@@ -346,7 +437,9 @@ export class DashboardService {
 
     let bultosDespachadosCentro = 0;
     let bultosPagadosCentro = 0;
+    let bultosPagadosCentroTotal = 0;
     let bultosPendientesCentro = 0;
+    let bultosPendientesCentroTotal = 0;
 
     for (const factura of facturasCentro) {
       const totalBultos = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -362,17 +455,51 @@ export class DashboardService {
       }
     }
 
+    for (const pago of pagosEnRango) {
+      for (const invoicePayment of pago.InvoicePayment) {
+        const factura = invoicePayment.invoice;
+        if (factura.client.block.name.toLowerCase().includes('centro')) {
+          const montoAsignado = parseFloat(invoicePayment.amount.toString());
+          const totalFactura = parseFloat(factura.totalAmount.toString());
+          // Calcular cantidad total de items en la factura
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          // Calcular porcentaje pagado de la factura por este pago
+          const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
+          // Sumar los bultos pagados proporcionalmente
+          bultosPagadosCentroTotal += cantidadTotalItems * porcentajePagado;
+        }
+      }
+    }
+
+    for (const facturaCentro of facturasCentros) {
+      const totalBultosCentro = facturaCentro.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalFacturaCentro = parseFloat(facturaCentro.totalAmount.toString());
+      const pendienteCentro = parseFloat(facturaCentro.remaining.toString());
+      if (totalFacturaCentro > 0) {
+        const porcentajePendiente = pendienteCentro / totalFacturaCentro;
+        bultosPendientesCentroTotal += totalBultosCentro * porcentajePendiente;
+      }
+    }
+
     wsReporte.getCell(`B21`).value = 'Despachados:';
     wsReporte.getCell(`B21`).font = { bold: true };
     wsReporte.getCell(`C21`).value = bultosDespachadosCentro.toFixed(2);
 
+    // wsReporte.getCell(`B22`).value = 'Pagos semana:';
+    // wsReporte.getCell(`B22`).font = { bold: true };
+    // wsReporte.getCell(`C22`).value = bultosPagadosCentro.toFixed(2);
+
     wsReporte.getCell(`B22`).value = 'Pagos:';
     wsReporte.getCell(`B22`).font = { bold: true };
-    wsReporte.getCell(`C22`).value = bultosPagadosCentro.toFixed(2);
+    wsReporte.getCell(`C22`).value = bultosPagadosCentroTotal.toFixed(2);
+
+    // wsReporte.getCell(`B24`).value = 'Pendientes semana:';
+    // wsReporte.getCell(`B24`).font = { bold: true };
+    // wsReporte.getCell(`C24`).value = bultosPendientesCentro.toFixed(2);
 
     wsReporte.getCell(`B23`).value = 'Pendientes:';
     wsReporte.getCell(`B23`).font = { bold: true };
-    wsReporte.getCell(`C23`).value = bultosPendientesCentro.toFixed(2);
+    wsReporte.getCell(`C23`).value = bultosPendientesCentroTotal.toFixed(2);
 
     // Aplicar bordes a toda la sección del reporte
     for (let row = 2; row <= 25; row++) {
