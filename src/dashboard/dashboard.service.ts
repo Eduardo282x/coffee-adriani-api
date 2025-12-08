@@ -17,58 +17,80 @@ export class DashboardService {
 
 
   async getDashboardData(filter: DTODateRangeFilter) {
-    // 1. Facturas por estado y porcentajes
-    const [totalInvoices, payed, expired, pending] = await Promise.all([
-      this.prismaService.invoice.count({
-        where: {
-          createdAt: { gte: filter.startDate, lte: filter.endDate }
+    const dateFilter = {
+      createdAt: { gte: filter.startDate, lte: filter.endDate }
+    };
+
+    // 1. Ejecutar todas las consultas en paralelo
+    const [invoiceStats, productos, lastPending] = await Promise.all([
+      // Usar groupBy para obtener conteos por estado en una sola query
+      this.prismaService.invoice.groupBy({
+        by: ['status'],
+        where: dateFilter,
+        _count: { status: true }
+      }),
+
+      // Obtener solo los campos necesarios de productos
+      this.prismaService.product.findMany({
+        select: {
+          id: true,
+          name: true,
+          presentation: true,
+          amount: true
         }
       }),
-      this.prismaService.invoice.count({
-        where: {
-          status: 'Pagado',
-          createdAt: { gte: filter.startDate, lte: filter.endDate }
+
+      // Últimas 20 facturas pendientes con solo campos necesarios
+      this.prismaService.invoice.findMany({
+        where: { status: 'Pendiente' },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          controlNumber: true,
+          dispatchDate: true,
+          dueDate: true,
+          totalAmount: true,
+          status: true,
+          client: {
+            select: {
+              id: true,
+              name: true,
+            }
+          }
         }
-      }),
-      this.prismaService.invoice.count({
-        where: {
-          status: 'Vencida',
-          createdAt: { gte: filter.startDate, lte: filter.endDate }
-        }
-      }),
-      this.prismaService.invoice.count({
-        where: {
-          status: 'Pendiente',
-          createdAt: { gte: filter.startDate, lte: filter.endDate }
-        }
-      }),
+      })
     ]);
+
+    // 2. Procesar estadísticas de facturas
+    const statusMap = invoiceStats.reduce((acc, stat) => {
+      acc[stat.status] = stat._count.status;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const totalInvoices = invoiceStats.reduce((acc, stat) => acc + stat._count.status, 0);
+    const payed = statusMap['Pagado'] || 0;
+    const expired = statusMap['Vencida'] || 0;
+    const pending = statusMap['Pendiente'] || 0;
 
     const percent = (amount: number) =>
       totalInvoices === 0 ? 0 : Number(((amount / totalInvoices) * 100).toFixed(2));
 
-    // 2. Porcentaje de cada producto en inventario
-    const productos = await this.prismaService.product.findMany();
+    // 3. Procesar productos e inventario
     const totalStock = productos.reduce((acc, p) => acc + p.amount, 0);
-    const productsPercent = productos.map(p => ({
-      id: p.id,
-      name: `${p.name} ${p.presentation}`,
-      amount: p.amount,
-      percent: totalStock === 0 ? 0 : Number(((p.amount / totalStock) * 100).toFixed(2))
-    }));
 
-    // 3. Productos con bajo stock (<30%)
-    const lowStock = productsPercent.filter(p => p.percent < 30);
-
-    // 4. Últimas 20 facturas pendientes
-    const lastPending = await this.prismaService.invoice.findMany({
-      where: { status: 'Pendiente' },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      include: {
-        client: true,
-      }
+    const productsPercent = productos.map(p => {
+      const productPercent = totalStock === 0 ? 0 : Number(((p.amount / totalStock) * 100).toFixed(2));
+      return {
+        id: p.id,
+        name: `${p.name} ${p.presentation}`,
+        amount: p.amount,
+        percent: productPercent
+      };
     });
+
+    // 4. Filtrar productos con bajo stock (evitar iteración adicional)
+    const lowStock = productsPercent.filter(p => p.percent < 30);
 
     return {
       invoices: {
@@ -400,7 +422,7 @@ export class DashboardService {
     wsReporte.getCell(`B16`).value = 'Total:';
     wsReporte.getCell(`B16`).font = { bold: true };
     // wsReporte.getCell(`B17`).value = totalInventario;
-    wsReporte.getCell(`D${rowIndex}`).value = totalDespachado;
+    wsReporte.getCell(`D${rowIndex}`).value = totalDespachado as number;
 
     // const bultosPorCobrar = totalDespachado - bultosPagadosEnRango;
     wsReporte.getCell(`B18`).value = 'Bultos por cobrar:';
@@ -778,6 +800,685 @@ export class DashboardService {
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     const buffer = Buffer.from(arrayBuffer);
     return buffer;
+  }
+
+  async generateInventoryAndInvoicesExcelV2(filter: DTODateRangeFilter): Promise<Buffer> {
+    const endDatePlusOne = addDays(filter.endDate, 1);
+
+    // 1. Ejecutar todas las consultas en paralelo con selects optimizados
+    const [
+      productos,
+      facturas,
+      facturasCentros,
+      facturasHastaCierre,
+      pagosEnRango,
+      pagosSinAsociarTodos,
+      currentDolar,
+      inventarioMovsAntes
+    ] = await Promise.all([
+      // Productos con solo campos necesarios
+      this.prismaService.product.findMany({
+        select: {
+          id: true,
+          name: true,
+          presentation: true,
+          amount: true
+        }
+      }),
+
+      // Facturas en el rango
+      this.prismaService.invoice.findMany({
+        where: {
+          dispatchDate: {
+            gte: filter.startDate,
+            lte: filter.endDate
+          }
+        },
+        select: {
+          id: true,
+          controlNumber: true,
+          dispatchDate: true,
+          dueDate: true,
+          totalAmount: true,
+          remaining: true,
+          status: true,
+          client: {
+            select: {
+              name: true,
+              zone: true,
+              block: {
+                select: { name: true }
+              }
+            }
+          },
+          invoiceItems: {
+            select: {
+              quantity: true,
+              unitPrice: true,
+              unitPriceUSD: true,
+              productId: true,
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  presentation: true
+                }
+              }
+            }
+          },
+          InvoicePayment: {
+            select: {
+              amount: true,
+              payment: {
+                select: {
+                  account: {
+                    select: {
+                      method: {
+                        select: { currency: true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        orderBy: { dispatchDate: 'asc' }
+      }),
+
+      // Facturas de centros
+      this.prismaService.invoice.findMany({
+        where: {
+          dispatchDate: { lte: filter.endDate },
+          client: {
+            block: {
+              name: { contains: 'centro', mode: 'insensitive' }
+            }
+          }
+        },
+        select: {
+          id: true,
+          totalAmount: true,
+          remaining: true,
+          invoiceItems: {
+            select: { quantity: true }
+          },
+          client: {
+            select: {
+              block: {
+                select: { name: true }
+              }
+            }
+          }
+        },
+        orderBy: { dispatchDate: 'asc' }
+      }),
+
+      // Facturas hasta cierre
+      this.prismaService.invoice.findMany({
+        where: {
+          dispatchDate: { lte: endDatePlusOne }
+        },
+        select: {
+          id: true,
+          remaining: true,
+          invoiceItems: {
+            select: { quantity: true }
+          },
+          InvoicePayment: {
+            select: {
+              payment: {
+                select: {
+                  account: {
+                    select: {
+                      method: {
+                        select: { currency: true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }),
+
+      // Pagos en rango
+      this.prismaService.payment.findMany({
+        where: {
+          paymentDate: {
+            gte: filter.startDate,
+            lte: endDatePlusOne
+          }
+        },
+        select: {
+          paymentDate: true,
+          reference: true,
+          amount: true,
+          description: true,
+          account: {
+            select: {
+              name: true,
+              method: {
+                select: {
+                  name: true,
+                  currency: true
+                }
+              }
+            }
+          },
+          dolar: {
+            select: { dolar: true }
+          },
+          InvoicePayment: {
+            select: {
+              amount: true,
+              invoice: {
+                select: {
+                  id: true,
+                  controlNumber: true,
+                  totalAmount: true,
+                  invoiceItems: {
+                    select: {
+                      quantity: true,
+                      unitPrice: true,
+                      product: {
+                        select: {
+                          name: true,
+                          presentation: true
+                        }
+                      }
+                    }
+                  },
+                  client: {
+                    select: {
+                      block: {
+                        select: { name: true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        orderBy: { paymentDate: 'asc' }
+      }),
+
+      // Pagos sin asociar
+      this.prismaService.payment.findMany({
+        where: {
+          paymentDate: { lte: endDatePlusOne },
+          InvoicePayment: { none: {} }
+        },
+        select: {
+          amount: true,
+          dolar: {
+            select: { dolar: true }
+          }
+        }
+      }),
+
+      // Dólar actual
+      this.prismaService.historyDolar.findFirst({
+        select: { dolar: true },
+        orderBy: { date: 'desc' }
+      }),
+
+      // Movimientos de inventario antes del rango (agrupados)
+      this.prismaService.historyInventory.groupBy({
+        by: ['productId'],
+        where: {
+          movementDate: { lt: filter.startDate }
+        },
+        _sum: { quantity: true }
+      })
+    ]);
+
+    // 2. Preparar estructuras de datos optimizadas
+    const dias = eachDayOfInterval({ start: filter.startDate, end: filter.endDate });
+    const exchangeRateUsed = currentDolar?.dolar || 1;
+
+    // Mapear movimientos de inventario por producto
+    const inventarioInicialMap = new Map();
+    inventarioMovsAntes.forEach(mov => {
+      inventarioInicialMap.set(mov.productId, mov._sum.quantity || 0);
+    });
+
+    // Calcular inventario inicial
+    const inventarioInicial = {};
+    productos.forEach(p => {
+      inventarioInicial[p.id] = (p.amount || 0) + (inventarioInicialMap.get(p.id) || 0);
+    });
+
+    // 3. Calcular métricas de pagos de forma eficiente
+    const pagosDivisas = pagosEnRango
+      .filter(p => p.account.method.name.toLowerCase().includes('efectivo') &&
+        p.account.method.currency.toLowerCase().includes('usd'))
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const pagosTransferencias = pagosEnRango
+      .filter(p => p.account.method.name.toLowerCase().includes('transferencia') ||
+        p.account.method.name.toLowerCase().includes('pago movil') ||
+        p.account.method.name.toLowerCase().includes('bs'))
+      .reduce((sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)), 0);
+
+    const totalPagosSinAsociar = pagosSinAsociarTodos.reduce(
+      (sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)),
+      0
+    );
+
+    // 4. Calcular bultos pagados optimizado
+    let bultosPagados = 0;
+    let bultosPagadosEnRango = 0;
+
+    // Cache para totales de facturas
+    const facturaTotalesCache = new Map();
+    facturas.forEach(f => {
+      const totalBultos = f.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      facturaTotalesCache.set(f.id, {
+        totalBultos,
+        totalAmount: Number(f.totalAmount),
+        remaining: Number(f.remaining)
+      });
+    });
+
+    // Calcular bultos pagados en rango
+    facturas.forEach(factura => {
+      const cache = facturaTotalesCache.get(factura.id);
+      if (cache.totalAmount > 0) {
+        const porcentajePagado = (cache.totalAmount - cache.remaining) / cache.totalAmount;
+        bultosPagadosEnRango += cache.totalBultos * porcentajePagado;
+      }
+    });
+
+    // Calcular bultos pagados por pagos
+    pagosEnRango.forEach(pago => {
+      pago.InvoicePayment.forEach(invoicePayment => {
+        const factura = invoicePayment.invoice;
+        const montoAsignado = Number(invoicePayment.amount);
+        const totalFactura = Number(factura.totalAmount);
+        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+        const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
+        bultosPagados += cantidadTotalItems * porcentajePagado;
+      });
+    });
+
+    // 5. Calcular despachados agrupados
+    const categoryProducto = {
+      'Cafe Gourmet': 'Gourmet 100 y 200',
+      'Cafe Premium': 'Premium 100 y 200',
+      'Cafe Especial': 'Especial 250',
+      'Cafe en Grano': 'Grano Kg'
+    };
+
+    const despachados = {};
+    facturas.forEach(factura => {
+      factura.invoiceItems.forEach(item => {
+        const category = categoryProducto[item.product.name];
+        if (category) {
+          despachados[category] = (despachados[category] || 0) + item.quantity;
+        }
+      });
+    });
+
+    // 6. Calcular despachos por día y producto de forma eficiente
+    const despachosPorDiaYProducto = {};
+    dias.forEach(dia => {
+      const fechaKey = format(dia, 'yyyy-MM-dd');
+      despachosPorDiaYProducto[fechaKey] = {};
+      productos.forEach(producto => {
+        despachosPorDiaYProducto[fechaKey][producto.id] = 0;
+      });
+    });
+
+    facturas.forEach(factura => {
+      const fechaDespacho = format(factura.dispatchDate, 'yyyy-MM-dd');
+      if (despachosPorDiaYProducto[fechaDespacho]) {
+        factura.invoiceItems.forEach(item => {
+          if (despachosPorDiaYProducto[fechaDespacho][item.productId] !== undefined) {
+            despachosPorDiaYProducto[fechaDespacho][item.productId] += item.quantity;
+          }
+        });
+      }
+    });
+
+    // 7. Calcular métricas de centro
+    let bultosDespachadosCentro = 0;
+    let bultosPagadosCentroTotal = 0;
+    let bultosPendientesCentroTotal = 0;
+
+    facturas.forEach(factura => {
+      if (factura.client.block.name.toLowerCase().includes('centro')) {
+        bultosDespachadosCentro += factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      }
+    });
+
+    pagosEnRango.forEach(pago => {
+      pago.InvoicePayment.forEach(invoicePayment => {
+        const factura = invoicePayment.invoice;
+        if (factura.client.block.name.toLowerCase().includes('centro')) {
+          const montoAsignado = Number(invoicePayment.amount);
+          const totalFactura = Number(factura.totalAmount);
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
+          bultosPagadosCentroTotal += cantidadTotalItems * porcentajePagado;
+        }
+      });
+    });
+
+    facturasCentros.forEach(facturaCentro => {
+      const totalBultos = facturaCentro.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalFactura = Number(facturaCentro.totalAmount);
+      const pendiente = Number(facturaCentro.remaining);
+      if (totalFactura > 0) {
+        const porcentajePendiente = pendiente / totalFactura;
+        bultosPendientesCentroTotal += totalBultos * porcentajePendiente;
+      }
+    });
+
+    // 8. Calcular deuda por cobrar y bultos por cobrar
+    const deudaPorCobrar = facturasHastaCierre.reduce((sum, f) => sum + Number(f.remaining), 0);
+
+    const baseStartDate = new Date(2020, 1, 1);
+    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(
+      baseStartDate.toISOString(),
+      filter.endDate.toISOString()
+    ) as InvoiceStatistics;
+    const bultosPorCobrar = invoiceStatistics.packagePending;
+
+    // ============== GENERACIÓN DEL EXCEL ==============
+    const workbook = new ExcelJS.Workbook();
+
+    // HOJA 1: REPORTE SEMANAL
+    const wsReporte = workbook.addWorksheet('Reporte Semanal');
+    wsReporte.columns = [
+      { width: 25 }, { width: 20 }, { width: 15 }, { width: 15 }, { width: 15 }
+    ];
+
+    // Título y fecha
+    wsReporte.getCell('C3').value = 'Reporte semanal';
+    wsReporte.getCell('C3').font = { bold: true, size: 14 };
+    wsReporte.getCell('D2').value = 'Fecha';
+    wsReporte.getCell('D2').font = { bold: true };
+    wsReporte.getCell('D3').value = `${format(filter.startDate, 'dd/MM/yyyy')} - ${format(filter.endDate, 'dd/MM/yyyy')}`;
+    wsReporte.getCell('D3').alignment = { horizontal: 'center' };
+
+    // Ingresos
+    wsReporte.getCell('C5').value = 'Ingresos de la semana';
+    wsReporte.getCell('B6').value = 'Divisas:';
+    wsReporte.getCell('B6').font = { bold: true };
+    wsReporte.getCell('B7').value = pagosDivisas.toFixed(2);
+    wsReporte.getCell('C6').value = 'Transferencia:';
+    wsReporte.getCell('C6').font = { bold: true };
+    wsReporte.getCell('C7').value = pagosTransferencias.toFixed(2);
+    wsReporte.getCell('D6').value = 'Sin asociar:';
+    wsReporte.getCell('D6').font = { bold: true };
+    wsReporte.getCell('D7').value = totalPagosSinAsociar.toFixed(2);
+
+    // Bultos pagados
+    wsReporte.getCell('B8').value = 'Bultos Pagados:';
+    wsReporte.getCell('B8').font = { bold: true };
+    wsReporte.getCell('B9').value = bultosPagados.toFixed(2);
+    wsReporte.getCell('D8').value = 'Ganancias:';
+    wsReporte.getCell('D8').font = { bold: true };
+
+    // Inventario y despachados
+    wsReporte.getCell('B11').value = 'Inventario:';
+    wsReporte.getCell('B11').font = { bold: true };
+    wsReporte.getCell('D11').value = 'Despachados de la semana:';
+    wsReporte.getCell('D11').font = { bold: true };
+
+    const productosEspeciales = ['Gourmet 100 y 200', 'Especial 250', 'Premium 100 y 200', 'Grano Kg'];
+    let rowIndex = 12;
+
+    productosEspeciales.forEach(nombreProd => {
+      wsReporte.getCell(`B${rowIndex}`).value = `${nombreProd}:`;
+      wsReporte.getCell(`D${rowIndex}`).value = despachados[nombreProd] || 0;
+      rowIndex++;
+    });
+
+    // Total despachado
+    const totalDespachado = Object.values(despachados).reduce((sum: number, val: any) => sum + val, 0);
+    wsReporte.getCell('B16').value = 'Total:';
+    wsReporte.getCell('B16').font = { bold: true };
+    wsReporte.getCell(`D${rowIndex}`).value = totalDespachado as number;
+
+    // Bultos y deuda por cobrar
+    wsReporte.getCell('B18').value = 'Bultos por cobrar:';
+    wsReporte.getCell('B18').font = { bold: true };
+    wsReporte.getCell('B19').value = bultosPorCobrar.toFixed(4);
+    wsReporte.getCell('D18').value = 'Deuda por cobrar:';
+    wsReporte.getCell('D18').font = { bold: true };
+    wsReporte.getCell('D19').value = deudaPorCobrar.toFixed(2);
+
+    // Bultos del centro
+    wsReporte.getCell('B20').value = 'Bultos del centro';
+    wsReporte.getCell('B20').font = { bold: true };
+    wsReporte.getCell('D20').value = 'Bultos perdidos:';
+    wsReporte.getCell('D20').font = { bold: true };
+    wsReporte.getCell('B21').value = 'Despachados:';
+    wsReporte.getCell('B21').font = { bold: true };
+    wsReporte.getCell('C21').value = bultosDespachadosCentro.toFixed(2);
+    wsReporte.getCell('B22').value = 'Pagos:';
+    wsReporte.getCell('B22').font = { bold: true };
+    wsReporte.getCell('C22').value = bultosPagadosCentroTotal.toFixed(2);
+    wsReporte.getCell('B23').value = 'Pendientes:';
+    wsReporte.getCell('B23').font = { bold: true };
+    wsReporte.getCell('C23').value = bultosPendientesCentroTotal.toFixed(2);
+
+    // Aplicar bordes
+    for (let row = 2; row <= 25; row++) {
+      for (let col = 2; col <= 4; col++) {
+        const cell = wsReporte.getCell(row, col);
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      }
+    }
+
+    // HOJA INVENTARIO
+    const wsInv = workbook.addWorksheet('Inventario');
+    const header = ['Producto', 'Inventario Inicial'];
+    dias.forEach(d => header.push(format(d, "EEEE dd/MM/yyyy", { locale: es })));
+    header.push('Total Despachado', 'Inventario Actual');
+    wsInv.addRow(header);
+
+    productos.forEach(p => {
+      let fila = [`${p.name} ${p.presentation}`, inventarioInicial[p.id]];
+      let inventarioActual = inventarioInicial[p.id];
+      let totalDespachado = 0;
+
+      dias.forEach(dia => {
+        const fechaKey = format(dia, 'yyyy-MM-dd');
+        const cantidadDespachada = despachosPorDiaYProducto[fechaKey][p.id] || 0;
+        fila.push(cantidadDespachada);
+        inventarioActual -= cantidadDespachada;
+        totalDespachado += cantidadDespachada;
+      });
+
+      fila.push(totalDespachado, inventarioActual);
+      wsInv.addRow(fila);
+    });
+
+    // HOJA FACTURAS
+    const wsFact = workbook.addWorksheet('Facturas');
+    const prodHeaders = productos.map(p => p.name);
+    wsFact.addRow([
+      'Nro de control', 'Cliente', 'Bloque', 'Dirección zona', 'Fecha despacho',
+      'Fecha vencimiento', 'Total', 'Debe', 'Estado', ...prodHeaders
+    ]);
+
+    facturas.forEach(f => {
+      const prodMap = {};
+      f.invoiceItems.forEach(item => {
+        prodMap[item.product.name] = item.unitPriceUSD ? Number(item.unitPriceUSD) : Number(item.unitPrice);
+      });
+      wsFact.addRow([
+        f.controlNumber,
+        f.client.name,
+        f.client.block.name,
+        f.client.zone,
+        format(f.dispatchDate, 'dd/MM/yyyy'),
+        format(f.dueDate, 'dd/MM/yyyy'),
+        Number(f.totalAmount),
+        Number(f.remaining),
+        f.status,
+        ...productos.map(p => prodMap[p.name] ?? '')
+      ]);
+    });
+
+    // HOJA PAGOS
+    const wsPagos = workbook.addWorksheet('Análisis de Pagos');
+    const headerPagos = [
+      'Fecha Pago', 'Referencia', 'Cuenta', 'Método', 'Monto ($)', 'Tasa Dólar', 'Monto (Bs)',
+      'Descripción', 'Factura Asociada', 'Total Factura ($)',
+      'Cantidad Total Items', 'Monto Asignado ($)', 'Equivalente en Items', 'Porcentaje Pagado'
+    ];
+    wsPagos.addRow(headerPagos);
+
+    let totalPagado = 0;
+    let totalItemsPagados = 0;
+    const totalFacturasAfectadas = new Set();
+
+    pagosEnRango.forEach(pago => {
+      const montoPagoUSD = pago.account.method.currency === 'USD'
+        ? Number(pago.amount)
+        : Number(pago.amount) / Number(pago.dolar.dolar);
+      const montoPagoBS = pago.account.method.currency === 'BS'
+        ? Number(pago.amount)
+        : Number(pago.amount) * Number(pago.dolar.dolar);
+
+      totalPagado += montoPagoUSD;
+
+      if (pago.InvoicePayment.length === 0) {
+        wsPagos.addRow([
+          format(pago.paymentDate, 'dd/MM/yyyy'),
+          pago.reference,
+          pago.account.name,
+          pago.account.method.name,
+          montoPagoUSD.toFixed(2),
+          Number(pago.dolar.dolar).toFixed(2),
+          montoPagoBS.toFixed(2),
+          pago.description,
+          'Sin factura asociada',
+          '-', '-', '-', '-', '-'
+        ]);
+      } else {
+        pago.InvoicePayment.forEach(invoicePayment => {
+          const factura = invoicePayment.invoice;
+          const montoAsignado = Number(invoicePayment.amount);
+          const totalFactura = Number(factura.totalAmount);
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          const porcentajePagado = montoAsignado / totalFactura;
+          const equivalenteItems = cantidadTotalItems * porcentajePagado;
+
+          totalItemsPagados += equivalenteItems;
+          totalFacturasAfectadas.add(factura.id);
+
+          wsPagos.addRow([
+            format(pago.paymentDate, 'dd/MM/yyyy'),
+            pago.reference,
+            pago.account.name,
+            pago.account.method.name,
+            montoPagoUSD.toFixed(2),
+            Number(pago.dolar.dolar).toFixed(2),
+            montoPagoBS.toFixed(2),
+            pago.description,
+            `#${factura.controlNumber}`,
+            totalFactura.toFixed(2),
+            cantidadTotalItems,
+            montoAsignado.toFixed(2),
+            equivalenteItems.toFixed(2),
+            `${(porcentajePagado * 100).toFixed(1)}%`
+          ]);
+        });
+      }
+    });
+
+    wsPagos.addRow([]);
+    wsPagos.addRow(['=== RESUMEN GENERAL ===']);
+    wsPagos.addRow(['Total Pagado ($):', totalPagado.toFixed(2)]);
+    wsPagos.addRow(['Total Items Equivalentes:', totalItemsPagados.toFixed(2)]);
+    wsPagos.addRow(['Facturas Afectadas:', totalFacturasAfectadas.size]);
+
+    // HOJA RESUMEN POR PRODUCTO
+    const wsResumenProductos = workbook.addWorksheet('Productos Pagados');
+    const headerProductos = ['Producto', 'Cantidad Pagada', 'Precio Promedio ($)', 'Monto Total Pagado ($)'];
+    wsResumenProductos.addRow(headerProductos);
+
+    type ProductoResumen = {
+      cantidadPagada: number;
+      montoTotalPagado: number;
+      precioPromedio: number;
+    };
+    const productosResumen: Record<string, ProductoResumen> = {};
+
+    pagosEnRango.forEach(pago => {
+      pago.InvoicePayment.forEach(invoicePayment => {
+        const factura = invoicePayment.invoice;
+        const montoAsignado = Number(invoicePayment.amount);
+        const totalFactura = Number(factura.totalAmount);
+        const porcentajePagado = montoAsignado / totalFactura;
+
+        factura.invoiceItems.forEach(item => {
+          const productoKey = `${item.product.name} ${item.product.presentation}`;
+          const cantidadPagada = item.quantity * porcentajePagado;
+          const montoPagadoProducto = Number(item.unitPrice) * cantidadPagada;
+
+          if (!productosResumen[productoKey]) {
+            productosResumen[productoKey] = {
+              cantidadPagada: 0,
+              montoTotalPagado: 0,
+              precioPromedio: Number(item.unitPrice)
+            };
+          }
+
+          productosResumen[productoKey].cantidadPagada += cantidadPagada;
+          productosResumen[productoKey].montoTotalPagado += montoPagadoProducto;
+          productosResumen[productoKey].precioPromedio =
+            productosResumen[productoKey].montoTotalPagado / productosResumen[productoKey].cantidadPagada;
+        });
+      });
+    });
+
+    let totalGeneralProductos = 0;
+    Object.entries(productosResumen).forEach(([nombreProducto, datos]) => {
+      wsResumenProductos.addRow([
+        nombreProducto,
+        datos.cantidadPagada.toFixed(2),
+        datos.precioPromedio.toFixed(2),
+        datos.montoTotalPagado.toFixed(2)
+      ]);
+      totalGeneralProductos += datos.montoTotalPagado;
+    });
+
+    wsResumenProductos.addRow([]);
+    wsResumenProductos.addRow(['TOTAL GENERAL', '', '', totalGeneralProductos.toFixed(2)]);
+
+    // Aplicar estilos
+    [wsPagos, wsResumenProductos].forEach(ws => {
+      const headerRow = ws.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '4472C4' } };
+      headerRow.alignment = { horizontal: 'center' };
+
+      ws.columns.forEach(column => {
+        let maxLength = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const columnLength = cell.value ? cell.value.toString().length : 10;
+          if (columnLength > maxLength) maxLength = columnLength;
+        });
+        column.width = Math.min(Math.max(maxLength + 2, 10), 50);
+      });
+    });
+
+    // Exportar
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer);
   }
 
   async getClientsDemandReport() {

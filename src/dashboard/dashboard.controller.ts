@@ -25,4 +25,12 @@ export class DashboardController {
     res.setHeader('Content-Disposition', 'attachment; filename=reporte.xlsx');
     res.send(buffer);
   }
+
+  @Post('/export/v2')
+  async downloadExcelV2(@Body() filter: DTODateRangeFilter, @Res() res: Response) {
+    const buffer = await this.dashboardService.generateInventoryAndInvoicesExcelV2(filter);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=reporte.xlsx');
+    res.send(buffer);
+  }
 }
