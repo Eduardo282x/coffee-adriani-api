@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTOBaseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DetProducts, DTOInvoice, IInvoiceWithDetails, OptionalFilterInvoices, ResponseInvoice } from './invoice.dto';
+import { DetProducts, DTOInvoice, IInvoiceWithDetails, InvoiceStatistics, OptionalFilterInvoices, ResponseInvoice } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
@@ -157,7 +157,7 @@ export class InvoicesService {
         search?: string,
         blockId?: string,
         status?: string,
-    ) {
+    ): Promise<InvoiceStatistics | DTOBaseResponse> {
         try {
             const where: any = {};
             if (status) {
@@ -434,11 +434,11 @@ export class InvoicesService {
                 packagePendingBS: totalPendingPackagesBS,
                 detPackage: detPackage.sort((a, b) => b.totalQuantity - a.totalQuantity),
                 payments: {
-                    total: totalCash,
-                    totalPending: totalPending,
-                    totalPaid: (totalCash - totalPending),
                     debt: 0,
                     remaining: (totalCash - totalPending),
+                    total: totalCash,
+                    totalPaid: (totalCash - totalPending),
+                    totalPending: totalPending,
                 },
                 summary: {
                     invoiceCount: invoicesWithDetails.length,

@@ -5,11 +5,13 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import * as ExcelJS from 'exceljs';
 import { format, eachDayOfInterval, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { InvoicesService } from 'src/invoices/invoices.service';
+import { InvoiceStatistics } from 'src/invoices/invoice.dto';
 
 @Injectable()
 export class DashboardService {
 
-  constructor(private readonly prismaService: PrismaService) {
+  constructor(private readonly prismaService: PrismaService, private readonly invoicesService: InvoicesService) {
 
   }
 
@@ -373,10 +375,11 @@ export class DashboardService {
 
     let bultosPorCobrar = 0;
 
-    for (const factura of facturasHastaCierre) {
-      const invoiceTotal = Number(factura.totalAmount);
-      const invoiceRemaining = Number(factura.remaining);
+    const baseStartDate = new Date(2020, 1, 1); // 31 de diciembre de 2024
+    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(baseStartDate.toISOString(), filter.endDate.toISOString()) as InvoiceStatistics;
+    bultosPorCobrar = invoiceStatistics.packagePending;
 
+    for (const factura of facturasHastaCierre) {
       // Analizar pagos por moneda
       let totalPaidUSD = 0;
       let totalPaidBS = 0;
@@ -388,18 +391,6 @@ export class DashboardService {
         } else {
           totalPaidBS += paymentAmount;
         }
-      }
-
-      // Calcular proporción pendiente en BS
-      const totalPaid = totalPaidUSD + totalPaidBS;
-      const proportionBS = totalPaid > 0 ? totalPaidBS / totalPaid : 1;
-
-      for (const item of factura.invoiceItems) {
-        const totalBultosFactura = Number(item.quantity);
-        const pendiente = invoiceRemaining;
-        const porcentajePendiente = invoiceTotal > 0 ? pendiente / invoiceTotal : 0;
-        const bultosPendientes = totalBultosFactura * porcentajePendiente * proportionBS;
-        bultosPorCobrar += bultosPendientes;
       }
     }
 
@@ -414,7 +405,7 @@ export class DashboardService {
     // const bultosPorCobrar = totalDespachado - bultosPagadosEnRango;
     wsReporte.getCell(`B18`).value = 'Bultos por cobrar:';
     wsReporte.getCell(`B18`).font = { bold: true };
-    wsReporte.getCell(`B19`).value = bultosPorCobrar.toFixed(2);
+    wsReporte.getCell(`B19`).value = bultosPorCobrar.toFixed(4);
 
     rowIndex += 2;
 

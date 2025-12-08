@@ -159,3 +159,44 @@ export interface InvoiceItem {
     product: Product;
 }
 
+
+
+// Statistics Invoice Interface
+export interface InvoiceStatistics {
+    package:           number;
+    packagePaid:       number;
+    packagePending:    number;
+    packagePaidUSD:    number;
+    packagePaidBS:     number;
+    packagePendingUSD: number;
+    packagePendingBS:  number;
+    detPackage:        DetPackage[];
+    payments:          PaymentsStatistics;
+    summary:           Summary;
+}
+
+export interface DetPackage {
+    productId:          number;
+    product:            string;
+    totalQuantity:      number;
+    paidQuantity:       number;
+    pendingQuantity:    number;
+    paidQuantityUSD:    number;
+    paidQuantityBS:     number;
+    pendingQuantityUSD: number;
+    pendingQuantityBS:  number;
+}
+
+export interface PaymentsStatistics {
+    total:        number;
+    totalPending: number;
+    totalPaid:    number;
+    debt:         number;
+    remaining:    number;
+}
+
+export interface Summary {
+    invoiceCount:        number;
+    averageInvoiceValue: number;
+    paymentPercentage:   number;
+}

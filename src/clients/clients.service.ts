@@ -99,7 +99,7 @@ export class ClientsService {
         try {
             const findBlock = await this.prismaService.block.findFirst({
                 where: { name: { equals: newBlock.name, mode: 'insensitive' } },
-            })
+            });
 
             if (findBlock) {
                 badResponse.message = 'Ya existe un bloque con este nombre';
