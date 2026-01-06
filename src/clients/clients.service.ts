@@ -29,7 +29,13 @@ export class ClientsService {
         const clients = await this.prismaService.client.findMany({
             where: { active: true },
             include: { block: true },
-            orderBy: { id: 'asc' }
+            orderBy: { blockId: 'asc' }
+        });
+
+        // Asegurar orden determinístico por bloque y dirección
+        clients.sort((a, b) => {
+            if (a.blockId !== b.blockId) return (a.blockId || 0) - (b.blockId || 0);
+            return a.address.localeCompare(b.address);
         });
 
         const workbook = new ExcelJS.Workbook();
@@ -320,6 +326,12 @@ export class ClientsService {
                 }
 
                 return cli;
+            });
+            
+            // Asegurar orden determinístico por bloque y dirección
+            clientsReports.sort((a, b) => {
+                if (a.blockId !== b.blockId) return (a.blockId || 0) - (b.blockId || 0);
+                return a.address.localeCompare(b.address);
             });
 
             const filePDF = await new Promise(resolve => {
