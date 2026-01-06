@@ -940,9 +940,13 @@ export class PaymentsService {
                 include: { account: { include: { method: true } }, dolar: true }
             });
 
-            const calculateRemaining = findPayment.account.method.currency == 'BS'
+            if (!findPayment) {
+                throw new Error(`Pago con ID ${pay.paymentId} no encontrado.`);
+            }
+
+            const calculateRemaining = findPayment.account.method.currency === 'BS'
                 ? Number(findPaymentAssociate.amount) * Number(findPayment.dolar.dolar)
-                : Number(findPayment.amount);
+                : Number(findPaymentAssociate.amount);
 
             await this.prismaService.payment.update({
                 data: { remaining: { increment: calculateRemaining } },
