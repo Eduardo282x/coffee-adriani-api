@@ -289,59 +289,98 @@ export class ClientsService {
 
     async reportClients(client: DTOReportClients): Promise<Buffer | DTOBaseResponse> {
         try {
-            const where: any = {};
+            const clientWhere: any = {};
+            const invoiceStatusFilter = ['Creada', 'Pendiente', 'Vencida'];
 
             if (client.zone) {
-                where.zone = { equals: client.zone, mode: 'insensitive' };
+                clientWhere.zone = { equals: client.zone, mode: 'insensitive' };
             }
 
             if (client.blockId && client.blockId != 0) {
-                where.blockId = client.blockId;
+                clientWhere.blockId = client.blockId;
             }
 
-            const clientsReports = await this.prismaService.client.findMany({
-                where,
-                include: { block: true, invoices: { where: { status: { in: ['Creada', 'Pendiente', 'Vencida'] } } } },
+            const clients = await this.prismaService.client.findMany({
+                where: clientWhere,
+                include: { block: true },
                 orderBy: { blockId: 'asc' }
-            }).then(cli => {
-                return cli.map(c => {
-                    const totalInvoices = c.invoices.reduce((acc, invoice) => acc + Number(invoice.totalAmount), 0);
-                    const totalPaid = c.invoices.reduce((acc, invoice) => acc + Number(invoice.remaining), 0);
-                    const debt = totalInvoices - totalPaid;
-
-                    return {
-                        ...c,
-                        totalInvoices,
-                        totalPaid,
-                        debt
-                    }
-                });
-            }).then(cli => {
-                if (client.status === 'clean') {
-                    return cli.filter(c => c.totalInvoices == 0);
-                }
-
-                if (client.status === 'pending') {
-                    return cli.filter(c => c.totalInvoices != 0);
-                }
-
-                return cli;
             });
-            
-            // Asegurar orden determinístico por bloque y dirección
+
+            const invoiceTotals = await this.prismaService.invoice.groupBy({
+                by: ['clientId'],
+                where: {
+                    status: { in: invoiceStatusFilter } as any, // Explicitly cast to 'any' to avoid circular reference
+                    client: clientWhere,
+                },
+                _sum: { totalAmount: true, remaining: true },
+            });
+
+            const lastInvoices = await this.prismaService.invoice.findMany({
+                where: {
+                    status: { in: invoiceStatusFilter } as any,
+                    client: clientWhere,
+                },
+                orderBy: [{ clientId: 'asc' }, { dispatchDate: 'desc' }],
+                distinct: ['clientId'],
+                select: { clientId: true, controlNumber: true, dispatchDate: true },
+            });
+
+            const totalMap = new Map<number, { totalAmount: number; remaining: number }>();
+            invoiceTotals.forEach(item => {
+                totalMap.set(item.clientId, {
+                    totalAmount: Number(item._sum.totalAmount || 0),
+                    remaining: Number(item._sum.remaining || 0),
+                });
+            });
+
+            const lastInvoiceMap = new Map<number, { controlNumber: string; dispatchDate: Date | null }>();
+            lastInvoices.forEach(item => {
+                lastInvoiceMap.set(item.clientId, {
+                    controlNumber: item.controlNumber,
+                    dispatchDate: item.dispatchDate,
+                });
+            });
+
+            let clientsReports = clients.map(c => {
+                const totals = totalMap.get(c.id);
+                const totalInvoices = totals ? totals.totalAmount : 0;
+                const totalPaid = totals ? totals.remaining : 0;
+                const debt = totalInvoices - totalPaid;
+                const lastInvoice = lastInvoiceMap.get(c.id);
+
+                return {
+                    ...c,
+                    totalInvoices,
+                    totalPaid,
+                    debt,
+                    lastInvoiceControlNumber: lastInvoice ? lastInvoice.controlNumber : '',
+                    lastInvoiceDispatchDate: lastInvoice ? lastInvoice.dispatchDate : null,
+                };
+            });
+
+            if (client.status === 'clean') {
+                clientsReports = clientsReports.filter(c => c.totalInvoices == 0);
+            }
+
+            if (client.status === 'pending') {
+                clientsReports = clientsReports.filter(c => c.totalInvoices != 0);
+            }
+
             clientsReports.sort((a, b) => {
                 if (a.blockId !== b.blockId) return (a.blockId || 0) - (b.blockId || 0);
                 return a.address.localeCompare(b.address);
             });
 
-            const filePDF = await new Promise(resolve => {
+
+            const filePDF = await new Promise<Buffer>((resolve, reject) => {
                 const doc = new PDFDocument({ margin: 10, size: 'A4' });
                 const buffer: Uint8Array[] = [];
 
-                doc.on('data', buffer.push.bind(buffer));
+                doc.on('data', chunk => buffer.push(chunk));
                 doc.on('end', () => resolve(Buffer.concat(buffer)));
+                doc.on('error', reject);
                 // doc.pipe(fs.createWriteStream('ReporteClientes.pdf'));
-                doc.pipe(new stream.PassThrough());
+                // Pipe is not required when only buffering the output
 
                 const columns = [
                     { header: 'Nombre', width: 100 },
@@ -386,8 +425,8 @@ export class ClientsService {
                         cli.phone,
                         // cli.zone,
                         cli.block ? cli.block.name : 'N/A',
-                        cli.invoices.length > 0 ? cli.invoices[0].controlNumber : '',
-                        cli.invoices.length > 0 ? cli.invoices[0].dispatchDate.toLocaleString() : '',
+                        cli.lastInvoiceControlNumber,
+                        cli.lastInvoiceDispatchDate ? cli.lastInvoiceDispatchDate.toLocaleString() : '',
                         `${formatNumberWithDots(cli.totalInvoices)} $`,
                         `${formatNumberWithDots(cli.debt)} $`,
                         `${formatNumberWithDots(cli.totalPaid)} $`
@@ -406,7 +445,6 @@ export class ClientsService {
                 let startY = doc.y + 10;
                 drawHeaders(startY);
                 startY += rowHeight;
-
                 for (const cli of clientsReports) {
                     if (startY + rowHeight > maxY) {
                         doc.addPage();
