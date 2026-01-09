@@ -780,14 +780,16 @@ export class PaymentsService {
                     // Si existe historial de pagos, usar tu lógica de nuevoTotal2
                     if (findLastPaymentInvoice && typeLastPay !== '') {
                         // Calcular bultos que faltan por pagar basándose en el último tipo de pago
-                        const calculateBultosPagados = typeLastPay === 'USD'
-                            ? Number(firstElement.unitPriceUSD)
-                            : Number(firstElement.unitPrice);
+                        const calculateBultosPagados = Number(firstElement.unitPrice);
+                        // const calculateBultosPagados = typeLastPay === 'USD'
+                        //     ? Number(firstElement.unitPriceUSD)
+                        //     : Number(firstElement.unitPrice);
 
                         const bultosFaltanPagar = Number(findInvoice.remaining) / calculateBultosPagados;
 
                         // Calcular cuántos bultos corresponden al pago actual en USD
-                        const bultosPagoUSD = payDetail.amount / Number(firstElement.unitPriceUSD);
+                        // const bultosPagoUSD = payDetail.amount / Number(firstElement.unitPriceUSD);
+                        const bultosPagoUSD = payDetail.amount / Number(firstElement.unitPrice);
 
                         // Validar que no se exceda la cantidad de bultos que faltan por pagar
                         if (bultosPagoUSD > bultosFaltanPagar) {
@@ -798,7 +800,7 @@ export class PaymentsService {
                         const bultosYaPagados = cantidadBultosTotal - bultosFaltanPagar;
                         const recalculateBS2 = (bultosYaPagados * Number(firstElement.unitPrice)) +
                             ((bultosFaltanPagar - bultosPagoUSD) * Number(firstElement.unitPrice));
-                        const recalculateUSD2 = bultosPagoUSD * Number(firstElement.unitPriceUSD);
+                        const recalculateUSD2 = bultosPagoUSD * Number(firstElement.unitPrice);
                         nuevoTotal = recalculateBS2 + recalculateUSD2;
 
                         // El pagado total es lo que ya se había pagado más este pago
@@ -809,7 +811,7 @@ export class PaymentsService {
                         nuevoPagadoTotal = totalPagado + payDetail.amount;
 
                         // Calcular bultos pagados en USD (incluyendo este pago)
-                        const bultosPagadosUSD = nuevoPagadoTotal / Number(firstElement.unitPriceUSD);
+                        const bultosPagadosUSD = nuevoPagadoTotal / Number(firstElement.unitPrice);
 
                         // Validar que no se exceda la cantidad de bultos
                         if (bultosPagadosUSD > cantidadBultosTotal) {
@@ -821,12 +823,12 @@ export class PaymentsService {
 
                         // Recalcular totales
                         const recalculateBS = cantidadBultosBS * Number(firstElement.unitPrice);
-                        const recalculateUSD = bultosPagadosUSD * Number(firstElement.unitPriceUSD);
+                        const recalculateUSD = bultosPagadosUSD * Number(firstElement.unitPrice);
                         nuevoTotal = recalculateBS + recalculateUSD;
                     }
 
                     // Validaciones del nuevo total
-                    const totalEnUSD = cantidadBultosTotal * Number(firstElement.unitPriceUSD);
+                    const totalEnUSD = cantidadBultosTotal * Number(firstElement.unitPrice);
                     const totalEnBS = cantidadBultosTotal * Number(firstElement.unitPrice);
 
                     if (nuevoTotal < totalEnUSD || nuevoTotal > totalEnBS) {
