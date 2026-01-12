@@ -161,6 +161,7 @@ export class InvoicesService {
         try {
             const where: any = {};
             if (status) {
+
                 if (status == 'Abonadas') {
                     where.OR = [
                         {
@@ -261,8 +262,7 @@ export class InvoicesService {
                         }
                     }
                 }
-            });
-
+            })
             // Calcular estadísticas por producto con separación de monedas
             const productStatsMap = new Map<number, {
                 productId: number;
@@ -289,7 +289,7 @@ export class InvoicesService {
             // Procesar cada factura
             for (const invoice of invoicesWithDetails) {
                 const invoiceTotal = Number(invoice.totalAmount);
-                const invoiceRemaining = Number(invoice.remaining);
+                const invoiceRemaining = invoice.status == 'Pagado' ? 0 : Number(invoice.remaining);
                 const invoicePaid = invoiceTotal - invoiceRemaining;
 
                 totalCash += invoiceTotal;
@@ -1621,14 +1621,27 @@ export class InvoicesService {
         ];
 
         const productHeaders = productNames.flatMap(name => [`${name}`, `Precio`]);
-        const finalHeaders = [...baseHeaders, ...productHeaders, 'Total de bultos', 'Monto', 'Abono'];
+        const finalHeaders = [...baseHeaders, ...productHeaders, 'Total de bultos', 'Bultos pendientes', 'Monto', 'Abono'];
 
         ws1.addRow(finalHeaders);
         ws1.getRow(1).font = { bold: true };
 
         invoices.forEach(inv => {
             const totalBultos = inv.invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+            let bultosPendientes = 0;
             const abono = Number(inv.totalAmount) - Number(inv.remaining);
+
+            // Calcular bultos pendientes: usar el precio promedio por bulto
+            if (totalBultos > 0) {
+                const avgPricePerBulto = Number(inv.totalAmount) / totalBultos;
+                if(inv.status === 'Pagado') {
+                    bultosPendientes = 0;
+                } else {
+                    if (avgPricePerBulto > 0) {
+                        bultosPendientes = Math.round((Number(inv.remaining) / avgPricePerBulto) * 100) / 100; // 2 decimales
+                    }
+                }
+            }
 
             const rowData: (string | number | Date)[] = [
                 inv.controlNumber,
@@ -1652,6 +1665,7 @@ export class InvoicesService {
             }
 
             rowData.push(totalBultos);
+            rowData.push(bultosPendientes);
             rowData.push(''); // Monto vacío
             rowData.push(abono);
 
