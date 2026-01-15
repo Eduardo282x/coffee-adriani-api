@@ -311,6 +311,11 @@ export class InvoicesService {
                     const productKey = item.productId;
                     const productName = `${product.name} ${product.presentation}`;
 
+                    // Factor de conversión: si la presentación es '1kilo', cada unidad equivale a 0.2
+                    const conversionFactor = product.presentation == '1kilo' ? 0.2 : 1;
+                    // Cantidad efectiva (ajustada por presentación)
+                    const effectiveQuantity = item.quantity * conversionFactor;
+
                     // Determinar el precio unitario correcto según la moneda de pago
                     let unitPriceToUse: number;
                     let unitPriceUSD: number;
@@ -328,14 +333,15 @@ export class InvoicesService {
                         unitPriceUSD = unitPriceToUse / Number(exchangeRateUsed);
                     }
 
-                    // Calcular cuánto se ha pagado de este producto específico
+                    // Calcular cuánto se ha pagado de este producto específico (monto)
                     const itemSubtotal = Number(item.subtotal);
                     const proportionPaid = invoiceTotal > 0 ? invoicePaid / invoiceTotal : 0;
                     const itemPaidAmount = itemSubtotal * proportionPaid;
 
-                    // Calcular cantidad pagada en unidades (con decimales)
-                    const paidQuantity = unitPriceToUse > 0 ? itemPaidAmount / unitPriceToUse : 0;
-                    const pendingQuantity = Math.max(0, item.quantity - paidQuantity);
+                    // Calcular cantidad pagada en unidades (con decimales) y ajustarla por el factor de conversión
+                    const paidQuantityRaw = unitPriceToUse > 0 ? itemPaidAmount / unitPriceToUse : 0;
+                    const paidQuantity = paidQuantityRaw * conversionFactor;
+                    const pendingQuantity = Math.max(0, effectiveQuantity - paidQuantity);
 
                     // NUEVO: Calcular cantidades pagadas y pendientes por moneda
                     let paidQuantityUSD = 0;
@@ -380,7 +386,7 @@ export class InvoicesService {
                     // Actualizar o crear estadísticas del producto
                     const existing = productStatsMap.get(productKey);
                     if (existing) {
-                        existing.totalQuantity += item.quantity;
+                        existing.totalQuantity += effectiveQuantity;
                         existing.paidQuantity += paidQuantity;
                         existing.pendingQuantity += pendingQuantity;
                         existing.paidQuantityUSD += paidQuantityUSD;
@@ -390,7 +396,7 @@ export class InvoicesService {
                     } else {
                         productStatsMap.set(productKey, {
                             productId: item.productId,
-                            totalQuantity: item.quantity,
+                            totalQuantity: effectiveQuantity,
                             paidQuantity: paidQuantity,
                             pendingQuantity: pendingQuantity,
                             paidQuantityUSD: paidQuantityUSD,
@@ -401,7 +407,7 @@ export class InvoicesService {
                         });
                     }
 
-                    totalPackages += item.quantity;
+                    totalPackages += effectiveQuantity;
                 }
             }
 
@@ -1598,12 +1604,14 @@ export class InvoicesService {
         const productsMap: Map<string, { total: number; price: number }> = new Map();
         invoices.forEach((inv) => {
             inv.invoiceItems.forEach(({ product, quantity, unitPrice }) => {
+                const conversionFactor = product.presentation === '1kilo' ? 0.2 : 1;
+                const effectiveQuantity = quantity * conversionFactor;
                 const key = product.name;
                 const current = productsMap.get(key);
                 if (!current) {
-                    productsMap.set(key, { total: quantity, price: Number(unitPrice) });
+                    productsMap.set(key, { total: effectiveQuantity, price: Number(unitPrice) });
                 } else {
-                    current.total += quantity;
+                    current.total += effectiveQuantity;
                     productsMap.set(key, current);
                 }
             });
@@ -1627,7 +1635,10 @@ export class InvoicesService {
         ws1.getRow(1).font = { bold: true };
 
         invoices.forEach(inv => {
-            const totalBultos = inv.invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+            const totalBultos = inv.invoiceItems.reduce((sum, i) => {
+                const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
+                return sum + i.quantity * conv;
+            }, 0);
             let bultosPendientes = 0;
             const abono = Number(inv.totalAmount) - Number(inv.remaining);
 
@@ -1657,11 +1668,18 @@ export class InvoicesService {
                 inv.status,
             ];
 
-            // Agregar los productos por nombre (cantidad y precio)
+            // Agregar los productos por nombre (cantidad efectiva y precio)
             for (const productName of productNames) {
                 const found = inv.invoiceItems.find(item => item.product.name === productName);
-                rowData.push(found ? found.quantity : '');
-                rowData.push(found ? Number(found.unitPrice) : 0);
+                if (found) {
+                    const conv = found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
+                    const effective = Math.round(found.quantity * conv * 100) / 100;
+                    rowData.push(effective);
+                    rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
+                } else {
+                    rowData.push('');
+                    rowData.push(0);
+                }
             }
 
             rowData.push(totalBultos);
@@ -1722,11 +1740,21 @@ export class InvoicesService {
 
                 for (const productName of productNames) {
                     const found = inv.invoiceItems.find(item => item.product.name === productName);
-                    rowData.push(found ? found.quantity : '');
-                    rowData.push(found ? Number(found.unitPrice) : 0);
+                    if (found) {
+                        const conv = found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
+                        const effective = Math.round(found.quantity * conv * 100) / 100;
+                        rowData.push(effective);
+                        rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
+                    } else {
+                        rowData.push('');
+                        rowData.push(0);
+                    }
                 }
 
-                const totalBultos = inv.invoiceItems.reduce((sum, i) => sum + i.quantity, 0);
+                const totalBultos = inv.invoiceItems.reduce((sum, i) => {
+                    const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
+                    return sum + i.quantity * conv;
+                }, 0);
                 rowData.push(totalBultos);
 
                 const row = ws2.addRow(rowData);
