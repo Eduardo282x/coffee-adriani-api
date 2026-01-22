@@ -27,6 +27,7 @@ export class InvoicesService {
     async getInvoicesPaginated(
         page: number = 1,
         limit: number = 50,
+        type: string,
         startDate?: string,
         endDate?: string,
         search?: string,
@@ -80,6 +81,17 @@ export class InvoicesService {
                 where.client = {
                     blockId: Number(blockId)
                 };
+            }
+
+            if (type) {
+                // Filtrar por el campo `product.type` (string) en lugar del enum `InvoiceTypeProduct`
+                where.invoiceItems = {
+                    some: {
+                        product: {
+                            type: type
+                        }
+                    }
+                }
             }
 
             if (startDate && endDate) {
@@ -152,6 +164,7 @@ export class InvoicesService {
 
     // 2. Endpoint separado para estadísticas (solo cuando se necesite)
     async getInvoiceStatistics(
+        type: string,
         startDate?: string,
         endDate?: string,
         search?: string,
@@ -202,6 +215,17 @@ export class InvoicesService {
                 where.client = {
                     blockId: Number(blockId)
                 };
+            }
+
+            if (type) {
+                // Filtrar por el campo `product.type` (string) para evitar el enum InvoiceTypeProduct
+                where.invoiceItems = {
+                    some: {
+                        product: {
+                            type: type
+                        }
+                    }
+                }
             }
 
             if (startDate && endDate) {
@@ -1645,7 +1669,7 @@ export class InvoicesService {
             // Calcular bultos pendientes: usar el precio promedio por bulto
             if (totalBultos > 0) {
                 const avgPricePerBulto = Number(inv.totalAmount) / totalBultos;
-                if(inv.status === 'Pagado') {
+                if (inv.status === 'Pagado') {
                     bultosPendientes = 0;
                 } else {
                     if (avgPricePerBulto > 0) {

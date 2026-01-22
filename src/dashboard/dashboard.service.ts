@@ -22,7 +22,7 @@ export class DashboardService {
     };
 
     // 1. Ejecutar todas las consultas en paralelo
-    const [invoiceStats, productos, lastPending] = await Promise.all([
+    const [invoiceStats, inventory, lastPending] = await Promise.all([
       // Usar groupBy para obtener conteos por estado en una sola query
       this.prismaService.invoice.groupBy({
         by: ['status'],
@@ -31,12 +31,16 @@ export class DashboardService {
       }),
 
       // Obtener solo los campos necesarios de productos
-      this.prismaService.product.findMany({
+      this.prismaService.inventory.findMany({
         select: {
           id: true,
-          name: true,
-          presentation: true,
-          amount: true
+          quantity: true,
+          product: {
+            select: {
+              name: true,
+              presentation: true,
+            }
+          }
         }
       }),
 
@@ -77,14 +81,14 @@ export class DashboardService {
       totalInvoices === 0 ? 0 : Number(((amount / totalInvoices) * 100).toFixed(2));
 
     // 3. Procesar productos e inventario
-    const totalStock = productos.reduce((acc, p) => acc + p.amount, 0);
+    const totalStock = inventory.reduce((acc, p) => acc + p.quantity, 0);
 
-    const productsPercent = productos.map(p => {
-      const productPercent = totalStock === 0 ? 0 : Number(((p.amount / totalStock) * 100).toFixed(2));
+    const productsPercent = inventory.map(p => {
+      const productPercent = totalStock === 0 ? 0 : Number(((p.quantity / totalStock) * 100).toFixed(2));
       return {
         id: p.id,
-        name: `${p.name} ${p.presentation}`,
-        amount: p.amount,
+        name: `${p.product.name} ${p.product.presentation}`,
+        amount: p.quantity as number,
         percent: productPercent
       };
     });

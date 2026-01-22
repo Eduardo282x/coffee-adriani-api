@@ -20,6 +20,7 @@ export class InvoicesController {
     @ApiBearerAuth('JWT-auth')
     @ApiQuery({ name: 'page', type: Number, required: true, description: 'Número de página' })
     @ApiQuery({ name: 'limit', type: Number, required: true, description: 'Límite de elementos por página' })
+    @ApiQuery({ name: 'type', type: Number, required: true, description: 'Tipo de producto' })
     @ApiQuery({ name: 'startDate', type: String, required: false, description: 'Fecha de inicio (opcional)' })
     @ApiQuery({ name: 'endDate', type: String, required: false, description: 'Fecha de fin (opcional)' })
     @ApiQuery({ name: 'search', type: String, required: false, description: 'Término de búsqueda (opcional)' })
@@ -28,13 +29,14 @@ export class InvoicesController {
     async getInvoicesPaginated(
         @Query('page', ParseIntPipe) page: number,
         @Query('limit', ParseIntPipe) limit: number,
+        @Query('type') type: string,
         @Query('startDate') startDate?: string,
         @Query('endDate') endDate?: string,
         @Query('search') search?: string,
         @Query('blockId') blockId?: string,
         @Query('status') status?: string,
     ) {
-        return await this.invoicesService.getInvoicesPaginated(page, limit, startDate, endDate, search, blockId, status);
+        return await this.invoicesService.getInvoicesPaginated(page, limit, type, startDate, endDate, search, blockId, status);
     }
     @Get('/statistics')
     @ApiBearerAuth('JWT-auth')
@@ -44,13 +46,14 @@ export class InvoicesController {
     @ApiQuery({ name: 'blockId', type: String, required: false, description: 'ID del bloque (opcional)' })
     @ApiQuery({ name: 'status', type: String, required: false, description: 'Estado (opcional)' })
     async getInvoiceStatistics(
+        @Query('type') type: string,
         @Query('startDate') startDate: string,
         @Query('endDate') endDate: string,
         @Query('search') search?: string,
         @Query('blockId') blockId?: string,
         @Query('status') status?: string,
     ) {
-        return await this.invoicesService.getInvoiceStatistics(startDate, endDate, search, blockId, status);
+        return await this.invoicesService.getInvoiceStatistics(type, startDate, endDate, search, blockId, status);
     }
     @Get('/details/:id')
     async getInvoiceDetails(@Param('id', ParseIntPipe) invoiceId: number) {

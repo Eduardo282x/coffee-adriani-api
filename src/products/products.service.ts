@@ -16,7 +16,8 @@ export class ProductsService {
 
     async getTypeProduct() {
         return await this.prismaService.product.groupBy({
-            by: ['type'] 
+            by: ['type'],
+            orderBy: { type: 'asc' }
         })
     }
 
