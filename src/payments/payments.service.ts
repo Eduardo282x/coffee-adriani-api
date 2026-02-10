@@ -111,6 +111,20 @@ export class PaymentsService {
                         }
                     },
                     {
+                        InvoicePayment: {
+                            some: {
+                                invoice: {
+                                    client: {
+                                        name: {
+                                            contains: search,
+                                            mode: 'insensitive'
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
                         reference: {
                             contains: search,
                             mode: 'insensitive'
@@ -164,6 +178,9 @@ export class PaymentsService {
                                     include: {
                                         client: {
                                             include: { block: true }
+                                        },
+                                        invoiceItems: {
+                                            include: { product: true }
                                         }
                                     }
                                 }
@@ -178,23 +195,37 @@ export class PaymentsService {
                 this.prismaService.payment.count({ where })
             ]);
 
-            // Procesar datos
-            const processedPayments = payments.map(data => ({
-                ...data,
-                associated: data.InvoicePayment.length > 0,
-                amount: data.amount.toFixed(2),
-                amountUSD: data.account.method.currency === 'USD'
-                    ? data.amount.toFixed(2)
-                    : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
-                amountBs: data.account.method.currency === 'BS'
-                    ? data.amount.toFixed(2)
-                    : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
-                remaining: data.remaining.toFixed(2),
-                remainingUSD: data.account.method.currency === 'USD'
-                    ? data.remaining.toFixed(2)
-                    : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
-                credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
-            }));
+            // Procesar datos. If a `type` filter was provided, include only the
+            // InvoicePayment entries whose related invoice contains products of
+            // that type. This avoids showing invoices of other types when a
+            // payment is associated to multiple invoices.
+            const processedPayments = payments.map(data => {
+                const filteredInvoicePayments = type
+                    ? data.InvoicePayment.filter(ip =>
+                        !!ip.invoice &&
+                        Array.isArray(ip.invoice.invoiceItems) &&
+                        ip.invoice.invoiceItems.some(ii => ii.product?.type === type)
+                    )
+                    : data.InvoicePayment;
+
+                return {
+                    ...data,
+                    InvoicePayment: filteredInvoicePayments,
+                    associated: filteredInvoicePayments.length > 0,
+                    amount: data.amount.toFixed(2),
+                    amountUSD: data.account.method.currency === 'USD'
+                        ? data.amount.toFixed(2)
+                        : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
+                    amountBs: data.account.method.currency === 'BS'
+                        ? data.amount.toFixed(2)
+                        : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
+                    remaining: data.remaining.toFixed(2),
+                    remainingUSD: data.account.method.currency === 'USD'
+                        ? data.remaining.toFixed(2)
+                        : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
+                    credit: filteredInvoicePayments.length > 0 && Number(data.remaining) > 0
+                };
+            });
 
             // Calcular paginación
             const totalPages = Math.ceil(totalCount / limit);
@@ -212,8 +243,9 @@ export class PaymentsService {
                     hasPrev
                 }
             };
-        } catch (error) {
-            throw new Error(`Error al obtener pagos paginados: ${error.message}`);
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error al obtener pagos paginados: ${errMsg}`);
         }
     }
 
@@ -287,6 +319,20 @@ export class PaymentsService {
                         }
                     },
                     {
+                        InvoicePayment: {
+                            some: {
+                                invoice: {
+                                    client: {
+                                        name: {
+                                            contains: search,
+                                            mode: 'insensitive'
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
                         reference: {
                             contains: search,
                             mode: 'insensitive'
@@ -333,53 +379,67 @@ export class PaymentsService {
                     dolar: true,
                     account: {
                         include: { method: true }
+                    },
+                    InvoicePayment: {
+                        include: {
+                            invoice: {
+                                include: {
+                                    client: { include: { block: true } },
+                                    invoiceItems: { include: { product: true } }
+                                }
+                            }
+                        }
                     }
                 },
                 where
             });
 
+            // Si se proporcionó `type`, mantener sólo las InvoicePayment cuya
+            // factura contiene productos de ese tipo. Esto evita contar/mostrar
+            // facturas de otros tipos cuando un pago está asociado a varias.
+            const processedPayments = payments.map(data => {
+                const filteredInvoicePayments = type
+                    ? data.InvoicePayment.filter((ip: any) =>
+                        !!ip.invoice &&
+                        Array.isArray(ip.invoice.invoiceItems) &&
+                        ip.invoice.invoiceItems.some((ii: any) => ii.product?.type === type)
+                    )
+                    : data.InvoicePayment;
+
+                return {
+                    ...data,
+                    InvoicePayment: filteredInvoicePayments
+                } as any;
+            });
+
             // Calcular estadísticas
-            const totalAmountBs = payments
+            const totalAmountBs = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
                 .reduce((acc, data) => acc + Number(data.amount), 0);
 
-            const totalAmountBsInUSD = payments
+            const totalAmountBsInUSD = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
                 .reduce((acc, data) => acc + (Number(data.amount) / Number(data.dolar.dolar)), 0);
 
-            const totalAmountUSD = payments
+            const totalAmountUSD = processedPayments
                 .filter(item => item.account.method.currency === 'USD')
                 .reduce((acc, data) => acc + Number(data.amount), 0);
 
-            const totalRemainingBs = payments
+            const totalRemainingBs = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
                 .reduce((acc, data) => acc + Number(data.remaining), 0);
 
-            const totalRemainingBsInUSD = payments
+            const totalRemainingBsInUSD = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
                 .reduce((acc, data) => acc + (Number(data.remaining) / Number(data.dolar.dolar)), 0);
 
-            const totalRemainingUSD = payments
+            const totalRemainingUSD = processedPayments
                 .filter(item => item.account.method.currency === 'USD')
                 .reduce((acc, data) => acc + Number(data.remaining), 0);
 
-            const associatedPayments = await this.prismaService.payment.count({
-                where: {
-                    ...where,
-                    InvoicePayment: {
-                        some: {}
-                    }
-                }
-            });
-
-            const unassociatedPayments = await this.prismaService.payment.count({
-                where: {
-                    ...where,
-                    InvoicePayment: {
-                        none: {}
-                    }
-                }
-            });
+            // Contar asociados/no asociados a partir de los pagos procesados
+            const associatedPayments = processedPayments.filter(p => p.InvoicePayment && p.InvoicePayment.length > 0).length;
+            const unassociatedPayments = processedPayments.filter(p => !p.InvoicePayment || p.InvoicePayment.length === 0).length;
 
             // Estadísticas por método de pago
             const paymentsByMethod = await this.prismaService.payment.groupBy({
@@ -426,8 +486,9 @@ export class PaymentsService {
                 },
                 byMethod: methodStatistics
             };
-        } catch (error) {
-            throw new Error(`Error al obtener estadísticas de pagos: ${error.message}`);
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error al obtener estadísticas de pagos: ${errMsg}`);
         }
     }
 
@@ -474,8 +535,9 @@ export class PaymentsService {
                     : (Number(payment.remaining) / Number(payment.dolar.dolar)).toFixed(2),
                 credit: payment.InvoicePayment.length > 0 && Number(payment.remaining) > 0
             };
-        } catch (error) {
-            throw new Error(`Error al obtener detalles del pago: ${error.message}`);
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error al obtener detalles del pago: ${errMsg}`);
         }
     }
 
@@ -536,8 +598,9 @@ export class PaymentsService {
             });
             baseResponse.message = 'Cuenta de pago creada correctamente';
             return baseResponse;
-        } catch (error) {
-            badResponse.message = error.message;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -554,8 +617,9 @@ export class PaymentsService {
             });
             baseResponse.message = 'Cuenta de pago actualizada correctamente';
             return baseResponse;
-        } catch (error) {
-            badResponse.message = error.message;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -645,8 +709,9 @@ export class PaymentsService {
             baseResponse.message = 'Pago guardado correctamente';
             return baseResponse;
         }
-        catch (error) {
-            badResponse.message = error.message;
+        catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -676,8 +741,9 @@ export class PaymentsService {
             baseResponse.message = 'Pago actualizado correctamente';
             return baseResponse;
         }
-        catch (error) {
-            badResponse.message = error.message;
+        catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -696,8 +762,9 @@ export class PaymentsService {
             baseResponse.message = 'Pago actualizado correctamente';
             return baseResponse;
         }
-        catch (error) {
-            badResponse.message = error.message;
+        catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -913,8 +980,9 @@ export class PaymentsService {
 
             baseResponse.message = 'Pago asociado a factura exitosamente.';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -961,14 +1029,11 @@ export class PaymentsService {
 
             baseResponse.message = `Pago Desasociado de factura exitosamente.`
             return baseResponse
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            badResponse.message = errMsg;
             return badResponse;
         }
-    }
-
-    async saveDataExcelPaymentsLocal(payments: PaymentParseExcel[]) {
-
     }
 
     async deletePayment(id: number) {
@@ -994,8 +1059,9 @@ export class PaymentsService {
             })
             baseResponse.message = 'Pago eliminado exitosamente';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -1007,8 +1073,9 @@ export class PaymentsService {
             })
             baseResponse.message = 'Cuenta eliminada exitosamente';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -1059,7 +1126,6 @@ export class PaymentsService {
                 }
             }
 
-            console.log('Validación de facturas completada exitosamente.');
             // baseResponse.data = { invoices: invoicesAffectedData, message: messages };
             baseResponse.message = `Se actualizaron ${invoicesAffected} facturas.`;
             return baseResponse;
@@ -1074,16 +1140,7 @@ export class PaymentsService {
         const dolarHistory = await this.prismaService.historyDolar.findMany();
         const invoicesDB = await this.prismaService.invoice.findMany();
         const dolarBase = await this.productService.getDolar();
-        // const dolarData = payments.map(item => {
-        //     return {
-        //         dolar: item.dolar,
-        //         date: item.date
-        //     }
-        // })
 
-        // const removeDolarDuplicate: DolarData[] = this.removeDuplicateDolarEntries(dolarData)
-
-        // return await this.saveDolarHistory(removeDolarDuplicate);
         try {
             payments.map(async (item) => {
                 let findAccount;
@@ -1173,8 +1230,9 @@ export class PaymentsService {
 
             baseResponse.message = 'Pagos, dolar y asociación guardados exitosamente.';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -1288,8 +1346,9 @@ export class PaymentsService {
 
             baseResponse.message = 'Pagos asociación guardados exitosamente.';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -1308,64 +1367,10 @@ export class PaymentsService {
             }
         });
 
-        const methodPaymentsDB = await this.prismaService.paymentMethod.findMany();
-        const historyDolarDB = await this.prismaService.historyDolar.findMany();
         const invoicesDB = await this.prismaService.invoice.findMany();
         const paymentsDB = await this.prismaService.payment.findMany();
-        const paymentsInvoiceDB = await this.prismaService.invoicePayment.findMany({
-            include: {
-                invoice: true,
-                payment: true
-            }
-        });
+        
         try {
-            // const savePayments = dataPayments.map((data) => {
-            //     const findDolar = historyDolarDB.find(item => Number(item.dolar).toFixed(2) === Number(data.dolar).toFixed(2));
-            //     const pagoMovil = methodPaymentsDB.find(item => item.name === 'Pago Movil');
-            //     const Efectivo = methodPaymentsDB.find(item => item.name === 'Efectivo Bs');
-
-            //     const methodPayments = data.bank === 'Bolivares' ? Efectivo?.id : pagoMovil?.id;
-
-            //     if (!pagoMovil || !Efectivo) {
-            //         throw new Error(`Metodo de pago no encontrado para la factura ${data.controlNumber}`)
-            //     }
-            //     if (!findDolar) {
-            //         throw new Error(`Tasa de dolar no encontrada para pago ${data.reference} - factura: ${data.controlNumber}`)
-            //     }
-            //     return {
-            //         amount: data.amount,
-            //         bank: data.bank,
-            //         currency: 'BS' as Currency,
-            //         reference: data.reference ? data.reference.toString() : '',
-            //         paymentDate: data.date,
-            //         status: 'CONFIRMED' as PaymentStatus,
-            //         dolarId: findDolar.id,
-            //         methodId: methodPayments
-            //     }
-            // });
-
-            // const savePaymentInvoices = dataPayments.map(data => {
-            //     const findInvoice = invoicesDB.find(item => item.controlNumber == data.controlNumber);
-
-            //     if(data.reference == '' ){
-            //         return 
-            //     }
-            //     const findPayment = paymentsDB.filter(pay => pay.reference != null || pay.reference != '').find(item => item.reference == data.reference);
-            //     const totalPayInvoice = Number(data.amount / data.dolar).toFixed(2);
-
-            //     if(!findInvoice) {
-            //         return 
-            //     }
-            //     if(!findPayment) {
-            //         throw new Error(`No se encontro el pago con referencia ${data.reference}`)
-            //     }
-            //     return {
-            //         invoiceId: findInvoice.id,
-            //         paymentId: findPayment.id,
-            //         amount: totalPayInvoice
-            //     }
-            // })
-
             const updatePaymentsInvoices = dataPayments.map(data => {
                 const totalPayInvoice = Number(data.amount / data.dolar).toFixed(2);
                 const findInvoice = invoicesDB.find(item => item.controlNumber == data.controlNumber);
@@ -1393,8 +1398,9 @@ export class PaymentsService {
             })
             baseResponse.message = 'Pagos, dolar y asociación guardados exitosamente.';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -1407,8 +1413,9 @@ export class PaymentsService {
 
             baseResponse.message = 'Historial del dolar cargado';
             return baseResponse;
-        } catch (err) {
-            badResponse.message = err.message
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
             return badResponse;
         }
     }

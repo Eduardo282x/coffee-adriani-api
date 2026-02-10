@@ -155,9 +155,9 @@ export class InvoicesService {
             };
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             });
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -480,14 +480,16 @@ export class InvoicesService {
             };
 
         } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+
             await this.prismaService.errorMessages.create({
                 data: {
-                    message: err.message,
+                    message: errMsg,
                     from: 'InvoiceService',
                 }
             });
 
-            badResponse.message = err.message || 'Error calculating invoice statistics';
+            badResponse.message = errMsg || 'Error calculating invoice statistics';
             return badResponse;
         }
     }
@@ -532,6 +534,12 @@ export class InvoicesService {
             const invoice = await this.prismaService.invoice.findUnique({
                 where: { id: invoiceId },
                 include: {
+                    client: {
+                        select: {
+                            name: true,
+                            rif: true
+                        }
+                    },
                     invoiceItems: {
                         include: {
                             product: true
@@ -558,10 +566,11 @@ export class InvoicesService {
                 totalAmount: invoice.totalAmount.toFixed(2)
             };
         } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: errMsg, from: 'InvoiceService' }
             });
-            badResponse.message = err.message;
+            badResponse.message = errMsg;
             return badResponse;
         }
     }
@@ -638,9 +647,9 @@ export class InvoicesService {
             };
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -716,9 +725,9 @@ export class InvoicesService {
             };
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -727,7 +736,7 @@ export class InvoicesService {
         try {
             return await this.getInvoices({ status: 'Vencida' }) as ResponseInvoice
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -765,9 +774,9 @@ export class InvoicesService {
             return invoice;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -833,7 +842,7 @@ export class InvoicesService {
             baseResponse.message = 'Facturas verificadas y agregadas a cobranza.'
             return baseResponse;
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -882,9 +891,9 @@ export class InvoicesService {
             }
         } catch (error) {
             await this.prismaService.errorMessages.create({
-                data: { message: error.message, from: 'ClientService - InactivityNotifications' }
+                data: { message: (error instanceof Error ? error.message : String(error)), from: 'ClientService - InactivityNotifications' }
             });
-            console.error('Error generating inactivity notifications:', error);
+            console.error('Error generating inactivity notifications:', error instanceof Error ? error.message : String(error));
         }
     }
 
@@ -934,7 +943,7 @@ export class InvoicesService {
             }
 
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -1187,9 +1196,9 @@ export class InvoicesService {
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -1257,9 +1266,9 @@ export class InvoicesService {
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -1289,7 +1298,7 @@ export class InvoicesService {
             return baseResponse;
 
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse
         }
     }
@@ -1303,7 +1312,7 @@ export class InvoicesService {
             baseResponse.message = 'Factura marcada como pagada.'
             return baseResponse;
         } catch (err) {
-            baseResponse.message = err.message;
+            baseResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse
         }
     }
@@ -1316,7 +1325,7 @@ export class InvoicesService {
             baseResponse.message = 'Factura marcada como pendiente.'
             return baseResponse;
         } catch (err) {
-            baseResponse.message = err.message;
+            baseResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse
         }
     }
@@ -1329,7 +1338,7 @@ export class InvoicesService {
             baseResponse.message = 'Factura Limpiada.'
             return baseResponse;
         } catch (err) {
-            baseResponse.message = err.message;
+            baseResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse
         }
     }
@@ -1392,9 +1401,9 @@ export class InvoicesService {
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'InvoiceService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -1452,7 +1461,7 @@ export class InvoicesService {
             baseResponse.message = 'Facturas guardadas exitosamente.';
             return baseResponse;
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -1535,9 +1544,9 @@ export class InvoicesService {
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { from: 'InvoiceServiceExcel', message: err.message }
+                data: { from: 'InvoiceServiceExcel', message: err instanceof Error ? err.message : String(err) }
             })
-            badResponse.message = `Ah ocurrido un error ${err.message}`
+            badResponse.message = `Ah ocurrido un error ${err instanceof Error ? err.message : String(err)}`
             return badResponse;
         }
     }
@@ -1565,7 +1574,7 @@ export class InvoicesService {
             return baseResponse;
         } catch (err) {
             return {
-                message: err.message,
+                message: err instanceof Error ? err.message : String(err),
                 success: false,
                 data: parseDataClient
             }

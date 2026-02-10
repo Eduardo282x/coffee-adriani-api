@@ -1,10 +1,9 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res } from '@nestjs/common';
-import { InvoicesService } from './invoices.service';
 import { DTOInvoice } from './invoice.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 import { Response } from 'express';
-import { InvoiceStatus } from '@prisma/client';
 import { ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { InvoicesService } from './invoices.service';
 
 @Controller('invoices')
 export class InvoicesController {
