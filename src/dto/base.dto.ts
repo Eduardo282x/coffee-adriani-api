@@ -1,5 +1,5 @@
 import { Transform } from "class-transformer";
-import { IsDate, IsOptional } from "class-validator";
+import { IsDate, IsOptional, IsString } from "class-validator";
 
 export class DTOBaseResponse {
     message: string;
@@ -25,4 +25,9 @@ export class DTODateRangeFilter {
     @IsDate()
     @Transform(({ value }) => new Date(value))
     endDate: Date;
+}
+
+export class DashboardExcel extends DTODateRangeFilter {
+    @IsString()
+    type: string;
 }

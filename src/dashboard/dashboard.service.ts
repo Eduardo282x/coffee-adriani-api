@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DTODateRangeFilter } from 'src/dto/base.dto';
+import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 import * as ExcelJS from 'exceljs';
@@ -111,7 +111,7 @@ export class DashboardService {
     };
   }
 
-  async generateInventoryAndInvoicesExcel(filter: DTODateRangeFilter): Promise<Buffer> {
+  async generateInventoryAndInvoicesExcel(filter: DashboardExcel): Promise<Buffer> {
     // 1. Obtener productos y movimientos de inventario en el rango
     const productos = await this.prismaService.product.findMany();
 
@@ -402,7 +402,7 @@ export class DashboardService {
     let bultosPorCobrar = 0;
 
     const baseStartDate = new Date(2020, 1, 1); // 31 de diciembre de 2024
-    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(baseStartDate.toISOString(), filter.endDate.toISOString()) as InvoiceStatistics;
+    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(filter.type, baseStartDate.toISOString(), filter.endDate.toISOString()) as InvoiceStatistics;
     bultosPorCobrar = invoiceStatistics.packagePending;
 
     for (const factura of facturasHastaCierre) {
@@ -806,7 +806,7 @@ export class DashboardService {
     return buffer;
   }
 
-  async generateInventoryAndInvoicesExcelV2(filter: DTODateRangeFilter): Promise<Buffer> {
+  async generateInventoryAndInvoicesExcelV2(filter: DashboardExcel): Promise<Buffer> {
     const endDatePlusOne = addDays(filter.endDate, 1);
 
     // 1. Ejecutar todas las consultas en paralelo con selects optimizados
@@ -1186,6 +1186,7 @@ export class DashboardService {
 
     const baseStartDate = new Date(2020, 1, 1);
     const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(
+      filter.type,
       baseStartDate.toISOString(),
       filter.endDate.toISOString()
     ) as InvoiceStatistics;
