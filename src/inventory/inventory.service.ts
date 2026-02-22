@@ -14,22 +14,30 @@ export class InventoryService {
     async getInventory() {
         const getDolar = await this.productsService.getDolar();
 
-        return await this.prismaService.inventory.findMany({
-            orderBy: { id: 'asc' },
-            include: {
-                product: true
-            }
-        }).then(inv => inv.map(iv => {
-            return {
-                ...iv,
-                product: {
-                    ...iv.product,
-                    price: iv.product.price.toFixed(2),
-                    priceUSD: iv.product.priceUSD.toFixed(2),
-                    priceBs: (Number(iv.product.price) * Number(getDolar.dolar)).toFixed(2)
+        try {
+            return await this.prismaService.inventory.findMany({
+                orderBy: { id: 'asc' },
+                include: {
+                    product: true
                 }
-            }
-        }))
+            }).then(inv => inv.map(iv => {
+                return {
+                    ...iv,
+                    product: {
+                        ...iv.product,
+                        price: iv.product.price.toFixed(2),
+                        priceUSD: iv.product.priceUSD.toFixed(2),
+                        priceBs: (Number(iv.product.price) * Number(getDolar.dolar)).toFixed(2)
+                    }
+                }
+            }))
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
+            })
+            badResponse.message = err instanceof Error ? err.message : String(err);
+            return [];
+        }
     }
     async getInventoryHistory() {
         const getDolar = await this.productsService.getDolar();
@@ -93,9 +101,9 @@ export class InventoryService {
         }
         catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'inventoryService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -134,9 +142,9 @@ export class InventoryService {
         }
         catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'inventoryService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -144,7 +152,7 @@ export class InventoryService {
     async updateInventoryInvoice(inventory: DTOInventory) {
         try {
             const findProductInventory = await this.prismaService.inventory.findFirst({
-                where: {productId: inventory.productId}
+                where: { productId: inventory.productId }
             })
 
             const findProductInInventory = await this.prismaService.inventory.update({
@@ -170,9 +178,9 @@ export class InventoryService {
         }
         catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'inventoryService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }
@@ -204,9 +212,9 @@ export class InventoryService {
         }
         catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'inventoryService' }
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : String(err);
             return badResponse;
         }
     }

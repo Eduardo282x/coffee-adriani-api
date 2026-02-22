@@ -167,25 +167,85 @@ export class PaymentsService {
             // Consulta principal con paginación
             const [payments, totalCount] = await Promise.all([
                 this.prismaService.payment.findMany({
-                    include: {
-                        dolar: true,
-                        account: {
-                            include: { method: true }
+                    select: {
+                        id: true,
+                        amount: true,
+                        remaining: true,
+                        reference: true,
+                        description: true,
+                        paymentDate: true,
+                        status: true,
+                        createdAt: true,
+                        updatedAt: true,
+                        dolar: {
+                            select: {
+                                id: true,
+                                dolar: true,
+                                date: true
+                            }
                         },
-                        InvoicePayment: {
-                            include: {
-                                invoice: {
-                                    include: {
-                                        client: {
-                                            include: { block: true }
-                                        },
-                                        invoiceItems: {
-                                            include: { product: true }
-                                        }
+                        account: {
+                            select: {
+                                id: true,
+                                name: true,
+                                bank: true,
+                                method: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        currency: true
                                     }
                                 }
                             }
                         },
+                        InvoicePayment: {
+                            // Si viene `type`, traer sólo las asociaciones cuyo invoice
+                            // tenga items con productos de ese tipo.
+                            where: type ? {
+                                invoice: {
+                                    invoiceItems: {
+                                        some: {
+                                            product: {
+                                                type: type
+                                            }
+                                        }
+                                    }
+                                }
+                            } : undefined,
+                            select: {
+                                id: true,
+                                invoiceId: true,
+                                paymentId: true,
+                                amount: true,
+                                createdAt: true,
+                                invoice: {
+                                    select: {
+                                        id: true,
+                                        controlNumber: true,
+                                        dispatchDate: true,
+                                        dueDate: true,
+                                        totalAmount: true,
+                                        remaining: true,
+                                        consignment: true,
+                                        status: true,
+                                        deleted: true,
+                                        client: {
+                                            select: {
+                                                id: true,
+                                                name: true,
+                                                rif: true,
+                                                block: {
+                                                    select: {
+                                                        id: true,
+                                                        name: true
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     },
                     where,
                     orderBy: { paymentDate: 'desc' },
@@ -195,18 +255,9 @@ export class PaymentsService {
                 this.prismaService.payment.count({ where })
             ]);
 
-            // Procesar datos. If a `type` filter was provided, include only the
-            // InvoicePayment entries whose related invoice contains products of
-            // that type. This avoids showing invoices of other types when a
-            // payment is associated to multiple invoices.
             const processedPayments = payments.map(data => {
-                const filteredInvoicePayments = type
-                    ? data.InvoicePayment.filter(ip =>
-                        !!ip.invoice &&
-                        Array.isArray(ip.invoice.invoiceItems) &&
-                        ip.invoice.invoiceItems.some(ii => ii.product?.type === type)
-                    )
-                    : data.InvoicePayment;
+                // Nota: `InvoicePayment` ya viene filtrado por `type` desde Prisma.
+                const filteredInvoicePayments = data.InvoicePayment
 
                 return {
                     ...data,
@@ -405,12 +456,45 @@ export class PaymentsService {
                         ip.invoice.invoiceItems.some((ii: any) => ii.product?.type === type)
                     )
                     : data.InvoicePayment;
-
                 return {
                     ...data,
                     InvoicePayment: filteredInvoicePayments
                 } as any;
             });
+
+            const processedPaymentsNotType = payments.map(data => {
+                const filteredInvoicePayments = type
+                    ? data.InvoicePayment.filter((ip: any) =>
+                        !!ip.invoice &&
+                        Array.isArray(ip.invoice.invoiceItems) &&
+                        ip.invoice.invoiceItems.some((ii: any) => ii.product?.type !== type)
+                    )
+                    : data.InvoicePayment;
+                return {
+                    ...data,
+                    InvoicePayment: filteredInvoicePayments
+                } as any;
+            });
+
+            const paymentInvoiceWithType = payments.filter(data => data.InvoicePayment.some((ip: any) => !!ip.invoice && Array.isArray(ip.invoice.invoiceItems) && ip.invoice.invoiceItems.some((ii: any) => ii.product?.type === type)));
+            const paymentInvoiceWithoutType = payments.filter(data => data.InvoicePayment.some((ip: any) => !!ip.invoice && Array.isArray(ip.invoice.invoiceItems) && ip.invoice.invoiceItems.every((ii: any) => ii.product?.type !== type)));
+            const controlNumberInvoicesWihoutType = paymentInvoiceWithoutType.map(item => item.InvoicePayment.map(inv => inv.invoice.controlNumber)).flat();
+            const sumInvoiceWithoutType = paymentInvoiceWithoutType.reduce((acc, data) => acc + Number(data.amount), 0);
+            // console.log(`Facturas de tipo seleccionado: ${paymentInvoiceWithType.length}`);
+            // console.log(`Facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.length}`);
+            // console.log(`Monto total de facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.reduce((acc, data) => acc + Number(data.amount), 0)}`);
+            // console.log(`Facturas sin tipo: ${[...new Set(controlNumberInvoicesWihoutType)].join(', ')}`);
+            // console.log(`Suma de las facturas sin tipo: ${sumInvoiceWithoutType}`);
+            
+
+
+            const totalAmountBsNot = paymentInvoiceWithoutType
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + Number(data.amount), 0);
+
+            const totalAmountBsInUSDNot = paymentInvoiceWithoutType
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + (Number(data.amount) / Number(data.dolar.dolar)), 0);
 
             // Calcular estadísticas
             const totalAmountBs = processedPayments
@@ -420,6 +504,17 @@ export class PaymentsService {
             const totalAmountBsInUSD = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
                 .reduce((acc, data) => acc + (Number(data.amount) / Number(data.dolar.dolar)), 0);
+
+            const valores = {
+                originals: {
+                    totalAmountBs,
+                    totalAmountBsInUSD
+                },
+                alter: {
+                    totalAmountBs: totalAmountBsNot,
+                    totalAmountBsInUSD: totalAmountBsInUSDNot
+                }
+            }
 
             const totalAmountUSD = processedPayments
                 .filter(item => item.account.method.currency === 'USD')
@@ -436,6 +531,40 @@ export class PaymentsService {
             const totalRemainingUSD = processedPayments
                 .filter(item => item.account.method.currency === 'USD')
                 .reduce((acc, data) => acc + Number(data.remaining), 0);
+
+            const totalGrossUSD = totalAmountBsInUSD + totalAmountUSD;
+
+            // Si viene `type`, restar del total los montos asignados a facturas
+            // que NO tengan el tipo solicitado.
+            const otherTypeAllocatedUSD = type
+                ? payments.reduce((acc, payment: any) => {
+                    const invoicePayments = Array.isArray(payment.InvoicePayment) ? payment.InvoicePayment : [];
+
+                    const otherAssigned = invoicePayments.reduce((sum: number, ip: any) => {
+                        const items = ip?.invoice?.invoiceItems;
+                        const hasSelectedType = Array.isArray(items)
+                            && items.some((ii: any) => ii?.product?.type === type);
+
+                        // Considerar "otros tipos" sólo si la factura NO tiene
+                        // ningún item del tipo seleccionado.
+                        if (!hasSelectedType) {
+                            return sum + Number(ip.amount);
+                        }
+
+                        return sum;
+                    }, 0);
+
+                    const otherAssignedUSD = payment.account?.method?.currency === 'USD'
+                        ? otherAssigned
+                        : (otherAssigned / Number(payment.dolar?.dolar));
+
+                    return acc + otherAssignedUSD;
+                }, 0)
+                : 0;
+
+            const totalNetUSD = type
+                ? (totalGrossUSD - otherTypeAllocatedUSD)
+                : totalGrossUSD;
 
             // Contar asociados/no asociados a partir de los pagos procesados
             const associatedPayments = processedPayments.filter(p => p.InvoicePayment && p.InvoicePayment.length > 0).length;
@@ -474,7 +603,7 @@ export class PaymentsService {
                 totals: {
                     totalBs: totalAmountBs,
                     totalUSD: totalAmountUSD,
-                    total: totalAmountBsInUSD + totalAmountUSD,
+                    total: totalNetUSD,
                     remaining: totalRemainingBsInUSD + totalRemainingUSD,
                     totalRemainingBs,
                     totalRemainingUSD
@@ -484,7 +613,9 @@ export class PaymentsService {
                     associated: associatedPayments,
                     unassociated: unassociatedPayments
                 },
-                byMethod: methodStatistics
+                byMethod: methodStatistics,
+                valores: valores,
+                paymentInvoiceWithoutType: paymentInvoiceWithoutType
             };
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
@@ -1369,7 +1500,7 @@ export class PaymentsService {
 
         const invoicesDB = await this.prismaService.invoice.findMany();
         const paymentsDB = await this.prismaService.payment.findMany();
-        
+
         try {
             const updatePaymentsInvoices = dataPayments.map(data => {
                 const totalPayInvoice = Number(data.amount / data.dolar).toFixed(2);

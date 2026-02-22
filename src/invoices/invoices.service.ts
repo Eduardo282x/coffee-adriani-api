@@ -104,10 +104,32 @@ export class InvoicesService {
             // Consulta optimizada con menos includes iniciales
             const [invoices, totalCount] = await Promise.all([
                 this.prismaService.invoice.findMany({
-                    include: {
+                    select: {
+                        id: true,
+                        controlNumber: true,
+                        consignment: true,
+                        status: true,
+                        dispatchDate: true,
+                        dueDate: true,
+                        totalAmount: true,
+                        remaining: true,
+                        clientId: true,
                         client: {
-                            include: { block: true }
-                        }
+                            select: {
+                                id: true,
+                                name: true,
+                                rif: true,
+                                zone: true,
+                                blockId: true,
+                                block: {
+                                    select: {
+                                        id: true,
+                                        name: true
+                                    }
+                                }
+                            },
+                            // include: { block: true }
+                        },
                     },
                     orderBy: {
                         dispatchDate: 'desc'
@@ -744,15 +766,32 @@ export class InvoicesService {
     async getInvoiceWithDetails() {
         try {
             const invoice = await this.prismaService.invoice.findMany({
-                include: {
+                select: {
+                    id: true,
+                    controlNumber: true,
+                    totalAmount: true,
+                    remaining: true,
+                    clientId: true,
                     client: {
-                        include: { block: true }
+                        select: {
+                            id: true,
+                            name: true,
+                            block: true
+                        }
                     },
                     invoiceItems: {
-                        include: {
-                            product: true
+                        select: {
+                            id: true,
+                            type: true,
+                            unitPriceUSD: true,
+                            quantity: true,
                         }
                     }
+                    // invoiceItems: {
+                    //     select: {
+                    //         product: true
+                    //     }
+                    // }
                 },
                 where: {
                     status: {
