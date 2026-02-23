@@ -96,8 +96,8 @@ export class InvoicesService {
 
             if (startDate && endDate) {
                 where.dispatchDate = {
-                    gte: new Date(startDate),
-                    lte: new Date(endDate)
+                    gte: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
+                    lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
                 }
             }
 
@@ -252,8 +252,8 @@ export class InvoicesService {
 
             if (startDate && endDate) {
                 where.dispatchDate = {
-                    gte: new Date(startDate),
-                    lte: new Date(endDate)
+                    gte: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
+                    lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
                 }
             }
 
