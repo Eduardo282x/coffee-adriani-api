@@ -28,6 +28,7 @@ export class InvoicesService {
         page: number = 1,
         limit: number = 50,
         type: string,
+        zone?: string,
         startDate?: string,
         endDate?: string,
         search?: string,
@@ -77,8 +78,18 @@ export class InvoicesService {
                     }
                 ]
             }
+            if (zone) {
+                where.client = {
+                    ...where.client,
+                    zone: {
+                        contains: zone,
+                        mode: 'insensitive'
+                    }
+                }
+            }
             if (blockId) {
                 where.client = {
+                    ...where.client,
                     blockId: Number(blockId)
                 };
             }
@@ -187,6 +198,7 @@ export class InvoicesService {
     // 2. Endpoint separado para estadísticas (solo cuando se necesite)
     async getInvoiceStatistics(
         type: string,
+        zone?: string,
         startDate?: string,
         endDate?: string,
         search?: string,
@@ -233,8 +245,18 @@ export class InvoicesService {
                     }
                 ]
             }
+            if (zone) {
+                where.client = {
+                    ...where.client,
+                    zone: {
+                        contains: zone,
+                        mode: 'insensitive'
+                    }
+                }
+            }
             if (blockId) {
                 where.client = {
+                    ...where.client,
                     blockId: Number(blockId)
                 };
             }
