@@ -60,7 +60,11 @@ async function bootstrap() {
   const documentFactory = () => SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, documentFactory, { useGlobalPrefix: true });
 
-  await app.listen(3000);
-  console.log('🚀 Application is running on: http://localhost:3000');
+  const port = process.env.PORT || 3000;
+
+  // Es CRUCIAL añadir '0.0.0.0' para que sea accesible externamente
+  await app.listen(port, '0.0.0.0');
+
+  console.log(`🚀 Application is running on: http://localhost:${port}`);
 }
 bootstrap();
