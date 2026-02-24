@@ -12,6 +12,20 @@ import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 
+interface FilterInvoice {
+    page?: number;
+    limit?: number;
+    type: string;
+
+    startDate?: string;
+    search?: string;
+    endDate?: string;
+    blockId?: string;
+    zone?: string;
+    status?: string;
+    filter?: OptionalFilterInvoices;
+}
+
 @Injectable()
 export class InvoicesService {
 
@@ -24,19 +38,21 @@ export class InvoicesService {
 
     }
 
-    async getInvoicesPaginated(
-        page: number = 1,
-        limit: number = 50,
-        type: string,
-        zone?: string,
-        startDate?: string,
-        endDate?: string,
-        search?: string,
-        blockId?: string,
-        status?: string,
-        filter?: OptionalFilterInvoices
-    ) {
+    async getInvoicesPaginated(filters: FilterInvoice) {
         try {
+            const {
+                page = 1,
+                limit = 50,
+                type,
+                zone,
+                startDate,
+                endDate,
+                search,
+                blockId,
+                status,
+                filter,
+            } = filters;
+
             const offset = (page - 1) * limit;
             const where: any = {};
 
@@ -196,19 +212,20 @@ export class InvoicesService {
     }
 
     // 2. Endpoint separado para estadísticas (solo cuando se necesite)
-    async getInvoiceStatistics(
-        type: string,
-        zone?: string,
-        startDate?: string,
-        endDate?: string,
-        search?: string,
-        blockId?: string,
-        status?: string,
-    ): Promise<InvoiceStatistics | DTOBaseResponse> {
+    async getInvoiceStatistics(filters: FilterInvoice): Promise<InvoiceStatistics | DTOBaseResponse> {
         try {
+            const {
+                type,
+                zone,
+                startDate,
+                endDate,
+                search,
+                blockId,
+                status,
+            } = filters;
+
             const where: any = {};
             if (status) {
-
                 if (status == 'Abonadas') {
                     where.OR = [
                         {
@@ -330,7 +347,8 @@ export class InvoicesService {
                         }
                     }
                 }
-            })
+            });
+
             // Calcular estadísticas por producto con separación de monedas
             const productStatsMap = new Map<number, {
                 productId: number;

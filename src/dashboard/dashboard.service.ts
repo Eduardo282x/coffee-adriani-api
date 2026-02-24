@@ -402,7 +402,11 @@ export class DashboardService {
     let bultosPorCobrar = 0;
 
     const baseStartDate = new Date(2020, 1, 1); // 31 de diciembre de 2024
-    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(filter.type, baseStartDate.toISOString(), filter.endDate.toISOString()) as InvoiceStatistics;
+    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics({
+      type: filter.type,
+      startDate: baseStartDate.toISOString(),
+      endDate: filter.endDate.toISOString(),
+    }) as InvoiceStatistics;
     bultosPorCobrar = invoiceStatistics.packagePending;
 
     for (const factura of facturasHastaCierre) {
@@ -1185,11 +1189,11 @@ export class DashboardService {
     const deudaPorCobrar = facturasHastaCierre.reduce((sum, f) => sum + Number(f.remaining), 0);
 
     const baseStartDate = new Date(2020, 1, 1);
-    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics(
-      filter.type,
-      baseStartDate.toISOString(),
-      filter.endDate.toISOString()
-    ) as InvoiceStatistics;
+    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics({
+      type: filter.type,
+      startDate: baseStartDate.toISOString(),
+      endDate: filter.endDate.toISOString(),
+    }) as InvoiceStatistics;
     const bultosPorCobrar = invoiceStatistics.packagePending;
 
     // ============== GENERACIÓN DEL EXCEL ==============

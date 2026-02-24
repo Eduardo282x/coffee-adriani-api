@@ -36,7 +36,17 @@ export class InvoicesController {
         @Query('blockId') blockId?: string,
         @Query('status') status?: string,
     ) {
-        return await this.invoicesService.getInvoicesPaginated(page, limit, type, zone, startDate, endDate, search, blockId, status);
+        return await this.invoicesService.getInvoicesPaginated({
+            page,
+            limit,
+            type,
+            zone,
+            startDate,
+            endDate,
+            search,
+            blockId,
+            status,
+        });
     }
     @Get('/statistics')
     @ApiBearerAuth('JWT-auth')
@@ -54,7 +64,15 @@ export class InvoicesController {
         @Query('blockId') blockId?: string,
         @Query('status') status?: string,
     ) {
-        return await this.invoicesService.getInvoiceStatistics(type, startDate, endDate, zone, search, blockId, status);
+        return await this.invoicesService.getInvoiceStatistics({
+            type,
+            startDate,
+            endDate,
+            zone,
+            search,
+            blockId,
+            status,
+        });
     }
     @Get('/details/:id')
     async getInvoiceDetails(@Param('id', ParseIntPipe) invoiceId: number) {
