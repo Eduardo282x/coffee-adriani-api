@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, InternalServerErrorException, Param, Post, Put, Res } from '@nestjs/common';
 import { ClientsService } from './clients.service';
 import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
 import { Response } from 'express';
+import { FastifyReply } from 'fastify';
 
 @Controller('clients')
 export class ClientsController {
@@ -18,11 +19,11 @@ export class ClientsController {
         return await this.clientService.formatNumberClients();
     }
     @Get('/excel')
-    async getClientExcel(@Res() res: Response) {
+    async getClientExcel(@Res({ passthrough: true }) res: FastifyReply) {
         const buffer = await this.clientService.getClientExcel();
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename=clientes.xlsx');
-        res.send(buffer);
+        res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.header('Content-Disposition', 'attachment; filename=clientes.xlsx');
+        return buffer;
     }
     @Post()
     async createClients(@Body() client: DTOClients) {
@@ -30,20 +31,22 @@ export class ClientsController {
     }
 
     @Post('/report')
-    async reportClients(@Body() report: DTOReportClients, @Res() res: Response) {
+    async reportClients(@Body() report: DTOReportClients, @Res({ passthrough: true }) res: FastifyReply) {
         try {
             const pdfBuffer = await this.clientService.reportClients(report) as Buffer;
 
-            res.set({
-                'Content-Type': 'application/pdf',
-                'Content-Disposition': 'attachment; filename=ReporteClientes.pdf',
-                'Content-Length': pdfBuffer.length,
-            });
 
-            res.end(pdfBuffer);
+            // Configuramos los headers
+            res.header('Content-Type', 'application/pdf');
+            res.header('Content-Disposition', 'attachment; filename=ReporteClientes.pdf');
+            res.header('Content-Length', pdfBuffer.length);
+            // En Fastify con { passthrough: true }, simplemente retornamos el buffer.
+            // NestJS y el adaptador de Fastify se encargan del resto.
+            return pdfBuffer;
         } catch (error) {
             console.error('Error generando PDF:', error);
-            res.status(500).send('Error generando PDF');
+        // Importante: Si lanzas una excepción de NestJS, el passthrough lo manejará mejor
+        throw new InternalServerErrorException('Error generando PDF');
         }
     }
 

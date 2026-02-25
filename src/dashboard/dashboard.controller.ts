@@ -1,8 +1,7 @@
 import { Controller, Post, Body, Res, Get } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
-import { Response } from 'express';
-
+import { FastifyReply } from 'fastify';
 
 @Controller('dashboard')
 export class DashboardController {
@@ -19,18 +18,21 @@ export class DashboardController {
   }
 
   @Post('/export')
-  async downloadExcel(@Body() filter: DashboardExcel, @Res() res: Response) {
+  async downloadExcel(@Body() filter: DashboardExcel, @Res({ passthrough: true }) res: FastifyReply) {
     const buffer = await this.dashboardService.generateInventoryAndInvoicesExcel(filter);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=reporte.xlsx');
-    res.send(buffer);
+    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.header('Content-Disposition', 'attachment; filename=reporte.xlsx');
+    return buffer;
   }
 
   @Post('/export/v2')
-  async downloadExcelV2(@Body() filter: DashboardExcel, @Res() res: Response) {
+  async downloadExcelV2(@Body() filter: DashboardExcel, @Res({ passthrough: true }) res: FastifyReply) {
     const buffer = await this.dashboardService.generateInventoryAndInvoicesExcelV2(filter);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=reporte.xlsx');
-    res.send(buffer);
+
+    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.header('Content-Disposition', 'attachment; filename=reporte.xlsx');
+
+    // En Fastify con passthrough: true, simplemente retornamos el buffer
+    return buffer;
   }
 }
