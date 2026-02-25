@@ -8,6 +8,7 @@ import { AllExceptionsFilter } from './filters/exception.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 import compression from '@fastify/compress';
+import cors from '@fastify/cors';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 
 async function bootstrap() {
@@ -16,7 +17,21 @@ async function bootstrap() {
     new FastifyAdapter()
   );
   app.setGlobalPrefix('api');
-  app.enableCors();
+
+  // Fastify: manejar correctamente los preflight (OPTIONS) de PUT/DELETE
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+
+  // app.enableCors({
+  //   origin: '*', // En desarrollo puedes usar '*', pero mejor pon la URL de tu túnel del front
+  //   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  //   allowedHeaders: 'Content-Type, Accept, Authorization',
+  //   credentials: true,
+  // });
   app.useGlobalGuards(new AuthGuard(app.get(JwtService)), new RolesGuard(app.get(Reflector)))
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalPipes(new ValidationPipe({

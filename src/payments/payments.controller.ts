@@ -121,6 +121,8 @@ export class PaymentsController {
 
     @Put('/disassociate')
     async payDisassociate(@Body() payment: PayDisassociateDTO) {
+        console.log('Alo');
+        
         return await this.paymentService.payDisassociate(payment);
     }
 

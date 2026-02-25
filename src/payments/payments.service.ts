@@ -177,6 +177,7 @@ export class PaymentsService {
                         status: true,
                         createdAt: true,
                         updatedAt: true,
+                        accountId: true,
                         dolar: {
                             select: {
                                 id: true,
