@@ -26,8 +26,8 @@ jobs:
         port: ${{ secrets.VPS_PORT }}
         debug: true
         script: |
-          cd /root/backend/coffee-adriani-api
+          cd /var/www/coffee-adriani-api
           git pull
-          npm install --legacy-peer-deps && npx prisma generate && npm run build
-          pm2 restart coffee-adriani-api || pm2 start "npm run start:prod" --name "coffee-adriani-api"
+          npm run build
+          pm2 restart coffee-api || pm2 restart all
           pm2 save

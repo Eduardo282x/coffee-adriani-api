@@ -22,7 +22,7 @@ export class DashboardService {
     };
 
     // 1. Ejecutar todas las consultas en paralelo
-    const [invoiceStats, inventory, lastPending] = await Promise.all([
+    const [invoiceStats, inventory, lastPending, totalClients] = await Promise.all([
       // Usar groupBy para obtener conteos por estado en una sola query
       this.prismaService.invoice.groupBy({
         by: ['status'],
@@ -63,7 +63,9 @@ export class DashboardService {
             }
           }
         }
-      })
+      }),
+
+      this.prismaService.client.count()
     ]);
 
     // 2. Procesar estadísticas de facturas
@@ -99,6 +101,7 @@ export class DashboardService {
     return {
       invoices: {
         total: totalInvoices,
+        totalClients: totalClients,
         payed: { amount: payed, percent: percent(payed) },
         expired: { amount: expired, percent: percent(expired) },
         pending: { amount: pending, percent: percent(pending) },
