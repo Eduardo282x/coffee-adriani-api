@@ -1,85 +1,206 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# ☕ Café Adriani API — Backend REST
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+> API RESTful construida con NestJS y TypeScript para el sistema administrativo de una distribuidora de café. Gestiona productos, inventario, clientes, facturación, pagos, cobranza y reportes en Excel. Incluye Prisma ORM, CI/CD con GitHub Actions y despliegue en VPS con PM2 y Nginx.
+ 
+🔗 **Frontend:** [coffee-adriani](https://github.com/Eduardo282x/coffee-adriani)
+ 
+---
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 📋 Descripción
 
-## Description
+Este repositorio contiene el backend del sistema Café Adriani — una plataforma administrativa desarrollada a medida para una distribuidora de café que llevaba sus operaciones en hojas de cálculo. La API expone los endpoints que alimentan todos los módulos del sistema: productos, inventario, clientes por zonas y bloques, facturación agrupada, conciliación de pagos, cobranza y exportación de reportes en Excel.
+ 
+Construido sobre NestJS con arquitectura modular, Prisma como ORM sobre PostgreSQL, y desplegado en producción en un VPS Ubuntu con PM2 y Nginx.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## ✨ Módulos de la API
+ 
+- 📦 **Productos e inventario** — CRUD de productos y control de stock
+- 👥 **Clientes** — Gestión de clientes organizados por zonas y bloques
+- 🧾 **Facturación** — Creación y consulta de facturas agrupadas por cliente
+- 💳 **Pagos y conciliación** — Registro de pagos y vinculación con facturas al recibir comprobante
+- 📲 **Cobranza** — Endpoint de clientes con facturas pendientes para gestión de cobros
+- 📊 **Dashboard** — Métricas del negocio: stock, demanda, clientes activos y últimas facturas
+- 📁 **Reportes** — Exportación de datos a Excel filtrados por rango de fechas
+ 
+---
+
+## 🛠️ Tecnologías utilizadas
+
+| Categoría | Tecnología |
+|-----------|------------|
+| Framework | NestJS |
+| Lenguaje | TypeScript |
+| ORM | Prisma |
+| Base de datos | PostgreSQL |
+| Runtime | Node.js |
+| Gestor de procesos | PM2 |
+| Servidor web | Nginx (reverse proxy) |
+| CI/CD | GitHub Actions |
+| Linting / Formato | ESLint + Prettier |
+
+---
+
+## 🚀 Instalación y uso local
+
+### Requisitos previos
+
+- Node.js 18 o superior
+- PostgreSQL instalado y corriendo
+- npm
+
+### Pasos
 
 ```bash
-$ npm install
+# 1. Clonar el repositorio
+git clone https://github.com/Eduardo282x/coffee-adriani-api.git
+cd coffee-adriani-api
+
+# 2. Instalar dependencias
+npm install
+
+# 3. Configurar variables de entorno
+cp .env.example .env
+# Editar .env con la URL de tu base de datos y demás configs
 ```
 
-## Compile and run the project
+### Variables de entorno requeridas
+
+```env
+DATABASE_URL="postgresql://usuario:password@localhost:5432/coffee_adriani"
+PORT=3000
+```
 
 ```bash
-# development
-$ npm run start
+# 4. Ejecutar migraciones de Prisma
+npx prisma migrate deploy
 
-# watch mode
-$ npm run start:dev
+# 5. Generar el cliente de Prisma
+npx prisma generate
 
-# production mode
-$ npm run start:prod
+# 6. Iniciar en modo desarrollo
+npm run start:dev
 ```
 
-## Run tests
+La API estará disponible en `http://localhost:3000`
+
+---
+
+## 📁 Estructura del proyecto
+
+```
+coffee-adriani-api/
+├── .github/
+│   └── workflows/        # Pipelines de CI/CD con GitHub Actions
+├── prisma/
+│   ├── schema.prisma     # Esquema de base de datos y modelos
+│   └── migrations/       # Historial de migraciones
+├── src/
+│   ├── modules/          # Módulos de la aplicación (productos, pedidos, etc.)
+│   ├── common/           # Guards, decoradores, interceptores reutilizables
+│   ├── prisma/           # Servicio de Prisma compartido
+│   └── main.ts           # Punto de entrada de la aplicación
+├── .eslintrc.js          # Configuración de ESLint
+├── .prettierrc           # Configuración de Prettier
+├── nest-cli.json         # Configuración del CLI de NestJS
+└── package.json          # Dependencias y scripts
+```
+
+---
+
+## ⚙️ Scripts disponibles
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run start           # Inicia en modo producción
+npm run start:dev       # Inicia en modo desarrollo con hot-reload
+npm run start:prod      # Inicia desde la build compilada
+npm run build           # Compila TypeScript a JavaScript en /dist
+npm run lint            # Ejecuta ESLint
+npm run format          # Formatea el código con Prettier
+npm run test            # Ejecuta tests unitarios
+npm run test:e2e        # Ejecuta tests end-to-end
+npm run test:cov        # Genera reporte de cobertura
 ```
 
-## Resources
+---
 
-Check out a few resources that may come in handy when working with NestJS:
+## 🗄️ Base de datos con Prisma
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+# Crear una nueva migración tras modificar el schema
+npx prisma migrate dev --name nombre_de_la_migracion
 
-## Support
+# Aplicar migraciones en producción
+npx prisma migrate deploy
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+# Abrir Prisma Studio (explorador visual de la BD)
+npx prisma studio
+```
 
-## Stay in touch
+---
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## 🌐 Despliegue en VPS (Contabo)
 
-## License
+El proyecto está desplegado en un servidor VPS con **Ubuntu Linux** en Contabo, usando **PM2** para la gestión del proceso Node.js y **Nginx** como reverse proxy.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+### Pasos para desplegar
+
+```bash
+# 1. En el servidor, clonar o actualizar el repo
+git pull origin main
+
+# 2. Instalar dependencias y compilar
+npm install
+npm run build
+
+# 3. Aplicar migraciones de base de datos
+npx prisma migrate deploy
+
+# 4. Iniciar o reiniciar con PM2
+pm2 start dist/main.js --name coffee-api
+# o si ya está corriendo:
+pm2 restart coffee-api
+pm2 save
+```
+
+### Configuración de Nginx (reverse proxy)
+
+```nginx
+server {
+    listen 80;
+    server_name tu-dominio.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### CI/CD con GitHub Actions
+
+El repositorio incluye un workflow en `.github/workflows/` que automatiza el despliegue al VPS cada vez que se hace push a la rama `main`. El pipeline ejecuta el build, las migraciones y reinicia PM2 automáticamente.
+
+---
+
+## 👤 Autor
+
+**Eduardo Rojas**
+- GitHub: [@Eduardo282x](https://github.com/Eduardo282x)
+- Email: eduardorojas282x@gmail.com
+
+---
+
+## 📄 Licencia
+
+Este proyecto es de uso privado. Todos los derechos reservados © Eduardo Rojas.
