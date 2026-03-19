@@ -1,26 +1,29 @@
 # ☕ Café Adriani API — Backend REST
 
-> API RESTful construida con NestJS y TypeScript para el sistema de gestión de la cafetería Adriani. Incluye manejo de base de datos con Prisma ORM, despliegue en VPS con PM2 y Nginx, y pipeline de CI/CD con GitHub Actions.
-
+> API RESTful construida con NestJS y TypeScript para el sistema administrativo de una distribuidora de café. Gestiona productos, inventario, clientes, facturación, pagos, cobranza y reportes en Excel. Incluye Prisma ORM, CI/CD con GitHub Actions y despliegue en VPS con PM2 y Nginx.
+ 
 🔗 **Frontend:** [coffee-adriani](https://github.com/Eduardo282x/coffee-adriani)
-
+ 
 ---
 
 ## 📋 Descripción
 
-Este repositorio contiene el backend del sistema Café Adriani. Expone una API RESTful que sirve los datos y la lógica de negocio consumida por el frontend en React. Está construido sobre NestJS con arquitectura modular, Prisma como ORM para interactuar con PostgreSQL, y desplegado en producción en un VPS Ubuntu con PM2 y Nginx.
+Este repositorio contiene el backend del sistema Café Adriani — una plataforma administrativa desarrollada a medida para una distribuidora de café que llevaba sus operaciones en hojas de cálculo. La API expone los endpoints que alimentan todos los módulos del sistema: productos, inventario, clientes por zonas y bloques, facturación agrupada, conciliación de pagos, cobranza y exportación de reportes en Excel.
+ 
+Construido sobre NestJS con arquitectura modular, Prisma como ORM sobre PostgreSQL, y desplegado en producción en un VPS Ubuntu con PM2 y Nginx.
 
 ---
 
-## ✨ Funcionalidades principales
-
-- 🍽️ **Gestión de productos y menú** — CRUD completo de ítems, categorías y precios
-- 🛒 **Gestión de pedidos** — Creación, actualización de estado y consulta de pedidos
-- 👤 **Gestión de usuarios** — Registro, autenticación y control de acceso
-- 🗄️ **ORM con Prisma** — Migraciones, esquema tipado y consultas seguras sobre PostgreSQL
-- 🔄 **CI/CD automatizado** — Pipeline con GitHub Actions para despliegue continuo al VPS
-- 📐 **Arquitectura modular** — Separación por módulos NestJS (productos, pedidos, usuarios, etc.)
-
+## ✨ Módulos de la API
+ 
+- 📦 **Productos e inventario** — CRUD de productos y control de stock
+- 👥 **Clientes** — Gestión de clientes organizados por zonas y bloques
+- 🧾 **Facturación** — Creación y consulta de facturas agrupadas por cliente
+- 💳 **Pagos y conciliación** — Registro de pagos y vinculación con facturas al recibir comprobante
+- 📲 **Cobranza** — Endpoint de clientes con facturas pendientes para gestión de cobros
+- 📊 **Dashboard** — Métricas del negocio: stock, demanda, clientes activos y últimas facturas
+- 📁 **Reportes** — Exportación de datos a Excel filtrados por rango de fechas
+ 
 ---
 
 ## 🛠️ Tecnologías utilizadas
