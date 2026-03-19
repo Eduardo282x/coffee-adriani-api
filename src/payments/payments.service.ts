@@ -15,8 +15,8 @@ interface PaymentFilterPaginate extends PaymentFilter {
 }
 
 interface PaymentFilter {
-    startDate?: Date;
-    endDate?: Date;
+    startDate?: string;
+    endDate?: string;
     accountId?: number;
     methodId?: number;
     associated?: boolean;
@@ -34,6 +34,14 @@ export class PaymentsService {
         private readonly productService: ProductsService
     ) { }
 
+    private getStartOfDayUtc(date: string) {
+        return new Date(`${date}T00:00:00.000Z`);
+    }
+
+    private getEndOfDayUtc(date: string) {
+        return new Date(`${date}T23:59:59.999Z`);
+    }
+
     // NUEVOS MÉTODOS OPTIMIZADOS EN PaymentsService
 
     async getPaymentsPaginated(filters: PaymentFilterPaginate) {
@@ -46,8 +54,8 @@ export class PaymentsService {
 
             if (startDate && endDate) {
                 where.paymentDate = {
-                    gte: startDate,
-                    lte: endDate
+                    gte: this.getStartOfDayUtc(startDate),
+                    lte: this.getEndOfDayUtc(endDate)
                 };
             }
 
@@ -310,8 +318,8 @@ export class PaymentsService {
 
             if (startDate && endDate) {
                 where.paymentDate = {
-                    gte: startDate,
-                    lte: endDate
+                    gte: this.getStartOfDayUtc(startDate),
+                    lte: this.getEndOfDayUtc(endDate)
                 };
             }
 
@@ -486,7 +494,7 @@ export class PaymentsService {
             // console.log(`Monto total de facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.reduce((acc, data) => acc + Number(data.amount), 0)}`);
             // console.log(`Facturas sin tipo: ${[...new Set(controlNumberInvoicesWihoutType)].join(', ')}`);
             // console.log(`Suma de las facturas sin tipo: ${sumInvoiceWithoutType}`);
-            
+
 
 
             const totalAmountBsNot = paymentInvoiceWithoutType

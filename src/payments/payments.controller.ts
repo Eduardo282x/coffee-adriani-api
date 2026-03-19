@@ -31,8 +31,8 @@ export class PaymentsController {
         return await this.paymentService.getPaymentsPaginated({
             page: page ? parseInt(page) : 1,
             limit: limit ? parseInt(limit) : 50,
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
+            startDate: startDate ? startDate : undefined,
+            endDate: endDate ? endDate : undefined,
             accountId: accountId ? parseInt(accountId) : undefined,
             methodId: methodId ? parseInt(methodId) : undefined,
             search: search as string,
@@ -56,8 +56,8 @@ export class PaymentsController {
         @Query('typeDescription') typeDescription?: string,
     ) {
         return await this.paymentService.getPaymentsStatistics({
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
+            startDate: startDate ? startDate : undefined,
+            endDate: endDate ? endDate : undefined,
             accountId: accountId ? parseInt(accountId) : undefined,
             methodId: methodId ? parseInt(methodId) : undefined,
             associated: associated === 'true' ? true : associated === 'false' ? false : undefined,
@@ -121,8 +121,6 @@ export class PaymentsController {
 
     @Put('/disassociate')
     async payDisassociate(@Body() payment: PayDisassociateDTO) {
-        console.log('Alo');
-        
         return await this.paymentService.payDisassociate(payment);
     }
 

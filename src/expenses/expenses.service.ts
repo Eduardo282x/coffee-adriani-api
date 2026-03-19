@@ -10,6 +10,31 @@ export class ExpensesService {
 
     }
 
+    private getNormalizedDateRange(expenseFilter: ExpensesDTO) {
+        const startDate = new Date(expenseFilter.startDate);
+        startDate.setHours(0, 0, 0, 0);
+
+        const endDate = new Date(expenseFilter.endDate);
+        endDate.setHours(23, 59, 59, 999);
+
+        return { startDate, endDate };
+    }
+
+    private normalizeText(value?: string | null) {
+        return (value || '').trim().toLowerCase();
+    }
+
+    private isDivisaPayment(payment: any) {
+        const methodName = this.normalizeText(payment?.account?.method?.name);
+        const accountName = this.normalizeText(payment?.account?.name);
+        const bankName = this.normalizeText(payment?.account?.bank);
+
+        const isCashUsd = methodName.includes('efectivo $') || methodName.includes('efectivo usd');
+        const isGastoDivisa = accountName.includes('gasto divisa') || bankName.includes('gasto divisa');
+
+        return isCashUsd || isGastoDivisa;
+    }
+
     async getExpensesFilter(expenseFilter: ExpensesDTO) {
         try {
             const invoices = await this.getInvoicesRemaining(expenseFilter);
@@ -19,10 +44,14 @@ export class ExpensesService {
 
             const calculateTotal = paymentsNoAssociated.map(pay => {
                 const findMethodPay = pay.account.method.currency;
-                if (findMethodPay === 'US') {
+                if (findMethodPay === 'USD') {
                     return Number(pay.amount)
                 } else {
-                    const parseDolar = Number(pay.amount) / Number(pay.dolar.dolar);
+                    const dolarRate = Number(pay.dolar?.dolar || 0);
+                    if (dolarRate <= 0) {
+                        return 0;
+                    }
+                    const parseDolar = Number(pay.amount) / dolarRate;
                     return parseDolar;
                 }
             }).reduce((acc, item) => acc + item, 0)
@@ -37,19 +66,21 @@ export class ExpensesService {
                 }
             };
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
         }
     }
 
     async getInvoicesEarn(expenseFilter: ExpensesDTO) {
         try {
+            const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
             const invoices = await this.prismaService.invoice.findMany({
                 where: {
                     status: 'Pagado',
                     dispatchDate: {
-                        gte: expenseFilter.startDate,
-                        lte: expenseFilter.endDate,
+                        gte: startDate,
+                        lte: endDate,
                     },
                     invoiceItems: {
                         none: {
@@ -155,124 +186,143 @@ export class ExpensesService {
                 dailyData: parseDailyDataMeta,
             };
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
         }
     }
 
     async getInvoicesEarnV2(expenseFilter: ExpensesDTO) {
-        // 1. Obtener todos los pagos de facturas (InvoicePayment) con su factura, productos y pagos
-        const invoicePayments = await this.prismaService.invoicePayment.findMany({
-            include: {
-                invoice: {
-                    include: {
-                        invoiceItems: {
-                            include: { product: true }
-                        },
-                        client: true,
-                    }
-                },
-                payment: {
-                    include: {
-                        account: {
-                            include: {
-                                method: true
+        try {
+            const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
+            // 1. Obtener todos los pagos de facturas (InvoicePayment) con su factura, productos y pagos
+            const invoicePayments = await this.prismaService.invoicePayment.findMany({
+                include: {
+                    invoice: {
+                        include: {
+                            invoiceItems: {
+                                include: { product: true }
+                            },
+                            client: true,
+                        }
+                    },
+                    payment: {
+                        include: {
+                            account: {
+                                include: {
+                                    method: true
+                                }
                             }
                         }
-                    }
-                },
-            },
-            where: {
-                createdAt: {
-                    gte: expenseFilter.startDate,
-                    lte: expenseFilter.endDate,
-                }
-            }
-        });
-
-        // 2. Agrupar ventas de productos
-        const productSales: Record<number, { name: string, quantity: number }> = {};
-        let totalQuantity = 0;
-
-        for (const ip of invoicePayments) {
-            for (const item of ip.invoice.invoiceItems) {
-                if (!productSales[item.productId]) {
-                    // Buscar nombre del producto (puedes optimizar esto si tienes muchos productos)
-                    const product = await this.prismaService.product.findUnique({ where: { id: item.productId } });
-                    productSales[item.productId] = { name: product?.name || 'Desconocido', quantity: 0 };
-                }
-                productSales[item.productId].quantity += item.quantity;
-                totalQuantity += item.quantity;
-            }
-        }
-
-        // Calcular porcentaje de ventas por producto
-        const productPercentages = Object.entries(productSales).map(([id, data]) => ({
-            productId: Number(id),
-            name: data.name,
-            quantity: data.quantity,
-            percentage: totalQuantity > 0 ? (data.quantity / totalQuantity * 100).toFixed(2) : '0.00'
-        })).sort((a, b) => b.quantity - a.quantity);
-
-        // 3. Calcular ganancias individuales y totales
-        let totalEarnDay = 0;
-        let totalEarnMonth = 0;
-        const invoiceEarns: any[] = [];
-
-        // Agrupar por día y mes
-        const now = new Date();
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-        for (const ip of invoicePayments) {
-            let earn = 0;
-            for (const item of ip.invoice.invoiceItems) {
-                // Buscar el precio histórico del producto en el momento de la venta
-                const history = await this.prismaService.historyProduct.findFirst({
-                    where: {
-                        name: item.product.name,
-                        presentation: item.product.presentation,
-                        price: item.product.price,
-                        priceUSD: item.product.priceUSD,
-                        createdAt: { lte: ip.createdAt }
                     },
-                    orderBy: { createdAt: 'desc' }
-                });
-
-                // Si no hay histórico, usar el producto actual
-                const product = history || await this.prismaService.product.findUnique({ where: { id: item.productId } });
-
-                // Determinar si fue pagado en USD o BS
-                if (ip.payment.account.method.currency === 'USD') {
-                    earn += (Number(item.unitPriceUSD) - Number(product.purchasePriceUSD)) * item.quantity;
-                } else {
-                    earn += (Number(item.unitPrice) - Number(product.purchasePrice)) * item.quantity;
+                },
+                where: {
+                    createdAt: {
+                        gte: startDate,
+                        lte: endDate,
+                    }
                 }
-            }
-
-            invoiceEarns.push({
-                invoiceId: ip.invoiceId,
-                controlNumber: ip.invoice.controlNumber,
-                client: ip.invoice.client.name,
-                earn,
-                createdAt: ip.createdAt
             });
 
-            // Sumar a los totales del día y mes
-            if (ip.createdAt >= startOfDay) totalEarnDay += earn;
-            if (ip.createdAt >= startOfMonth) totalEarnMonth += earn;
-        }
+            // 2. Agrupar ventas de productos
+            const productSales: Record<number, { name: string, quantity: number }> = {};
+            let totalQuantity = 0;
 
-        return {
-            productPercentages,
-            invoiceEarns,
-            totalEarnDay,
-            totalEarnMonth
-        };
+            for (const ip of invoicePayments) {
+                for (const item of ip.invoice.invoiceItems) {
+                    if (!productSales[item.productId]) {
+                        productSales[item.productId] = { name: item.product.name || 'Desconocido', quantity: 0 };
+                    }
+                    productSales[item.productId].quantity += item.quantity;
+                    totalQuantity += item.quantity;
+                }
+            }
+
+            // Calcular porcentaje de ventas por producto
+            const productPercentages = Object.entries(productSales).map(([id, data]) => ({
+                productId: Number(id),
+                name: data.name,
+                quantity: data.quantity,
+                percentage: totalQuantity > 0 ? (data.quantity / totalQuantity * 100).toFixed(2) : '0.00'
+            })).sort((a, b) => b.quantity - a.quantity);
+
+            // 3. Calcular ganancias individuales y totales
+            let totalEarnDay = 0;
+            let totalEarnMonth = 0;
+            let totalEarnRange = 0;
+            const invoiceEarns: any[] = [];
+
+            // Referencias del día y mes usando el rango filtrado
+            const referenceDate = new Date(endDate);
+            const startOfDay = new Date(referenceDate);
+            startOfDay.setHours(0, 0, 0, 0);
+
+            const endOfDay = new Date(referenceDate);
+            endOfDay.setHours(23, 59, 59, 999);
+
+            const startOfMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1, 0, 0, 0, 0);
+
+            for (const ip of invoicePayments) {
+                let earn = 0;
+                for (const item of ip.invoice.invoiceItems) {
+                    // Buscar el precio histórico del producto en el momento de la venta
+                    const history = await this.prismaService.historyProduct.findFirst({
+                        where: {
+                            name: item.product.name,
+                            presentation: item.product.presentation,
+                            price: item.product.price,
+                            priceUSD: item.product.priceUSD,
+                            createdAt: { lte: ip.createdAt }
+                        },
+                        orderBy: { createdAt: 'desc' }
+                    });
+
+                    // Si no hay histórico, usar el producto actual
+                    const product = history || await this.prismaService.product.findUnique({ where: { id: item.productId } });
+
+                    const purchasePrice = Number(product?.purchasePrice || 0);
+                    const purchasePriceUSD = Number(product?.purchasePriceUSD || 0);
+
+                    // Determinar si fue pagado en USD o BS
+                    if (ip.payment.account.method.currency === 'USD') {
+                        earn += (Number(item.unitPriceUSD) - purchasePriceUSD) * item.quantity;
+                    } else {
+                        earn += (Number(item.unitPrice) - purchasePrice) * item.quantity;
+                    }
+                }
+
+                invoiceEarns.push({
+                    invoiceId: ip.invoiceId,
+                    controlNumber: ip.invoice.controlNumber,
+                    client: ip.invoice.client.name,
+                    earn: Number(earn.toFixed(2)),
+                    createdAt: ip.createdAt
+                });
+
+                totalEarnRange += earn;
+
+                // Sumar a los totales del día y mes en base al rango seleccionado
+                if (ip.createdAt >= startOfDay && ip.createdAt <= endOfDay) totalEarnDay += earn;
+                if (ip.createdAt >= startOfMonth && ip.createdAt <= endDate) totalEarnMonth += earn;
+            }
+
+            return {
+                productPercentages,
+                invoiceEarns,
+                totalEarnDay: Number(totalEarnDay.toFixed(2)),
+                totalEarnMonth: Number(totalEarnMonth.toFixed(2)),
+                totalEarnRange: Number(totalEarnRange.toFixed(2))
+            };
+        } catch (err) {
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
+            return badResponse;
+        }
     }
 
     async getInvoicesRemaining(expenseFilter: ExpensesDTO) {
         try {
+            const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
             const invoices = await this.prismaService.invoice.findMany({
                 where: {
                     status: 'Pagado',
@@ -287,8 +337,8 @@ export class ExpensesService {
                     InvoicePayment: {
                         some: {
                             createdAt: {
-                                gte: expenseFilter.startDate,
-                                lte: expenseFilter.endDate
+                                gte: startDate,
+                                lte: endDate
                             }
                         }
                     }
@@ -298,13 +348,15 @@ export class ExpensesService {
 
             return invoices;
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
         }
     }
 
     async getPayments(expenseFilter: ExpensesDTO) {
         try {
+            const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
             const payments = await this.prismaService.payment.findMany({
                 where: {
                     account: {
@@ -313,8 +365,8 @@ export class ExpensesService {
                     InvoicePayment: {
                         some: {
                             createdAt: {
-                                gte: expenseFilter.startDate,
-                                lte: expenseFilter.endDate
+                                gte: startDate,
+                                lte: endDate
                             }
                         }
                     }
@@ -324,27 +376,46 @@ export class ExpensesService {
                         include: {
                             method: true
                         }
-                    }
+                    },
+                    dolar: true
                 }
             })
 
-            return payments;
+            const parsePayments = payments.map(payment => {
+                const currency = payment.account?.method?.currency;
+                const dolarRate = Number(payment?.dolar?.dolar || 0);
+                const isDivisaPayment = this.isDivisaPayment(payment);
+
+                let amountUSD = Number(payment.amount);
+                if (currency === 'BS' && !isDivisaPayment) {
+                    amountUSD = dolarRate > 0 ? Number(payment.amount) / dolarRate : 0;
+                }
+
+                return {
+                    ...payment,
+                    amountUSD: Number(amountUSD.toFixed(2))
+                };
+            })
+
+            return parsePayments;
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
         }
     }
 
     async getPaymentsNoAssociated(expenseFilter: ExpensesDTO) {
         try {
+            const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
             const payments = await this.prismaService.payment.findMany({
                 where: {
                     account: {
                         name: { not: 'Gastos' }
                     },
                     paymentDate: {
-                        gte: expenseFilter.startDate,
-                        lte: expenseFilter.endDate
+                        gte: startDate,
+                        lte: endDate
                     },
                     InvoicePayment: {
                         none: {}
@@ -362,7 +433,7 @@ export class ExpensesService {
 
             return payments;
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
         }
     }
@@ -380,7 +451,7 @@ export class ExpensesService {
 
             return invoicesPayed;
         } catch (err) {
-            badResponse.message = err.message;
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
         }
     }

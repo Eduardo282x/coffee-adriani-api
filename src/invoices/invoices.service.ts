@@ -38,6 +38,20 @@ export class InvoicesService {
 
     }
 
+    private getStartOfDayUtc(date: string) {
+        if(date.length > 10) {
+            return new Date(date);
+        }
+        return new Date(`${date}T00:00:00.000Z`);
+    }
+
+    private getEndOfDayUtc(date: string) {
+        if(date.length > 10) {
+            return new Date(date);
+        }
+        return new Date(`${date}T23:59:59.999Z`);
+    }
+
     async getInvoicesPaginated(filters: FilterInvoice) {
         try {
             const {
@@ -123,8 +137,8 @@ export class InvoicesService {
 
             if (startDate && endDate) {
                 where.dispatchDate = {
-                    gte: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
-                    lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
+                    gte: this.getStartOfDayUtc(startDate),
+                    lte: this.getEndOfDayUtc(endDate)
                 }
             }
 
@@ -291,8 +305,8 @@ export class InvoicesService {
 
             if (startDate && endDate) {
                 where.dispatchDate = {
-                    gte: new Date(new Date(startDate).setHours(0, 0, 0, 0)),
-                    lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
+                    gte: this.getStartOfDayUtc(startDate),
+                    lte: this.getEndOfDayUtc(endDate)
                 }
             }
 
@@ -1689,8 +1703,8 @@ export class InvoicesService {
         const where: any = {};
         if (dateRange?.startDate && dateRange?.endDate) {
             where.dispatchDate = {
-                gte: dateRange.startDate,
-                lte: dateRange.endDate,
+                gte: this.getStartOfDayUtc(dateRange.startDate.toString()),
+                lte: this.getEndOfDayUtc(dateRange.endDate.toString())
             };
         }
 
