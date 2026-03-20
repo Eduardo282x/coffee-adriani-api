@@ -414,7 +414,7 @@ export class InvoicesService {
                     // Factor de conversión: si la presentación es '1kilo', cada unidad equivale a 0.2
                     const conversionFactor = product.presentation == '1kilo' ? 0.2 : 1;
                     // Cantidad efectiva (ajustada por presentación)
-                    const effectiveQuantity = item.quantity * conversionFactor;
+                    const effectiveQuantity = Number(item.quantity) * conversionFactor;
 
                     // Determinar el precio unitario correcto según la moneda de pago
                     let unitPriceToUse: number;
@@ -855,7 +855,7 @@ export class InvoicesService {
             }).then(item => item.map(data => {
                 return {
                     ...data,
-                    specialPrice: data.invoiceItems.filter(item => item.type == 'SALE').reduce((acc, det) => acc + (Number(det.unitPriceUSD) * det.quantity), 0),
+                    specialPrice: data.invoiceItems.filter(item => item.type == 'SALE').reduce((acc, det) => acc + (Number(det.unitPriceUSD) * Number(det.quantity)), 0),
                 }
             }))
 
@@ -1468,12 +1468,12 @@ export class InvoicesService {
                 if (findInventory) {
                     await this.prismaService.inventory.update({
                         where: { id: findInventory.id },
-                        data: { quantity: findInventory.quantity + det.quantity }
+                        data: { quantity: Number(findInventory.quantity) + Number(det.quantity) }
                     })
                     await this.prismaService.historyInventory.create({
                         data: {
                             productId: findInventory.productId,
-                            quantity: det.quantity,
+                            quantity: Number(det.quantity),
                             description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
                             movementType: 'IN'
                         }
@@ -1731,7 +1731,7 @@ export class InvoicesService {
         invoices.forEach((inv) => {
             inv.invoiceItems.forEach(({ product, quantity, unitPrice }) => {
                 const conversionFactor = product.presentation === '1kilo' ? 0.2 : 1;
-                const effectiveQuantity = quantity * conversionFactor;
+                const effectiveQuantity = Number(quantity) * conversionFactor;
                 const key = product.name;
                 const current = productsMap.get(key);
                 if (!current) {
@@ -1763,7 +1763,7 @@ export class InvoicesService {
         invoices.forEach(inv => {
             const totalBultos = inv.invoiceItems.reduce((sum, i) => {
                 const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
-                return sum + i.quantity * conv;
+                return sum + Number(i.quantity) * conv;
             }, 0);
             let bultosPendientes = 0;
             const abono = Number(inv.totalAmount) - Number(inv.remaining);
@@ -1799,7 +1799,7 @@ export class InvoicesService {
                 const found = inv.invoiceItems.find(item => item.product.name === productName);
                 if (found) {
                     const conv = found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
-                    const effective = Math.round(found.quantity * conv * 100) / 100;
+                    const effective = Math.round(Number(found.quantity) * conv * 100) / 100;
                     rowData.push(effective);
                     rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
                 } else {
@@ -1868,7 +1868,7 @@ export class InvoicesService {
                     const found = inv.invoiceItems.find(item => item.product.name === productName);
                     if (found) {
                         const conv = found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
-                        const effective = Math.round(found.quantity * conv * 100) / 100;
+                        const effective = Math.round(Number(found.quantity) * conv * 100) / 100;
                         rowData.push(effective);
                         rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
                     } else {
@@ -1879,7 +1879,7 @@ export class InvoicesService {
 
                 const totalBultos = inv.invoiceItems.reduce((sum, i) => {
                     const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
-                    return sum + i.quantity * conv;
+                    return sum + Number(i.quantity) * conv;
                 }, 0);
                 rowData.push(totalBultos);
 

@@ -979,7 +979,7 @@ export class PaymentsService {
                     }
 
                     // Calcular total de bultos en la factura
-                    const cantidadBultosTotal = findInvoice.invoiceItems.filter(item => item.type !== 'GIFT').reduce((acc, item) => acc + item.quantity, 0);
+                    const cantidadBultosTotal = findInvoice.invoiceItems.filter(item => item.type !== 'GIFT').reduce((acc, item) => acc + Number(item.quantity), 0);
 
                     let nuevoTotal = 0;
                     let nuevoPagadoTotal = 0;

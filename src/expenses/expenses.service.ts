@@ -232,8 +232,8 @@ export class ExpensesService {
                     if (!productSales[item.productId]) {
                         productSales[item.productId] = { name: item.product.name || 'Desconocido', quantity: 0 };
                     }
-                    productSales[item.productId].quantity += item.quantity;
-                    totalQuantity += item.quantity;
+                    productSales[item.productId].quantity += Number(item.quantity);
+                    totalQuantity += Number(item.quantity);
                 }
             }
 
@@ -329,9 +329,9 @@ export class ExpensesService {
 
                     // Determinar si fue pagado en USD o BS
                     if (invoiceCurrency === 'USD') {
-                        earn += (Number(item.unitPriceUSD) - purchasePriceUSD) * item.quantity;
+                        earn += (Number(item.unitPriceUSD) - purchasePriceUSD) * Number(item.quantity);
                     } else {
-                        earn += (Number(item.unitPrice) - purchasePrice) * item.quantity;
+                        earn += (Number(item.unitPrice) - purchasePrice) * Number(item.quantity);
                     }
                 }
 

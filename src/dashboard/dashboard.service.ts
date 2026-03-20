@@ -317,7 +317,7 @@ export class DashboardService {
     let bultosPagadosEnRango = 0;
 
     for (const factura of facturas) {
-      const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalBultosFactura = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       const totalFactura = parseFloat(factura.totalAmount.toString());
       const pendiente = parseFloat(factura.remaining.toString());
 
@@ -335,7 +335,7 @@ export class DashboardService {
         const totalFactura = parseFloat(factura.totalAmount.toString());
 
         // Calcular cantidad total de items en la factura
-        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
 
         // Calcular porcentaje pagado de la factura por este pago
         const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
@@ -384,7 +384,7 @@ export class DashboardService {
             despachados[category] = 0;
           }
 
-          despachados[category] += item.quantity;
+          despachados[category] += Number(item.quantity);
         }
       });
     });
@@ -428,7 +428,7 @@ export class DashboardService {
     }
 
     // Total
-    const totalDespachado: number = Object.values(despachados).reduce((sum: number, val: any) => sum + val, 0) as number;
+    const totalDespachado: number = Object.values(despachados).reduce((sum: number, val: any) => sum + Number(val), 0) as number;
 
     wsReporte.getCell(`B16`).value = 'Total:';
     wsReporte.getCell(`B16`).font = { bold: true };
@@ -466,7 +466,7 @@ export class DashboardService {
     let bultosPendientesCentroTotal = 0;
 
     for (const factura of facturasCentro) {
-      const totalBultos = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalBultos = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       const totalFactura = parseFloat(factura.totalAmount.toString());
       const pendiente = parseFloat(factura.remaining.toString());
 
@@ -486,7 +486,7 @@ export class DashboardService {
           const montoAsignado = parseFloat(invoicePayment.amount.toString());
           const totalFactura = parseFloat(factura.totalAmount.toString());
           // Calcular cantidad total de items en la factura
-          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
           // Calcular porcentaje pagado de la factura por este pago
           const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
           // Sumar los bultos pagados proporcionalmente
@@ -496,7 +496,7 @@ export class DashboardService {
     }
 
     for (const facturaCentro of facturasCentros) {
-      const totalBultosCentro = facturaCentro.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalBultosCentro = facturaCentro.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       const totalFacturaCentro = parseFloat(facturaCentro.totalAmount.toString());
       const pendienteCentro = parseFloat(facturaCentro.remaining.toString());
       if (totalFacturaCentro > 0) {
@@ -690,7 +690,7 @@ export class DashboardService {
           const totalFactura = parseFloat(factura.totalAmount.toString());
 
           // Calcular cantidad total de items en la factura
-          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
 
           // Calcular equivalente en items basado en el pago
           const porcentajePagado = montoAsignado / totalFactura;
@@ -750,7 +750,7 @@ export class DashboardService {
 
         for (const item of factura.invoiceItems) {
           const productoKey = `${item.product.name} ${item.product.presentation}`;
-          const cantidadPagada = item.quantity * porcentajePagado;
+          const cantidadPagada = Number(item.quantity) * porcentajePagado;
           const montoPagadoProducto = parseFloat(item.unitPrice.toString()) * cantidadPagada;
 
           if (!productosResumen[productoKey]) {
@@ -1086,7 +1086,7 @@ export class DashboardService {
     // Cache para totales de facturas
     const facturaTotalesCache = new Map();
     facturas.forEach(f => {
-      const totalBultos = f.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalBultos = f.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       facturaTotalesCache.set(f.id, {
         totalBultos,
         totalAmount: Number(f.totalAmount),
@@ -1109,7 +1109,7 @@ export class DashboardService {
         const factura = invoicePayment.invoice;
         const montoAsignado = Number(invoicePayment.amount);
         const totalFactura = Number(factura.totalAmount);
-        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
         const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
         bultosPagados += cantidadTotalItems * porcentajePagado;
       });
@@ -1161,7 +1161,7 @@ export class DashboardService {
 
     facturas.forEach(factura => {
       if (factura.client.block.name.toLowerCase().includes('centro')) {
-        bultosDespachadosCentro += factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+        bultosDespachadosCentro += factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       }
     });
 
@@ -1171,7 +1171,7 @@ export class DashboardService {
         if (factura.client.block.name.toLowerCase().includes('centro')) {
           const montoAsignado = Number(invoicePayment.amount);
           const totalFactura = Number(factura.totalAmount);
-          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
           const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
           bultosPagadosCentroTotal += cantidadTotalItems * porcentajePagado;
         }
@@ -1179,7 +1179,7 @@ export class DashboardService {
     });
 
     facturasCentros.forEach(facturaCentro => {
-      const totalBultos = facturaCentro.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalBultos = facturaCentro.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       const totalFactura = Number(facturaCentro.totalAmount);
       const pendiente = Number(facturaCentro.remaining);
       if (totalFactura > 0) {
@@ -1384,7 +1384,7 @@ export class DashboardService {
           const factura = invoicePayment.invoice;
           const montoAsignado = Number(invoicePayment.amount);
           const totalFactura = Number(factura.totalAmount);
-          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
+          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
           const porcentajePagado = montoAsignado / totalFactura;
           const equivalenteItems = cantidadTotalItems * porcentajePagado;
 
@@ -1438,7 +1438,7 @@ export class DashboardService {
 
         factura.invoiceItems.forEach(item => {
           const productoKey = `${item.product.name} ${item.product.presentation}`;
-          const cantidadPagada = item.quantity * porcentajePagado;
+          const cantidadPagada = Number(item.quantity) * porcentajePagado;
           const montoPagadoProducto = Number(item.unitPrice) * cantidadPagada;
 
           if (!productosResumen[productoKey]) {

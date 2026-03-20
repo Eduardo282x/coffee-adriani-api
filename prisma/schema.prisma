@@ -146,7 +146,7 @@ model InvoiceProduct {
   invoiceId    Int
   product      Product            @relation(fields: [productId], references: [id])
   productId    Int
-  quantity     Int
+  quantity     Decimal            @db.Decimal(10, 4)
   type         InvoiceTypeProduct @default(SALE)
   unitPriceUSD Decimal            @default(0) @db.Decimal(10, 2)
   unitPrice    Decimal            @db.Decimal(10, 2)
