@@ -1,8 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOInventory } from './inventory.dto';
+import { DTOInventory, DTOInventoryHistory, DTOInventorySimple } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
+
+interface InventoryHistoryFilter {
+    page: number;
+    limit: number;
+    startDate?: string;
+    endDate?: string;
+    typeMovement?: 'IN' | 'OUT' | 'EDIT' | '';
+    typeProduct?: string;
+}
 
 @Injectable()
 export class InventoryService {
@@ -10,6 +19,20 @@ export class InventoryService {
     constructor(
         private readonly prismaService: PrismaService,
         private readonly productsService: ProductsService) { }
+
+    private getStartOfDayUtc(date: string) {
+        if (date.length > 10) {
+            return new Date(date);
+        }
+        return new Date(`${date}T00:00:00.000Z`);
+    }
+
+    private getEndOfDayUtc(date: string) {
+        if (date.length > 10) {
+            return new Date(date);
+        }
+        return new Date(`${date}T23:59:59.999Z`);
+    }
 
     async getInventory() {
         const getDolar = await this.productsService.getDolar();
@@ -39,64 +62,149 @@ export class InventoryService {
             return [];
         }
     }
-    async getInventoryHistory() {
-        const getDolar = await this.productsService.getDolar();
 
-        return await this.prismaService.historyInventory.findMany({
-            orderBy: { id: 'desc' },
-            include: {
-                product: true
+    async getInventoryHistory(filter: InventoryHistoryFilter) {
+        const { page, limit, startDate, endDate, typeMovement, typeProduct } = filter;
+
+        const where: any = {};
+        const getDolar = await this.productsService.getDolar();
+        const safePage = page > 0 ? page : 1;
+        const safeLimit = limit > 0 ? Math.min(limit, 100) : 20;
+        const skip = (safePage - 1) * safeLimit;
+
+        if (startDate && endDate) {
+            where.movementDate = {
+                gte: this.getStartOfDayUtc(startDate),
+                lte: this.getEndOfDayUtc(endDate),
+            };
+        }
+
+        if (typeMovement) {
+            where.movementType = typeMovement;
+        }
+
+        if (typeProduct) {
+            where.product = {
+                type: {
+                    equals: typeProduct,
+                    mode: 'insensitive',
+                },
+            };
+        }
+
+        const [total, history] = await Promise.all([
+            this.prismaService.historyInventory.count({ where }),
+            this.prismaService.historyInventory.findMany({
+                skip,
+                take: safeLimit,
+                orderBy: [{ movementDate: 'desc' }, { id: 'desc' }],
+                where,
+                include: {
+                    product: true,
+                },
+            }),
+        ]);
+
+        const groupedMap = new Map<
+            string,
+            {
+                controlNumber: string;
+                description: string;
+                movementType: 'IN' | 'OUT' | 'EDIT';
+                movementDate: string;
+                details: Array<{
+                    productId: number;
+                    name: string;
+                    presentation: string;
+                    quantity: number;
+                    priceBs: string;
+                    priceUSD: string;
+                    date: string;
+                }>;
             }
-        }).then(inv => inv.map(iv => {
-            return {
-                ...iv,
-                product: {
-                    ...iv.product,
-                    price: iv.product.price.toFixed(2),
-                    priceUSD: iv.product.priceUSD.toFixed(2),
-                    priceBs: (Number(iv.product.price) * Number(getDolar.dolar)).toFixed(2)
-                }
+        >();
+
+        for (const item of history) {
+            const day = item.movementDate.toISOString().slice(0, 10);
+            const control = item.controlNumber || '';
+            const key = `${control}-${day}`;
+
+            if (!groupedMap.has(key)) {
+                groupedMap.set(key, {
+                    controlNumber: control,
+                    description: item.description,
+                    movementType: item.movementType,
+                    movementDate: day,
+                    details: [],
+                });
             }
-        }))
+
+            groupedMap.get(key)!.details.push({
+                productId: item.productId,
+                name: item.product.name,
+                presentation: item.product.presentation,
+                quantity: item.quantity,
+                priceBs: (Number(item.product.price) * Number(getDolar.dolar)).toFixed(2),
+                priceUSD: item.product.priceUSD.toFixed(2),
+                date: item.movementDate.toISOString(),
+            });
+        }
+
+        const data = Array.from(groupedMap.values());
+        const totalPages = Math.ceil(total / safeLimit);
+
+        return {
+            data,
+            meta: {
+                total,
+                page: safePage,
+                limit: safeLimit,
+                totalPages,
+                hasNextPage: safePage < totalPages,
+                hasPreviousPage: safePage > 1,
+            },
+        };
     }
 
     async saveInventory(inventory: DTOInventory) {
         try {
-            const findProductInInventory = await this.prismaService.inventory.findFirst({
-                where: { productId: inventory.productId }
-            })
-
-            if (findProductInInventory) {
-
-                await this.prismaService.inventory.update({
-                    data: {
-                        quantity: findProductInInventory.quantity + inventory.quantity
-                    },
-                    where: {
-                        id: findProductInInventory.id
-                    }
-                })
-            } else {
-                await this.prismaService.inventory.create({
-                    data: {
-                        productId: inventory.productId,
-                        quantity: inventory.quantity,
-                        createdAt: new Date()
-                    }
-                })
-            }
-
-            await this.prismaService.historyInventory.create({
-                data: {
-                    productId: inventory.productId,
-                    quantity: inventory.quantity,
+            const saveHistory = await this.prismaService.historyInventory.createMany({
+                data: inventory.details.map(detail => ({
+                    productId: detail.productId,
+                    quantity: detail.quantity,
+                    controlNumber: inventory.controlNumber,
                     movementType: 'IN',
-                    description: `Entrada de mercancía`,
-                    movementDate: new Date(inventory.date)
+                    description: `Entrada de mercancía ${inventory.description ? `- ${inventory.description}` : ''}`,
+                    movementDate: inventory.date
+                }))
+            });
+
+            inventory.details.map(async (detail) => {
+                const findProductInInventory = await this.prismaService.inventory.findFirst({
+                    where: { productId: detail.productId }
+                })
+
+                if (findProductInInventory) {
+
+                    await this.prismaService.inventory.update({
+                        data: {
+                            quantity: findProductInInventory.quantity + detail.quantity
+                        },
+                        where: {
+                            id: findProductInInventory.id
+                        }
+                    })
+                } else {
+                    await this.prismaService.inventory.create({
+                        data: {
+                            productId: detail.productId,
+                            quantity: detail.quantity,
+                        }
+                    })
                 }
             })
 
-            baseResponse.message = 'Producto guardado en inventario.'
+            baseResponse.message = 'Productos guardados en inventario.'
             return baseResponse
         }
         catch (err) {
@@ -108,7 +216,7 @@ export class InventoryService {
         }
     }
 
-    async updateInventory(inventory: DTOInventory, id: number) {
+    async updateInventory(inventory: DTOInventorySimple, id: number) {
         try {
             const findProductInInventory = await this.prismaService.inventory.findFirst({
                 where: { id }
@@ -151,29 +259,33 @@ export class InventoryService {
 
     async updateInventoryInvoice(inventory: DTOInventory) {
         try {
-            const findProductInventory = await this.prismaService.inventory.findFirst({
-                where: { productId: inventory.productId }
+            inventory.details.map(async (detail) => {
+                const findProductInventory = await this.prismaService.inventory.findFirst({
+                    where: { productId: detail.productId }
+                })
+
+                const findProductInInventory = await this.prismaService.inventory.update({
+                    where: { id: findProductInventory.id },
+                    data: {
+                        quantity: {
+                            decrement: detail.quantity
+                        }
+                    },
+                });
+
+                await this.prismaService.historyInventory.create({
+                    data: {
+                        productId: findProductInInventory.productId,
+                        controlNumber: inventory.controlNumber,
+                        quantity: detail.quantity,
+                        description: inventory.description,
+                        movementDate: inventory.date,
+                        movementType: 'OUT'
+                    }
+                });
             })
 
-            const findProductInInventory = await this.prismaService.inventory.update({
-                where: { id: findProductInventory.id },
-                data: {
-                    quantity: {
-                        decrement: inventory.quantity
-                    }
-                },
-            });
-
-            await this.prismaService.historyInventory.create({
-                data: {
-                    productId: findProductInInventory.productId,
-                    quantity: inventory.quantity,
-                    description: inventory.description,
-                    movementType: 'OUT'
-                }
-            });
-
-            baseResponse.message = 'Producto actualizado en inventario.'
+            baseResponse.message = 'Productos actualizados en inventario.'
             return baseResponse
         }
         catch (err) {
@@ -185,7 +297,7 @@ export class InventoryService {
         }
     }
 
-    async updateAmountInventory(inventory: DTOInventory, id: number) {
+    async updateAmountInventory(inventory: DTOInventorySimple, id: number) {
         try {
             const findProductInInventory = await this.prismaService.inventory.findFirst({
                 where: { id }

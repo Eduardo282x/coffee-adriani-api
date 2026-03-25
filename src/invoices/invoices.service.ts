@@ -39,14 +39,14 @@ export class InvoicesService {
     }
 
     private getStartOfDayUtc(date: string) {
-        if(date.length > 10) {
+        if (date.length > 10) {
             return new Date(date);
         }
         return new Date(`${date}T00:00:00.000Z`);
     }
 
     private getEndOfDayUtc(date: string) {
-        if(date.length > 10) {
+        if (date.length > 10) {
             return new Date(date);
         }
         return new Date(`${date}T23:59:59.999Z`);
@@ -1254,16 +1254,17 @@ export class InvoicesService {
                 data: dataDetailsInvoice
             })
 
-            newInvoice.details.map(async (det) => {
-                const dataInventory = {
+            const saveInventory = {
+                controlNumber: saveInvoice.controlNumber,
+                description: `Salida de producto por factura ${saveInvoice.controlNumber}`,
+                date: saveInvoice.dispatchDate,
+                details: newInvoice.details.map(det => ({
                     productId: det.productId,
-                    price: det.price,
-                    priceUSD: det.priceUSD,
                     quantity: det.quantity,
-                    description: `Salida de producto por factura ${saveInvoice.controlNumber}`
-                }
-                await this.inventoryService.updateInventoryInvoice(dataInventory)
-            });
+                }))
+            }
+
+            await this.inventoryService.updateInventoryInvoice(saveInventory)
 
             const calculateTotalInvoice = dataDetailsInvoice.filter(item => item.type == 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
 

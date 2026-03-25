@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import { DTOInventory } from './inventory.dto';
+import { DTOInventory, DTOInventorySimple } from './inventory.dto';
 
 @Controller('inventory')
 export class InventoryController {
@@ -14,8 +14,15 @@ export class InventoryController {
         return await this.inventoryService.getInventory();
     }
     @Get('/history')
-    async getInventoryHistory() {
-        return await this.inventoryService.getInventoryHistory();
+    async getInventoryHistory(
+        @Query('page', ParseIntPipe) page: number,
+        @Query('limit', ParseIntPipe) limit: number,
+        @Query('startDate') startDate?: string,
+        @Query('endDate') endDate?: string,
+        @Query('typeMovement') typeMovement?: 'IN' | 'OUT' | 'EDIT' | '',
+        @Query('typeProduct') typeProduct?: string,
+    ) {
+        return await this.inventoryService.getInventoryHistory({page, limit, startDate, endDate, typeMovement, typeProduct});
     }
 
     @Post()
@@ -24,7 +31,7 @@ export class InventoryController {
     }
 
     @Put('/:id')
-    async updateAmountInventory(@Body() inventory: DTOInventory, @Param('id') id: string) {
+    async updateAmountInventory(@Body() inventory: DTOInventorySimple, @Param('id') id: string) {
         return await this.inventoryService.updateAmountInventory(inventory, Number(id));
     }
 }
