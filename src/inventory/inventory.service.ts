@@ -34,6 +34,24 @@ export class InventoryService {
         return new Date(`${date}T23:59:59.999Z`);
     }
 
+    private formatControlDate(date: Date): string {
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const year = String(date.getFullYear()).slice(-2);
+        return `${month}${day}${year}`;
+    }
+
+    private extractControlFromDescription(description: string): string | null {
+        if (!description) return null;
+
+        // Ejemplos que cubre:
+        // "Salida de producto por factura 0001"
+        // "Salida de inventario por factura #A-123"
+        // "Factura 1234"
+        const match = description.match(/factura\s*#?\s*([a-zA-Z0-9-]+)/i);
+        return match?.[1] ?? null;
+    }
+
     async getInventory() {
         const getDolar = await this.productsService.getDolar();
 
@@ -154,8 +172,8 @@ export class InventoryService {
         const totalPages = Math.ceil(total / safeLimit);
 
         return {
-            data,
-            meta: {
+            history: data,
+            pagination: {
                 total,
                 page: safePage,
                 limit: safeLimit,
@@ -164,6 +182,79 @@ export class InventoryService {
                 hasPreviousPage: safePage > 1,
             },
         };
+    }
+
+    async updateHistoryData() {
+        try {
+            const records = await this.prismaService.historyInventory.findMany({
+                where: {
+                    OR: [
+                        { controlNumber: '' },
+                        { controlNumber: { equals: '' } },
+                    ],
+                },
+                orderBy: { id: 'asc' },
+                select: {
+                    id: true,
+                    movementType: true,
+                    movementDate: true,
+                    description: true,
+                    controlNumber: true,
+                },
+            });
+
+            if (!records.length) {
+                return {
+                    success: true,
+                    message: 'No hay registros sin número de control.',
+                    updatedCount: 0,
+                };
+            }
+
+            let updatedCount = 0;
+
+            for (const row of records) {
+                let controlNumber = '';
+
+                if (row.movementType === 'OUT') {
+                    // 1) intentar extraerlo desde la descripción
+                    const extracted = this.extractControlFromDescription(row.description);
+                    if (extracted) {
+                        controlNumber = extracted;
+                    } else {
+                        // 2) fallback si no viene en texto
+                        controlNumber = `OUT-${this.formatControlDate(row.movementDate)}`;
+                    }
+                } else if (row.movementType === 'IN') {
+                    controlNumber = `Entrada-${this.formatControlDate(row.movementDate)}`;
+                } else if (row.movementType === 'EDIT') {
+                    controlNumber = `Edit-${this.formatControlDate(row.movementDate)}`;
+                }
+
+                if (!controlNumber) {
+                    controlNumber = `MOV-${this.formatControlDate(row.movementDate)}`;
+                }
+
+                await this.prismaService.historyInventory.update({
+                    where: { id: row.id },
+                    data: { controlNumber },
+                });
+
+                updatedCount++;
+            }
+
+            return {
+                success: true,
+                message: 'Historial actualizado correctamente.',
+                updatedCount,
+            };
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
+            });
+            badResponse.message = err instanceof Error ? err.message : String(err);
+            return badResponse;
+        }
     }
 
     async saveInventory(inventory: DTOInventory) {

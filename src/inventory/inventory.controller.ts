@@ -34,4 +34,9 @@ export class InventoryController {
     async updateAmountInventory(@Body() inventory: DTOInventorySimple, @Param('id') id: string) {
         return await this.inventoryService.updateAmountInventory(inventory, Number(id));
     }
+
+    @Post('/history/update-control-number')
+    async updateHistoryData() {
+        return await this.inventoryService.updateHistoryData();
+    }
 }

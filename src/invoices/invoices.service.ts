@@ -1246,7 +1246,7 @@ export class InvoicesService {
                     type: det.type || 'SALE', // Default to 'SALE' if not provided
                     unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
                     unitPriceUSD: Number(det.priceUSD),
-                    subtotal: Number(newInvoice.priceUSD ? Number(det.priceUSD) * det.quantity : Number(det.price) * det.quantity),
+                    subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
                 }
             })
 
