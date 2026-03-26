@@ -401,12 +401,15 @@ export class InventoryService {
                 where: { id }
             });
 
-            await this.prismaService.historyInventory.create({
+            const findHistory = await this.prismaService.historyInventory.findFirst({
+                where: { productId: findProductInInventory.productId },
+                orderBy: { movementDate: 'desc' }
+            });
+
+            await this.prismaService.historyInventory.update({
+                where: { id: findHistory.id },
                 data: {
-                    productId: findProductInInventory.productId,
                     quantity: inventory.quantity,
-                    description: 'Edición de inventario',
-                    movementType: 'EDIT'
                 }
             })
 
