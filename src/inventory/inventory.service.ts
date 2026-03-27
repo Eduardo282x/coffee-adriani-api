@@ -9,7 +9,7 @@ interface InventoryHistoryFilter {
     limit: number;
     startDate?: string;
     endDate?: string;
-    typeMovement?: 'IN' | 'OUT' | 'EDIT' | '';
+    typeMovement?: 'IN' | 'OUT' | 'EDIT' | 'ADJUSTMENT' | '';
     typeProduct?: string;
     controlNumber?: string;
 }
@@ -136,7 +136,7 @@ export class InventoryService {
             {
                 controlNumber: string;
                 description: string;
-                movementType: 'IN' | 'OUT' | 'EDIT';
+                movementType: 'IN' | 'OUT' | 'EDIT' | 'ADJUSTMENT';
                 movementDate: string;
                 details: Array<{
                     productId: number;
