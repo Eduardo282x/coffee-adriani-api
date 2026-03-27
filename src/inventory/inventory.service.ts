@@ -11,6 +11,7 @@ interface InventoryHistoryFilter {
     endDate?: string;
     typeMovement?: 'IN' | 'OUT' | 'EDIT' | '';
     typeProduct?: string;
+    controlNumber?: string;
 }
 
 @Injectable()
@@ -82,7 +83,7 @@ export class InventoryService {
     }
 
     async getInventoryHistory(filter: InventoryHistoryFilter) {
-        const { page, limit, startDate, endDate, typeMovement, typeProduct } = filter;
+        const { page, limit, startDate, endDate, typeMovement, typeProduct, controlNumber } = filter;
 
         const where: any = {};
         const getDolar = await this.productsService.getDolar();
@@ -107,6 +108,13 @@ export class InventoryService {
                     equals: typeProduct,
                     mode: 'insensitive',
                 },
+            };
+        }
+
+        if (controlNumber) {
+            where.controlNumber = {
+                equals: controlNumber,
+                mode: 'insensitive',
             };
         }
 

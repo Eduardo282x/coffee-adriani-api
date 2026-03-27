@@ -21,8 +21,9 @@ export class InventoryController {
         @Query('endDate') endDate?: string,
         @Query('typeMovement') typeMovement?: 'IN' | 'OUT' | 'EDIT' | '',
         @Query('typeProduct') typeProduct?: string,
+        @Query('controlNumber') controlNumber?: string,
     ) {
-        return await this.inventoryService.getInventoryHistory({page, limit, startDate, endDate, typeMovement, typeProduct});
+        return await this.inventoryService.getInventoryHistory({page, limit, startDate, endDate, typeMovement, typeProduct, controlNumber});
     }
 
     @Post()
