@@ -118,6 +118,7 @@ model Inventory {
 }
 
 enum InventoryType {
+  ADJUSTMENT
   IN
   OUT
   EDIT

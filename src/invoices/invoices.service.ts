@@ -1476,7 +1476,7 @@ export class InvoicesService {
                             productId: findInventory.productId,
                             quantity: Number(det.quantity),
                             description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
-                            movementType: 'IN'
+                            movementType: 'ADJUSTMENT'
                         }
                     })
                 }
