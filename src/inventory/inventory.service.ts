@@ -392,7 +392,15 @@ export class InventoryService {
         try {
             const findProductInInventory = await this.prismaService.inventory.findFirst({
                 where: { id }
-            })
+            });
+
+            const findHistory = await this.prismaService.historyInventory.findFirst({
+                where: { productId: findProductInInventory.productId, movementType: 'IN' },
+                orderBy: { movementDate: 'desc' }
+            });
+
+            const oldAmount = findProductInInventory.quantity - findHistory.quantity;
+            const updateAmountHistory = inventory.quantity - oldAmount;
 
             await this.prismaService.inventory.update({
                 data: {
@@ -401,15 +409,10 @@ export class InventoryService {
                 where: { id }
             });
 
-            const findHistory = await this.prismaService.historyInventory.findFirst({
-                where: { productId: findProductInInventory.productId },
-                orderBy: { movementDate: 'desc' }
-            });
-
             await this.prismaService.historyInventory.update({
                 where: { id: findHistory.id },
                 data: {
-                    quantity: inventory.quantity,
+                    quantity: updateAmountHistory,
                 }
             })
 
