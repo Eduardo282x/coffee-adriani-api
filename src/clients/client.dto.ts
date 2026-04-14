@@ -29,7 +29,10 @@ export class DTOBlocks {
 }
 
 export type StatusPay = 'clean' | 'pending' | 'all';
+
 export class DTOReportClients {
+    @IsString()
+    type: string;
     @IsString()
     @IsOptional()
     zone: string;

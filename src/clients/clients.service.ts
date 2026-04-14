@@ -123,9 +123,9 @@ export class ClientsService {
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'ClientService' }
+                data: { message: (err as any).message, from: 'ClientService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = (err as any).message;
             return badResponse;
         }
     }
@@ -144,9 +144,9 @@ export class ClientsService {
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'ClientService' }
+                data: { message: (err as any).message, from: 'ClientService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = (err as any).message;
             return badResponse;
         }
     }
@@ -170,9 +170,9 @@ export class ClientsService {
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'ClientService' }
+                data: { message: (err as any).message, from: 'ClientService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = (err as any).message;
             return badResponse;
         }
     }
@@ -202,9 +202,9 @@ export class ClientsService {
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'ClientService' }
+                data: { message: (err as any).message, from: 'ClientService' }
             })
-            badResponse.message = err.message
+            badResponse.message = (err as any).message
             return badResponse;
         }
     }
@@ -227,7 +227,7 @@ export class ClientsService {
             baseResponse.message = 'Cliente actualizado exitosamente.'
             return baseResponse;
         } catch (err) {
-            badResponse.message = err.message
+            badResponse.message = (err as any).message
             return badResponse;
         }
     }
@@ -280,9 +280,9 @@ export class ClientsService {
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'ClientService' }
+                data: { message: (err as any).message, from: 'ClientService' }
             });
-            badResponse.message = err.message;
+            badResponse.message = (err as any).message;
             return badResponse;
         }
     }
@@ -311,6 +311,16 @@ export class ClientsService {
                 where: {
                     status: { in: invoiceStatusFilter } as any, // Explicitly cast to 'any' to avoid circular reference
                     client: clientWhere,
+                    invoiceItems: {
+                        some: {
+                            product: {
+                                type: {
+                                    contains: client.type,
+                                    mode: 'insensitive'
+                                }
+                            }
+                        }
+                    }
                 },
                 _sum: { totalAmount: true, remaining: true },
             });
@@ -319,6 +329,16 @@ export class ClientsService {
                 where: {
                     status: { in: invoiceStatusFilter } as any,
                     client: clientWhere,
+                    invoiceItems: {
+                        some: {
+                            product: {
+                                type: {
+                                    contains: client.type,
+                                    mode: 'insensitive'
+                                }
+                            }
+                        }
+                    }
                 },
                 orderBy: [{ clientId: 'asc' }, { dispatchDate: 'desc' }],
                 distinct: ['clientId'],
@@ -426,7 +446,7 @@ export class ClientsService {
                         // cli.zone,
                         cli.block ? cli.block.name : 'N/A',
                         cli.lastInvoiceControlNumber,
-                        cli.lastInvoiceDispatchDate ? cli.lastInvoiceDispatchDate.toLocaleString() : '',
+                        cli.lastInvoiceDispatchDate ? cli.lastInvoiceDispatchDate.toISOString().slice(0, 10) : '',
                         `${formatNumberWithDots(cli.totalInvoices)} $`,
                         `${formatNumberWithDots(cli.debt)} $`,
                         `${formatNumberWithDots(cli.totalPaid)} $`
@@ -441,7 +461,7 @@ export class ClientsService {
                 }
 
                 // Comienza el documento
-                doc.font('Helvetica-Bold').fontSize(12).text('Lista de clientes', 10, 20, { align: 'left' });
+                doc.font('Helvetica-Bold').fontSize(12).text(`Lista de clientes - Producto: ${client.type}`, 10, 20, { align: 'left' });
                 let startY = doc.y + 10;
                 drawHeaders(startY);
                 startY += rowHeight;
@@ -463,9 +483,9 @@ export class ClientsService {
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'ClientService' }
+                data: { message: (err as any).message, from: 'ClientService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = (err as any).message;
             return badResponse;
         }
     }
@@ -520,7 +540,7 @@ export class ClientsService {
             }
         } catch (error) {
             await this.prismaService.errorMessages.create({
-                data: { message: error.message, from: 'ClientService - InactivityNotifications' }
+                data: { message: (error as any).message, from: 'ClientService - InactivityNotifications' }
             })
             console.error('Error generating inactivity notifications:', error);
         }
