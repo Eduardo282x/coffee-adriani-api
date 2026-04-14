@@ -312,7 +312,7 @@ export class ClientsService {
                     status: { in: invoiceStatusFilter } as any, // Explicitly cast to 'any' to avoid circular reference
                     client: clientWhere,
                     invoiceItems: {
-                        some: {
+                        every: {
                             product: {
                                 type: {
                                     contains: client.type,
@@ -330,7 +330,7 @@ export class ClientsService {
                     status: { in: invoiceStatusFilter } as any,
                     client: clientWhere,
                     invoiceItems: {
-                        some: {
+                        every: {
                             product: {
                                 type: {
                                     contains: client.type,
