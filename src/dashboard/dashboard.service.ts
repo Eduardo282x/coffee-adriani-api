@@ -103,7 +103,7 @@ export class DashboardService {
           },
           where: {
             status: {
-              in: ['Pagado','Pendiente', 'Vencida']
+              in: ['Pagado', 'Pendiente', 'Vencida']
             },
             createdAt: { gte: filter.startDate, lte: filter.endDate },
             invoiceItems: {
@@ -216,6 +216,16 @@ export class DashboardService {
           dispatchDate: {
             gte: filter.startDate,
             lte: filter.endDate
+          },
+          invoiceItems: {
+            every: {
+              product: {
+                type: {
+                  contains: filter.type,
+                  mode: 'insensitive'
+                }
+              }
+            }
           }
         },
         select: {
@@ -278,6 +288,16 @@ export class DashboardService {
             block: {
               name: { contains: 'centro', mode: 'insensitive' }
             }
+          },
+          invoiceItems: {
+            every: {
+              product: {
+                type: {
+                  contains: filter.type,
+                  mode: 'insensitive'
+                }
+              }
+            }
           }
         },
         select: {
@@ -301,7 +321,17 @@ export class DashboardService {
       // Facturas hasta cierre
       this.prismaService.invoice.findMany({
         where: {
-          dispatchDate: { lte: endDatePlusOne }
+          dispatchDate: { lte: endDatePlusOne },
+          invoiceItems: {
+            every: {
+              product: {
+                type: {
+                  contains: filter.type,
+                  mode: 'insensitive'
+                }
+              }
+            }
+          }
         },
         select: {
           id: true,
@@ -323,7 +353,7 @@ export class DashboardService {
                 }
               }
             }
-          }
+          },
         }
       }),
 
@@ -888,7 +918,7 @@ export class DashboardService {
       },
       include: {
         client: {
-          include:{
+          include: {
             block: true
           }
         },
