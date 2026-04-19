@@ -20,11 +20,11 @@ export class DTODateRangeFilter {
     @IsOptional()
     @IsDate()
     @Transform(({ value }) => new Date(value))
-    startDate: Date;
+    startDate: Date | string;
     @IsOptional()
     @IsDate()
     @Transform(({ value }) => new Date(value))
-    endDate: Date;
+    endDate: Date | string;
 }
 
 export class DashboardExcel extends DTODateRangeFilter {

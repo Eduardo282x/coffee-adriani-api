@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res, Get } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get, Query } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
 import { FastifyReply } from 'fastify';
@@ -8,22 +8,26 @@ export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) { }
 
   @Post()
-  async getDashboardData(@Body() dateRange: DTODateRangeFilter) {
+  async getDashboardData(@Body() dateRange: DashboardExcel) {
     return await this.dashboardService.getDashboardData(dateRange);
   }
 
   @Get('/clients-demand')
-  async getClientsDemandReport() {
-    return await this.dashboardService.getClientsDemandReport();
+  async getClientsDemandReport(
+    @Query('type') type: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return await this.dashboardService.getClientsDemandReport({ startDate, endDate, type });
   }
 
-  @Post('/export')
-  async downloadExcel(@Body() filter: DashboardExcel, @Res({ passthrough: true }) res: FastifyReply) {
-    const buffer = await this.dashboardService.generateInventoryAndInvoicesExcel(filter);
-    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.header('Content-Disposition', 'attachment; filename=reporte.xlsx');
-    return buffer;
-  }
+  // @Post('/export')
+  // async downloadExcel(@Body() filter: DashboardExcel, @Res({ passthrough: true }) res: FastifyReply) {
+  //   const buffer = await this.dashboardService.generateInventoryAndInvoicesExcel(filter);
+  //   res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  //   res.header('Content-Disposition', 'attachment; filename=reporte.xlsx');
+  //   return buffer;
+  // }
 
   @Post('/export/v2')
   async downloadExcelV2(@Body() filter: DashboardExcel, @Res({ passthrough: true }) res: FastifyReply) {
