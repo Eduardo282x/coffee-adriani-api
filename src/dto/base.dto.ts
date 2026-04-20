@@ -4,11 +4,13 @@ import { IsDate, IsOptional, IsString } from "class-validator";
 export class DTOBaseResponse {
     message: string;
     success: boolean;
+    data?: any;
 }
 
 export const baseResponse: DTOBaseResponse = {
     message: '',
     success: true,
+    data: null
 }
 
 export const badResponse: DTOBaseResponse = {

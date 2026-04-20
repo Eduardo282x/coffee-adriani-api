@@ -922,7 +922,11 @@ export class DashboardService {
             block: true
           }
         },
-        invoiceItems: true
+        invoiceItems: {
+          include: {
+            product: true
+          }
+        }
       }
     });
 
@@ -970,7 +974,7 @@ export class DashboardService {
     ranges.forEach(r => { bucketClientMap[r.label] = new Map(); });
 
     for (const inv of invoices) {
-      const totalElements = inv.invoiceItems.filter(sale => sale.type == 'SALE').reduce((sum, it) => sum + Number(it.quantity), 0);
+      const totalElements = inv.invoiceItems.filter(sale => sale.type == 'SALE').reduce((sum, it) => sum + (it.product.presentation === '1kilo' ? Number(it.quantity) * 0.2 : Number(it.quantity)), 0);
       const range = ranges.find(r => totalElements >= r.min && totalElements <= r.max);
       if (!range) continue;
       const clientName = inv.client?.name || 'Sin nombre';
