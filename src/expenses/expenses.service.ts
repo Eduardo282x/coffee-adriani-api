@@ -184,6 +184,7 @@ export class ExpensesService {
     async getInvoicesEarnV2(expenseFilter: ExpensesDTO) {
         try {
             const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+            const { type } = expenseFilter;
 
             // 1. Obtener todos los pagos de facturas (InvoicePayment) con su factura, productos y pagos
             const invoicePayments = await this.prismaService.invoicePayment.findMany({
@@ -210,6 +211,18 @@ export class ExpensesService {
                     createdAt: {
                         gte: startDate,
                         lte: endDate,
+                    },
+                    invoice: {
+                        invoiceItems: {
+                            every: {
+                                product: {
+                                    type: {
+                                        contains: type,
+                                        mode: 'insensitive'
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             });
@@ -367,6 +380,7 @@ export class ExpensesService {
     async getInvoicesRemaining(expenseFilter: ExpensesDTO) {
         try {
             const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+            const { type } = expenseFilter;
 
             const invoices = await this.prismaService.invoice.findMany({
                 where: {
@@ -384,6 +398,16 @@ export class ExpensesService {
                             createdAt: {
                                 gte: startDate,
                                 lte: endDate
+                            }
+                        }
+                    },
+                    invoiceItems: {
+                        every: {
+                            product: {
+                                type: {
+                                    contains: type,
+                                    mode: 'insensitive'
+                                }
                             }
                         }
                     }

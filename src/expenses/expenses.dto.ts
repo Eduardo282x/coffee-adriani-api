@@ -1,5 +1,5 @@
 import { Transform } from "class-transformer";
-import { IsDate } from "class-validator";
+import { IsDate, IsString } from "class-validator";
 
 export class ExpensesDTO {
     @IsDate()
@@ -8,4 +8,6 @@ export class ExpensesDTO {
     @IsDate()
     @Transform(({ value }) => new Date(value))
     endDate: Date;
+    @IsString()
+    type: string;
 }
