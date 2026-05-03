@@ -11,6 +11,7 @@ import { InvoiceStatus } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
+import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 interface FilterInvoice {
     page?: number;
@@ -153,8 +154,12 @@ export class InvoicesService {
                         dispatchDate: true,
                         dueDate: true,
                         totalAmount: true,
-                        remaining: true,
                         clientId: true,
+                        InvoicePayment: {
+                            select: {
+                                amount: true
+                            }
+                        },
                         client: {
                             select: {
                                 id: true,
@@ -185,7 +190,8 @@ export class InvoicesService {
             // Formatear datos
             const formattedInvoices = invoices.map(invoice => ({
                 ...invoice,
-                totalAmount: invoice.totalAmount.toFixed(2)
+                totalAmount: invoice.totalAmount.toFixed(2),
+                remaining: calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment).toFixed(2)
             }));
 
             // Agrupar por cliente
@@ -323,7 +329,6 @@ export class InvoicesService {
                 select: {
                     id: true,
                     totalAmount: true,
-                    remaining: true,
                     status: true,
                     exchangeRate: true, // Para saber si fue pagada en USD
                     invoiceItems: {
@@ -389,7 +394,9 @@ export class InvoicesService {
             // Procesar cada factura
             for (const invoice of invoicesWithDetails) {
                 const invoiceTotal = Number(invoice.totalAmount);
-                const invoiceRemaining = invoice.status == 'Pagado' ? 0 : Number(invoice.remaining);
+                const invoiceRemaining = invoice.status == 'Pagado'
+                    ? 0
+                    : calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
                 const invoicePaid = invoiceTotal - invoiceRemaining;
 
                 totalCash += invoiceTotal;
@@ -639,7 +646,8 @@ export class InvoicesService {
 
             return {
                 ...invoice,
-                totalAmount: invoice.totalAmount.toFixed(2)
+                totalAmount: invoice.totalAmount.toFixed(2),
+                remaining: calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment).toFixed(2)
             };
         } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
@@ -681,7 +689,8 @@ export class InvoicesService {
                 inv.map(data => {
                     return {
                         ...data,
-                        totalAmount: data.totalAmount.toFixed(2)
+                        totalAmount: data.totalAmount.toFixed(2),
+                        remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment).toFixed(2)
                     }
                 })
             )
@@ -759,7 +768,8 @@ export class InvoicesService {
                 inv.map(data => {
                     return {
                         ...data,
-                        totalAmount: data.totalAmount.toFixed(2)
+                        totalAmount: data.totalAmount.toFixed(2),
+                        remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment).toFixed(2)
                     }
                 })
             )
@@ -824,8 +834,12 @@ export class InvoicesService {
                     id: true,
                     controlNumber: true,
                     totalAmount: true,
-                    remaining: true,
                     clientId: true,
+                    InvoicePayment: {
+                        select: {
+                            amount: true
+                        }
+                    },
                     client: {
                         select: {
                             id: true,
@@ -856,6 +870,7 @@ export class InvoicesService {
                 return {
                     ...data,
                     specialPrice: data.invoiceItems.filter(item => item.type == 'SALE').reduce((acc, det) => acc + (Number(det.unitPriceUSD) * Number(det.quantity)), 0),
+                    remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment)
                 }
             }))
 
@@ -1009,7 +1024,6 @@ export class InvoicesService {
             const newRemaining = Number(findInvoice.totalAmount) - calculateRemaining;
             await this.prismaService.invoice.update({
                 data: {
-                    remaining: newRemaining,
                     status: newRemaining < 2 ? 'Pagado' : findInvoice.status
                 }, where: {
                     id: invoiceId
@@ -1062,7 +1076,9 @@ export class InvoicesService {
 
     groupProductCountInvoices(invoicesFilter) {
         const calculateProducts = invoicesFilter.reduce((acc, invoice) => {
-            const parseRemaining = invoice.status == 'Pagado' ? 0 : Number(invoice.remaining);
+            const parseRemaining = invoice.status == 'Pagado'
+                ? 0
+                : calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment || []);
             let paidRemaining = Number(invoice.totalAmount) - parseRemaining;
 
             invoice.invoiceItems.forEach(item => {
@@ -1273,7 +1289,6 @@ export class InvoicesService {
                 data: {
                     status: calculateTotalInvoice == 0 ? 'Pagado' : 'Creada',
                     totalAmount: calculateTotalInvoice,
-                    remaining: calculateTotalInvoice,
                 }
             });
 
@@ -1350,7 +1365,6 @@ export class InvoicesService {
             await this.prismaService.invoice.update({
                 data: {
                     totalAmount: totalAmount,
-                    remaining: totalAmount
                 },
                 where: { id }
             })
@@ -1427,7 +1441,7 @@ export class InvoicesService {
         try {
             await this.prismaService.invoice.update({
                 where: { id },
-                data: { remaining: 0 }
+                data: { status: 'Pagado' }
             })
             baseResponse.message = 'Factura Limpiada.'
             return baseResponse;
@@ -1544,7 +1558,6 @@ export class InvoicesService {
                     status: 'Creada' as InvoiceStatus,
                     totalAmount: data.totalAmount,
                     clientId: findClient.id,
-                    remaining: data.totalAmount
                 }
             })
 
@@ -1574,7 +1587,6 @@ export class InvoicesService {
                 status: 'Creada' as InvoiceStatus,
                 totalAmount: data.totalAmount,
                 clientId: findClient ? findClient.id : 0,
-                remaining: data.totalAmount
             }
         })
         return dataInvoice
@@ -1762,12 +1774,13 @@ export class InvoicesService {
         ws1.getRow(1).font = { bold: true };
 
         invoices.forEach(inv => {
+            const invoiceRemaining = calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment);
             const totalBultos = inv.invoiceItems.reduce((sum, i) => {
                 const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
                 return sum + Number(i.quantity) * conv;
             }, 0);
             let bultosPendientes = 0;
-            const abono = Number(inv.totalAmount) - Number(inv.remaining);
+            const abono = Number(inv.totalAmount) - invoiceRemaining;
 
             // Calcular bultos pendientes: usar el precio promedio por bulto
             if (totalBultos > 0) {
@@ -1776,7 +1789,7 @@ export class InvoicesService {
                     bultosPendientes = 0;
                 } else {
                     if (avgPricePerBulto > 0) {
-                        bultosPendientes = Math.round((Number(inv.remaining) / avgPricePerBulto) * 100) / 100; // 2 decimales
+                        bultosPendientes = Math.round((invoiceRemaining / avgPricePerBulto) * 100) / 100; // 2 decimales
                     }
                 }
             }
@@ -1791,7 +1804,7 @@ export class InvoicesService {
                 inv.dispatchDate,
                 inv.dueDate,
                 Number(inv.totalAmount),
-                Number(inv.remaining),
+                invoiceRemaining,
                 inv.status,
             ];
 

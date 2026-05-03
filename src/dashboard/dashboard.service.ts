@@ -7,6 +7,7 @@ import { format, eachDayOfInterval, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatistics } from 'src/invoices/invoice.dto';
+import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
 export class DashboardService {
@@ -234,7 +235,6 @@ export class DashboardService {
           dispatchDate: true,
           dueDate: true,
           totalAmount: true,
-          remaining: true,
           status: true,
           client: {
             select: {
@@ -303,7 +303,11 @@ export class DashboardService {
         select: {
           id: true,
           totalAmount: true,
-          remaining: true,
+          InvoicePayment: {
+            select: {
+              amount: true
+            }
+          },
           invoiceItems: {
             select: { quantity: true }
           },
@@ -335,12 +339,13 @@ export class DashboardService {
         },
         select: {
           id: true,
-          remaining: true,
+          totalAmount: true,
           invoiceItems: {
             select: { quantity: true }
           },
           InvoicePayment: {
             select: {
+              amount: true,
               payment: {
                 select: {
                   account: {
@@ -493,7 +498,7 @@ export class DashboardService {
       facturaTotalesCache.set(f.id, {
         totalBultos,
         totalAmount: Number(f.totalAmount),
-        remaining: Number(f.remaining)
+        remaining: calculateInvoiceRemainingUsd(f.totalAmount, f.InvoicePayment)
       });
     });
 
@@ -584,7 +589,7 @@ export class DashboardService {
     facturasCentros.forEach(facturaCentro => {
       const totalBultos = facturaCentro.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
       const totalFactura = Number(facturaCentro.totalAmount);
-      const pendiente = Number(facturaCentro.remaining);
+      const pendiente = calculateInvoiceRemainingUsd(facturaCentro.totalAmount, facturaCentro.InvoicePayment);
       if (totalFactura > 0) {
         const porcentajePendiente = pendiente / totalFactura;
         bultosPendientesCentroTotal += totalBultos * porcentajePendiente;
@@ -592,7 +597,10 @@ export class DashboardService {
     });
 
     // 8. Calcular deuda por cobrar y bultos por cobrar
-    const deudaPorCobrar = facturasHastaCierre.reduce((sum, f) => sum + Number(f.remaining), 0);
+    const deudaPorCobrar = facturasHastaCierre.reduce(
+      (sum, f) => sum + calculateInvoiceRemainingUsd(f.totalAmount, f.InvoicePayment),
+      0
+    );
 
     const baseStartDate = new Date(2020, 1, 1);
     const invoiceStatistics = await this.invoicesService.getInvoiceStatistics({
@@ -728,6 +736,7 @@ export class DashboardService {
     ]);
 
     facturas.forEach(f => {
+      const invoiceRemaining = calculateInvoiceRemainingUsd(f.totalAmount, f.InvoicePayment);
       const prodMap = {};
       f.invoiceItems.forEach(item => {
         prodMap[item.product.name] = item.unitPriceUSD ? Number(item.unitPriceUSD) : Number(item.unitPrice);
@@ -740,7 +749,7 @@ export class DashboardService {
         format(f.dispatchDate, 'dd/MM/yyyy'),
         format(f.dueDate, 'dd/MM/yyyy'),
         Number(f.totalAmount),
-        Number(f.remaining),
+        invoiceRemaining,
         f.status,
         ...productos.map(p => prodMap[p.name] ?? '')
       ]);

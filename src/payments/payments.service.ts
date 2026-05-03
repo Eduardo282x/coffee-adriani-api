@@ -6,6 +6,7 @@ import { ProductsService } from 'src/products/products.service';
 import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
 import { InvoiceStatus, PaymentStatus } from '@prisma/client';
+import { calculateInvoiceRemainingUsd, calculatePaymentRemaining } from 'src/common/remaining-calculator';
 
 // Añadir estos métodos al PaymentsService existente
 
@@ -67,11 +68,6 @@ export class PaymentsService {
                 if (credit == 'credit') {
                     where.InvoicePayment = {
                         some: {}
-                    }
-                    where.AND = {
-                        remaining: {
-                            gt: 0
-                        }
                     }
                 } else {
                     where.InvoicePayment = {
@@ -178,7 +174,6 @@ export class PaymentsService {
                     select: {
                         id: true,
                         amount: true,
-                        remaining: true,
                         reference: true,
                         description: true,
                         paymentDate: true,
@@ -234,7 +229,6 @@ export class PaymentsService {
                                         dispatchDate: true,
                                         dueDate: true,
                                         totalAmount: true,
-                                        remaining: true,
                                         consignment: true,
                                         status: true,
                                         deleted: true,
@@ -267,6 +261,12 @@ export class PaymentsService {
             const processedPayments = payments.map(data => {
                 // Nota: `InvoicePayment` ya viene filtrado por `type` desde Prisma.
                 const filteredInvoicePayments = data.InvoicePayment
+                const paymentBalance = calculatePaymentRemaining(
+                    data.amount,
+                    data.account.method.currency,
+                    data.dolar.dolar,
+                    filteredInvoicePayments
+                );
 
                 return {
                     ...data,
@@ -279,21 +279,23 @@ export class PaymentsService {
                     amountBs: data.account.method.currency === 'BS'
                         ? data.amount.toFixed(2)
                         : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
-                    remaining: data.remaining.toFixed(2),
-                    remainingUSD: data.account.method.currency === 'USD'
-                        ? data.remaining.toFixed(2)
-                        : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
-                    credit: filteredInvoicePayments.length > 0 && Number(data.remaining) > 0
+                    remaining: paymentBalance.remainingOriginal.toFixed(2),
+                    remainingUSD: paymentBalance.remainingUSD.toFixed(2),
+                    credit: filteredInvoicePayments.length > 0 && paymentBalance.remainingOriginal > 0
                 };
             });
 
+            const filteredByCredit = credit === 'credit'
+                ? processedPayments.filter(item => item.credit)
+                : processedPayments;
+
             // Calcular paginación
-            const totalPages = Math.ceil(totalCount / limit);
+            const totalPages = Math.ceil(filteredByCredit.length / limit);
             const hasNext = page < totalPages;
             const hasPrev = page > 1;
 
             return {
-                payments: processedPayments,
+                payments: filteredByCredit,
                 pagination: {
                     page,
                     limit,
@@ -327,11 +329,6 @@ export class PaymentsService {
                 if (credit == 'credit') {
                     where.InvoicePayment = {
                         some: {}
-                    }
-                    where.AND = {
-                        remaining: {
-                            gt: 0
-                        }
                     }
                 } else {
                     where.InvoicePayment = {
@@ -531,15 +528,15 @@ export class PaymentsService {
 
             const totalRemainingBs = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
-                .reduce((acc, data) => acc + Number(data.remaining), 0);
+                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal, 0);
 
             const totalRemainingBsInUSD = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
-                .reduce((acc, data) => acc + (Number(data.remaining) / Number(data.dolar.dolar)), 0);
+                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingUSD, 0);
 
             const totalRemainingUSD = processedPayments
                 .filter(item => item.account.method.currency === 'USD')
-                .reduce((acc, data) => acc + Number(data.remaining), 0);
+                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal, 0);
 
             const totalGrossUSD = totalAmountBsInUSD + totalAmountUSD;
 
@@ -669,11 +666,9 @@ export class PaymentsService {
                 amountBs: payment.account.method.currency === 'BS'
                     ? payment.amount.toFixed(2)
                     : (Number(payment.amount) * Number(payment.dolar.dolar)).toFixed(2),
-                remaining: payment.remaining.toFixed(2),
-                remainingUSD: payment.account.method.currency === 'USD'
-                    ? payment.remaining.toFixed(2)
-                    : (Number(payment.remaining) / Number(payment.dolar.dolar)).toFixed(2),
-                credit: payment.InvoicePayment.length > 0 && Number(payment.remaining) > 0
+                remaining: calculatePaymentRemaining(payment.amount, payment.account.method.currency, payment.dolar.dolar, payment.InvoicePayment).remainingOriginal.toFixed(2),
+                remainingUSD: calculatePaymentRemaining(payment.amount, payment.account.method.currency, payment.dolar.dolar, payment.InvoicePayment).remainingUSD.toFixed(2),
+                credit: payment.InvoicePayment.length > 0 && calculatePaymentRemaining(payment.amount, payment.account.method.currency, payment.dolar.dolar, payment.InvoicePayment).remainingOriginal > 0
             };
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
@@ -701,9 +696,9 @@ export class PaymentsService {
                     amount: data.amount.toFixed(2),
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
-                    remaining: data.remaining.toFixed(2),
-                    remainingUSD: data.account.method.currency === 'USD' ? data.remaining.toFixed(2) : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
-                    credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
+                    remaining: calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal.toFixed(2),
+                    remainingUSD: calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingUSD.toFixed(2),
+                    credit: data.InvoicePayment.length > 0 && calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal > 0
                 }
             })
         )
@@ -790,9 +785,9 @@ export class PaymentsService {
                     amount: data.amount.toFixed(2),
                     amountUSD: data.account.method.currency === 'USD' ? data.amount.toFixed(2) : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
                     amountBs: data.account.method.currency === 'BS' ? data.amount.toFixed(2) : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
-                    remaining: data.remaining.toFixed(2),
-                    remainingUSD: data.account.method.currency === 'USD' ? data.remaining.toFixed(2) : (Number(data.remaining) / Number(data.dolar.dolar)).toFixed(2),
-                    credit: data.InvoicePayment.length > 0 && Number(data.remaining) > 0
+                    remaining: calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal.toFixed(2),
+                    remainingUSD: calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingUSD.toFixed(2),
+                    credit: data.InvoicePayment.length > 0 && calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal > 0
                 }
             })
         )
@@ -836,7 +831,6 @@ export class PaymentsService {
             await this.prismaService.payment.create({
                 data: {
                     amount: payment.amount,
-                    remaining: payment.amount,
                     reference: payment.reference,
                     dolarId: getDolar.id,
                     description: payment.description,
@@ -867,7 +861,6 @@ export class PaymentsService {
             await this.prismaService.payment.update({
                 data: {
                     amount: payment.amount,
-                    remaining: payment.amount,
                     reference: payment.reference,
                     dolarId: getDolar.id,
                     description: payment.description,
@@ -915,7 +908,13 @@ export class PaymentsService {
 
             const findPayment = await this.prismaService.payment.findFirst({
                 where: { id: pay.paymentId },
-                include: { account: { include: { method: true } }, dolar: true }
+                include: {
+                    account: { include: { method: true } },
+                    dolar: true,
+                    InvoicePayment: {
+                        select: { amount: true }
+                    }
+                }
             });
 
             if (!findPayment) {
@@ -923,7 +922,14 @@ export class PaymentsService {
                 return badResponse;
             }
 
-            if (Number(totalInvoices) > Number(findPayment.amount)) {
+            const paymentBalance = calculatePaymentRemaining(
+                findPayment.amount,
+                findPayment.account.method.currency,
+                findPayment.dolar.dolar,
+                findPayment.InvoicePayment
+            );
+
+            if (Number(totalInvoices) > paymentBalance.remainingUSD) {
                 badResponse.message = 'La cantidad a pagar excede la cantidad del pago.';
                 return badResponse;
             }
@@ -935,99 +941,29 @@ export class PaymentsService {
                 for (const payDetail of pay.details) {
                     const findInvoice = await prisma.invoice.findFirst({
                         where: { id: payDetail.invoiceId },
-                        include: { invoiceItems: true }
+                        include: {
+                            invoiceItems: true,
+                            InvoicePayment: {
+                                select: { amount: true }
+                            }
+                        }
                     });
 
                     if (!findInvoice) {
                         throw new Error(`Factura con ID ${payDetail.invoiceId} no encontrada.`);
                     }
 
-                    if (findInvoice.status === 'Pagado') {
+                    const currentInvoiceRemaining = calculateInvoiceRemainingUsd(
+                        findInvoice.totalAmount,
+                        findInvoice.InvoicePayment
+                    );
+
+                    if (findInvoice.status === 'Pagado' || currentInvoiceRemaining <= 0) {
                         throw new Error(`La factura #${findInvoice.controlNumber} ya está pagada.`);
                     }
 
-                    // Buscar el último pago de esta factura para determinar el tipo de moneda
-                    const findLastPaymentInvoice = await prisma.invoicePayment.findFirst({
-                        where: { invoiceId: payDetail.invoiceId },
-                        orderBy: { createdAt: 'desc' }
-                    });
-
-                    let typeLastPay = '';
-                    if (findLastPaymentInvoice) {
-                        const lastPayment = await prisma.payment.findFirst({
-                            where: { id: findLastPaymentInvoice.paymentId },
-                            include: { account: { include: { method: true } } }
-                        });
-                        typeLastPay = lastPayment.account.method.currency;
-                    }
-
-                    let nuevoTotal = 0;
-                    let nuevoPagadoTotal = 0;
-                    let nuevoRestante = 0;
-                    let statusInvoice: InvoiceStatus = 'Pendiente';
-
-                    if (findPayment.account.method.currency === 'USD') {
-                        const firstElement = findInvoice.invoiceItems.filter(item => item.type !== 'GIFT')[0];
-                        if (!firstElement) {
-                            throw new Error(`No se encontraron elementos en la factura ${findInvoice.controlNumber}`);
-                        }
-                        const cantidadBultosTotal = findInvoice.invoiceItems.filter(item => item.type !== 'GIFT').reduce((acc, item) => acc + Number(item.quantity), 0);
-
-                        if (findLastPaymentInvoice && typeLastPay !== '') {
-                            const calculateBultosPagados = Number(firstElement.unitPrice);
-                            const bultosFaltanPagar = Number(findInvoice.remaining) / calculateBultosPagados;
-                            const bultosPagoUSD = payDetail.amount / Number(firstElement.unitPrice);
-                            if (bultosPagoUSD > bultosFaltanPagar) {
-                                throw new Error(`El pago excede la cantidad de bultos restantes (${bultosFaltanPagar.toFixed(2)}) en la factura.`);
-                            }
-                            const bultosYaPagados = cantidadBultosTotal - bultosFaltanPagar;
-                            const recalculateBS2 = (bultosYaPagados * Number(firstElement.unitPrice)) + ((bultosFaltanPagar - bultosPagoUSD) * Number(firstElement.unitPrice));
-                            const recalculateUSD2 = bultosPagoUSD * Number(firstElement.unitPrice);
-                            nuevoTotal = recalculateBS2 + recalculateUSD2;
-                            nuevoPagadoTotal = Number(findInvoice.totalAmount) - Number(findInvoice.remaining) + payDetail.amount;
-                        } else {
-                            const totalPagado = Number(findInvoice.totalAmount) - Number(findInvoice.remaining);
-                            nuevoPagadoTotal = totalPagado + payDetail.amount;
-                            const bultosPagadosUSD = nuevoPagadoTotal / Number(firstElement.unitPrice);
-                            if (bultosPagadosUSD > cantidadBultosTotal) {
-                                throw new Error(`El pago excede la cantidad total de productos en la factura.`);
-                            }
-                            const cantidadBultosBS = cantidadBultosTotal - bultosPagadosUSD;
-                            const recalculateBS = cantidadBultosBS * Number(firstElement.unitPrice);
-                            const recalculateUSD = bultosPagadosUSD * Number(firstElement.unitPrice);
-                            nuevoTotal = recalculateBS + recalculateUSD;
-                        }
-                        const totalEnUSD = cantidadBultosTotal * Number(firstElement.unitPrice);
-                        const totalEnBS = cantidadBultosTotal * Number(firstElement.unitPrice);
-                        if (nuevoTotal < totalEnUSD || nuevoTotal > totalEnBS) {
-                            throw new Error(`El nuevo total calculado (${nuevoTotal.toFixed(2)}) no está en el rango válido entre USD total (${totalEnUSD}) y BS total (${totalEnBS}).`);
-                        }
-                        nuevoRestante = nuevoTotal - nuevoPagadoTotal;
-                        statusInvoice = nuevoRestante <= 2 ? 'Pagado' : 'Pendiente';
-                    } else {
-                        nuevoRestante = Number(findInvoice.remaining) - payDetail.amount;
-                        statusInvoice = nuevoRestante <= 2 ? 'Pagado' : 'Pendiente';
-                        nuevoTotal = Number(findInvoice.totalAmount);
-                    }
-
-                    // Actualizar la factura
-                    await prisma.invoice.update({
-                        where: { id: findInvoice.id },
-                        data: {
-                            totalAmount: nuevoTotal,
-                            remaining: nuevoRestante,
-                            status: statusInvoice
-                        }
-                    });
-
-                    // Si la factura queda pagada, eliminar recordatorio del cliente
-                    if (statusInvoice === 'Pagado') {
-                        const findClientReminder = await prisma.clientReminder.findFirst({
-                            where: { clientId: findInvoice.clientId }
-                        });
-                        if (findClientReminder) {
-                            await prisma.clientReminder.delete({ where: { id: findClientReminder.id } });
-                        }
+                    if (payDetail.amount > currentInvoiceRemaining) {
+                        throw new Error(`El monto excede el saldo pendiente de la factura #${findInvoice.controlNumber}.`);
                     }
 
                     // Crear el registro de pago
@@ -1039,19 +975,33 @@ export class PaymentsService {
                         }
                     });
 
-                    // Actualizar el remaining del pago
-                    const calculateRemaining = findPayment.account.method.currency === 'BS'
-                        ? Number(payDetail.amount) * Number(findPayment.dolar.dolar)
-                        : Number(payDetail.amount);
-
-                    // Leer el payment actualizado para evitar inconsistencias
-                    const paymentBefore = await prisma.payment.findUnique({ where: { id: findPayment.id } });
-                    let newRemaining = Number(paymentBefore.remaining) - calculateRemaining;
-                    if (newRemaining < 0) newRemaining = 0;
-                    await prisma.payment.update({
-                        where: { id: findPayment.id },
-                        data: { remaining: newRemaining }
+                    const invoicePaymentsAfter = await prisma.invoicePayment.findMany({
+                        where: { invoiceId: findInvoice.id },
+                        select: { amount: true }
                     });
+
+                    const remainingAfter = calculateInvoiceRemainingUsd(
+                        findInvoice.totalAmount,
+                        invoicePaymentsAfter
+                    );
+
+                    const statusInvoice: InvoiceStatus = remainingAfter <= 2 ? 'Pagado' : 'Pendiente';
+
+                    await prisma.invoice.update({
+                        where: { id: findInvoice.id },
+                        data: {
+                            status: statusInvoice
+                        }
+                    });
+
+                    if (statusInvoice === 'Pagado') {
+                        const findClientReminder = await prisma.clientReminder.findFirst({
+                            where: { clientId: findInvoice.clientId }
+                        });
+                        if (findClientReminder) {
+                            await prisma.clientReminder.delete({ where: { id: findClientReminder.id } });
+                        }
+                    }
                 }
 
                 paymentUpdated = await prisma.payment.findUnique({
@@ -1059,7 +1009,6 @@ export class PaymentsService {
                     select: {
                         id: true,
                         amount: true,
-                        remaining: true,
                         reference: true,
                         description: true,
                         paymentDate: true,
@@ -1102,10 +1051,12 @@ export class PaymentsService {
                                         dispatchDate: true,
                                         dueDate: true,
                                         totalAmount: true,
-                                        remaining: true,
                                         consignment: true,
                                         status: true,
                                         deleted: true,
+                                        InvoicePayment: {
+                                            select: { amount: true }
+                                        },
                                         client: {
                                             select: {
                                                 id: true,
@@ -1127,8 +1078,31 @@ export class PaymentsService {
                 })
             });
 
+            const paymentUpdatedParse = paymentUpdated ? {
+                ...paymentUpdated,
+                remaining: calculatePaymentRemaining(
+                    paymentUpdated.amount,
+                    paymentUpdated.account.method.currency,
+                    paymentUpdated.dolar.dolar,
+                    paymentUpdated.InvoicePayment
+                ).remainingOriginal.toFixed(2),
+                remainingUSD: calculatePaymentRemaining(
+                    paymentUpdated.amount,
+                    paymentUpdated.account.method.currency,
+                    paymentUpdated.dolar.dolar,
+                    paymentUpdated.InvoicePayment
+                ).remainingUSD.toFixed(2),
+                InvoicePayment: paymentUpdated.InvoicePayment.map(item => ({
+                    ...item,
+                    invoice: {
+                        ...item.invoice,
+                        remaining: calculateInvoiceRemainingUsd(item.invoice.totalAmount, item.invoice.InvoicePayment).toFixed(2)
+                    }
+                }))
+            } : null;
+
             baseResponse.message = 'Pago asociado a factura exitosamente.';
-            baseResponse.data = paymentUpdated;
+            baseResponse.data = paymentUpdatedParse;
             return baseResponse;
         } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
@@ -1147,35 +1121,32 @@ export class PaymentsService {
                 throw new Error(`No se encontró la asociación de pago con ID ${pay.id}`);
             }
 
-            await this.prismaService.invoice.update({
-                data: {
-                    remaining: { increment: findPaymentAssociate.amount },
-                    status: 'Pendiente'
-                },
-                where: { id: pay.invoiceId }
-            });
-
-            const findPayment = await this.prismaService.payment.findFirst({
-                where: { id: pay.paymentId },
-                include: { account: { include: { method: true } }, dolar: true }
-            });
-
-            if (!findPayment) {
-                throw new Error(`Pago con ID ${pay.paymentId} no encontrado.`);
-            }
-
-            const calculateRemaining = findPayment.account.method.currency === 'BS'
-                ? Number(findPaymentAssociate.amount) * Number(findPayment.dolar.dolar)
-                : Number(findPaymentAssociate.amount);
-
-            await this.prismaService.payment.update({
-                data: { remaining: { increment: calculateRemaining } },
-                where: { id: findPayment.id }
-            });
-
             await this.prismaService.invoicePayment.delete({
                 where: { id: pay.id }
             });
+
+            const invoiceAfter = await this.prismaService.invoice.findUnique({
+                where: { id: pay.invoiceId },
+                include: {
+                    InvoicePayment: {
+                        select: { amount: true }
+                    }
+                }
+            });
+
+            if (invoiceAfter) {
+                const remaining = calculateInvoiceRemainingUsd(
+                    invoiceAfter.totalAmount,
+                    invoiceAfter.InvoicePayment
+                );
+
+                await this.prismaService.invoice.update({
+                    where: { id: invoiceAfter.id },
+                    data: {
+                        status: remaining <= 2 ? 'Pagado' : 'Pendiente'
+                    }
+                });
+            }
 
             baseResponse.message = `Pago Desasociado de factura exitosamente.`
             return baseResponse
@@ -1188,22 +1159,41 @@ export class PaymentsService {
 
     async deletePayment(id: number) {
         try {
-            const findPaymentAssociate = await this.prismaService.invoicePayment.findFirst({
+            const findPaymentAssociate = await this.prismaService.invoicePayment.findMany({
                 where: { paymentId: id }
             })
 
-            if (findPaymentAssociate) {
-                await this.prismaService.invoice.update({
-                    data: {
-                        remaining: { increment: findPaymentAssociate.amount },
-                        status: 'Pendiente'
-                    },
-                    where: { id: findPaymentAssociate.invoiceId }
-                })
-                await this.prismaService.invoicePayment.delete({
-                    where: { id: findPaymentAssociate.id }
-                })
+            if (findPaymentAssociate.length > 0) {
+                const invoiceIds = [...new Set(findPaymentAssociate.map(item => item.invoiceId))];
+
+                await this.prismaService.invoicePayment.deleteMany({
+                    where: { paymentId: id }
+                });
+
+                for (const invoiceId of invoiceIds) {
+                    const invoice = await this.prismaService.invoice.findUnique({
+                        where: { id: invoiceId },
+                        include: {
+                            InvoicePayment: {
+                                select: { amount: true }
+                            }
+                        }
+                    });
+
+                    if (!invoice) {
+                        continue;
+                    }
+
+                    const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
+                    await this.prismaService.invoice.update({
+                        where: { id: invoice.id },
+                        data: {
+                            status: remaining <= 2 ? 'Pagado' : 'Pendiente'
+                        }
+                    });
+                }
             }
+
             await this.prismaService.payment.delete({
                 where: { id }
             })
@@ -1263,13 +1253,12 @@ export class PaymentsService {
                 const newStatus = remaining === 0 ? 'Pagado' : 'Pendiente';
 
                 // Verificar si hay cambios necesarios
-                if (Number(invoice.remaining) !== remaining || invoice.status !== newStatus) {
+                if (invoice.status !== newStatus) {
                     invoicesAffected++;
                     invoicesAffectedData.push(invoice)
                     await this.prismaService.invoice.update({
                         where: { id: invoice.id },
                         data: {
-                            remaining: remaining,
                             status: newStatus,
                         },
                     });
@@ -1352,7 +1341,6 @@ export class PaymentsService {
                 const savePayments = await this.prismaService.payment.create({
                     data: {
                         amount: item.amount ? item.amount : item.total,
-                        remaining: item.amount ? item.amount : item.total,
                         reference: item.reference ? item.reference.toString() : '',
                         accountId: findAccount.id,
                         dolarId: findDolar ? findDolar.id : dolarBase.id,

@@ -61,7 +61,6 @@ model Invoice {
   sellerId       Int?
   seller         Seller?          @relation(fields: [sellerId], references: [id])
   totalAmount    Decimal          @db.Decimal(10, 2)
-  remaining      Decimal          @default(0) @db.Decimal(10, 2)
   consignment    Boolean
   status         InvoiceStatus
   createdAt      DateTime         @default(now())
@@ -176,7 +175,6 @@ model AccountsPayments {
 model Payment {
   id             Int              @id @default(autoincrement())
   amount         Decimal          @db.Decimal(10, 2)
-  remaining      Decimal          @default(0) @db.Decimal(10, 2)
   accountId      Int
   account        AccountsPayments @relation(fields: [accountId], references: [id])
   reference      String

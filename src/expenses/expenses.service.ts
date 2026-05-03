@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { badResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ExpensesDTO } from './expenses.dto';
+import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
 export class ExpensesService {
@@ -385,14 +386,6 @@ export class ExpensesService {
             const invoices = await this.prismaService.invoice.findMany({
                 where: {
                     status: 'Pagado',
-                    OR: [
-                        { remaining: { not: 0 } },
-                        {
-                            invoiceItems: {
-                                some: { type: 'GIFT' }
-                            }
-                        }
-                    ],
                     InvoicePayment: {
                         some: {
                             createdAt: {
@@ -412,10 +405,20 @@ export class ExpensesService {
                         }
                     }
                 },
-                include: { client: true, invoiceItems: { include: { product: true } } }
+                include: {
+                    client: true,
+                    invoiceItems: { include: { product: true } },
+                    InvoicePayment: {
+                        select: { amount: true }
+                    }
+                }
             })
 
-            return invoices;
+            return invoices.filter(invoice => {
+                const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
+                const hasGiftItems = invoice.invoiceItems.some(item => item.type === 'GIFT');
+                return remaining !== 0 || hasGiftItems;
+            });
         } catch (err) {
             badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;

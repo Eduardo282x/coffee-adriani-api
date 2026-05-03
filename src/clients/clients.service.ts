@@ -9,6 +9,7 @@ import * as stream from 'stream';
 import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
+import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
 export class ClientsService {
@@ -306,10 +307,9 @@ export class ClientsService {
                 orderBy: { blockId: 'asc' }
             });
 
-            const invoiceTotals = await this.prismaService.invoice.groupBy({
-                by: ['clientId'],
+            const invoiceTotals = await this.prismaService.invoice.findMany({
                 where: {
-                    status: { in: invoiceStatusFilter } as any, // Explicitly cast to 'any' to avoid circular reference
+                    status: { in: invoiceStatusFilter } as any,
                     client: clientWhere,
                     invoiceItems: {
                         every: {
@@ -322,7 +322,15 @@ export class ClientsService {
                         }
                     }
                 },
-                _sum: { totalAmount: true, remaining: true },
+                select: {
+                    clientId: true,
+                    totalAmount: true,
+                    InvoicePayment: {
+                        select: {
+                            amount: true
+                        }
+                    }
+                }
             });
 
             const lastInvoices = await this.prismaService.invoice.findMany({
@@ -347,9 +355,10 @@ export class ClientsService {
 
             const totalMap = new Map<number, { totalAmount: number; remaining: number }>();
             invoiceTotals.forEach(item => {
+                const previous = totalMap.get(item.clientId) || { totalAmount: 0, remaining: 0 };
                 totalMap.set(item.clientId, {
-                    totalAmount: Number(item._sum.totalAmount || 0),
-                    remaining: Number(item._sum.remaining || 0),
+                    totalAmount: previous.totalAmount + Number(item.totalAmount),
+                    remaining: previous.remaining + calculateInvoiceRemainingUsd(item.totalAmount, item.InvoicePayment),
                 });
             });
 
@@ -364,8 +373,8 @@ export class ClientsService {
             let clientsReports = clients.map(c => {
                 const totals = totalMap.get(c.id);
                 const totalInvoices = totals ? totals.totalAmount : 0;
-                const totalPaid = totals ? totals.remaining : 0;
-                const debt = totalInvoices - totalPaid;
+                const debt = totals ? totals.remaining : 0;
+                const totalPaid = totalInvoices - debt;
                 const lastInvoice = lastInvoiceMap.get(c.id);
 
                 return {

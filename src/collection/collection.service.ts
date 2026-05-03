@@ -6,6 +6,7 @@ import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 import { ResponseInvoice } from 'src/invoices/invoice.dto';
 import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
 import * as ExcelJS from 'exceljs';
+import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
 export class CollectionService {
@@ -107,6 +108,11 @@ export class CollectionService {
             },
             include: {
                 client: { include: { block: true } },
+                InvoicePayment: {
+                    select: {
+                        amount: true
+                    }
+                }
             },
             orderBy: {
                 clientId: 'asc'
@@ -166,7 +172,7 @@ export class CollectionService {
                 item.dispatchDate,
                 item.dueDate,
                 Number(item.totalAmount),
-                Number(item.remaining)
+                calculateInvoiceRemainingUsd(item.totalAmount, item.InvoicePayment)
             ]
             ws2.addRow(rowData);
         });
