@@ -237,14 +237,14 @@ export class ExpensesService {
             }
 
             // 3. Agrupar ventas de productos sin duplicar por multiples pagos
-            const productSales: Record<number, { name: string, quantity: number }> = {};
+            const productSales: Record<number, { name: string, presentation: string, quantity: number }> = {};
             let totalQuantity = 0;
 
             for (const [, groupedPayments] of groupedByInvoice) {
                 const firstPayment = groupedPayments[0];
                 for (const item of firstPayment.invoice.invoiceItems) {
                     if (!productSales[item.productId]) {
-                        productSales[item.productId] = { name: item.product.name || 'Desconocido', quantity: 0 };
+                        productSales[item.productId] = { name: item.product.name || 'Desconocido', presentation: item.product.presentation || 'Desconocido', quantity: 0 };
                     }
                     productSales[item.productId].quantity += Number(item.quantity);
                     totalQuantity += Number(item.quantity);
@@ -255,6 +255,7 @@ export class ExpensesService {
             const productPercentages = Object.entries(productSales).map(([id, data]) => ({
                 productId: Number(id),
                 name: data.name,
+                presentation: data.presentation,
                 quantity: data.quantity,
                 percentage: totalQuantity > 0 ? (data.quantity / totalQuantity * 100).toFixed(2) : '0.00'
             })).sort((a, b) => b.quantity - a.quantity);
@@ -263,6 +264,8 @@ export class ExpensesService {
             let totalEarnDay = 0;
             let totalEarnMonth = 0;
             let totalEarnRange = 0;
+            let quantityProductsMonth = 0;
+            let quantityProductsRange = 0;
             const invoiceEarns: any[] = [];
 
             // Referencias del día y mes usando el rango filtrado
@@ -329,6 +332,10 @@ export class ExpensesService {
                 const paymentRefDate = firstPayment.createdAt;
                 const invoiceCurrency = firstPayment.payment.account.method.currency;
                 const saleRefDate = invoiceRef.dispatchDate || invoiceRef.createdAt;
+                const invoiceProductsQuantity = invoiceRef.invoiceItems.reduce(
+                    (acc, item) => acc + Number(item.quantity),
+                    0
+                );
 
                 let earn = 0;
                 for (const item of invoiceRef.invoiceItems) {
@@ -359,10 +366,14 @@ export class ExpensesService {
                 });
 
                 totalEarnRange += earn;
+                quantityProductsRange += invoiceProductsQuantity;
 
                 // Sumar a los totales del día y mes en base al rango seleccionado
                 if (paymentRefDate >= startOfDay && paymentRefDate <= endOfDay) totalEarnDay += earn;
-                if (paymentRefDate >= startOfMonth && paymentRefDate <= endDate) totalEarnMonth += earn;
+                if (paymentRefDate >= startOfMonth && paymentRefDate <= endDate) {
+                    totalEarnMonth += earn;
+                    quantityProductsMonth += invoiceProductsQuantity;
+                }
             }
 
             return {
@@ -370,7 +381,11 @@ export class ExpensesService {
                 invoiceEarns,
                 totalEarnDay: Number(totalEarnDay.toFixed(2)),
                 totalEarnMonth: Number(totalEarnMonth.toFixed(2)),
-                totalEarnRange: Number(totalEarnRange.toFixed(2))
+                totalEarnRange: Number(totalEarnRange.toFixed(2)),
+                quantityProducts: {
+                    totalEarnMonth: Number(quantityProductsMonth.toFixed(4)),
+                    totalEarnRange: Number(quantityProductsRange.toFixed(4))
+                }
             };
         } catch (err) {
             badResponse.message = err instanceof Error ? err.message : 'Unknown error';
@@ -414,11 +429,18 @@ export class ExpensesService {
                 }
             })
 
-            return invoices.filter(invoice => {
-                const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
-                const hasGiftItems = invoice.invoiceItems.some(item => item.type === 'GIFT');
-                return remaining !== 0 || hasGiftItems;
-            });
+            return invoices
+                .map(invoice => {
+                    const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
+                    return {
+                        ...invoice,
+                        remaining
+                    };
+                })
+                .filter(invoice => {
+                    const hasGiftItems = invoice.invoiceItems.some(item => item.type === 'GIFT');
+                    return invoice.remaining !== 0 || hasGiftItems;
+                });
         } catch (err) {
             badResponse.message = err instanceof Error ? err.message : 'Unknown error';
             return badResponse;
