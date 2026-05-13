@@ -34,3 +34,13 @@ export class DTOInventorySimple extends DTOInventoryHistory{
     @IsOptional()
     description?: string;
 }
+
+export class DTOUpdateHistoryInventory {
+    @IsString()
+    controlNumberOld: string;
+    @IsString()
+    controlNumber: string;
+    @IsDate()
+    @Transform(({ value }) => new Date(value))
+    date: Date;
+}

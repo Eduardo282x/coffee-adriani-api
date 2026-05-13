@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOInventory, DTOInventoryHistory, DTOInventorySimple } from './inventory.dto';
+import { DTOInventory, DTOInventoryHistory, DTOInventorySimple, DTOUpdateHistoryInventory } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
 
@@ -40,6 +40,10 @@ export class InventoryService {
         const day = String(date.getDate()).padStart(2, '0');
         const year = String(date.getFullYear()).slice(-2);
         return `${month}${day}${year}`;
+    }
+
+    private normalizeControlNumber(controlNumber?: string | null): string {
+        return (controlNumber ?? '').trimEnd();
     }
 
     private extractControlFromDescription(description: string): string | null {
@@ -111,9 +115,11 @@ export class InventoryService {
             };
         }
 
-        if (controlNumber) {
+        const normalizedControlNumber = this.normalizeControlNumber(controlNumber);
+
+        if (normalizedControlNumber) {
             where.controlNumber = {
-                equals: controlNumber,
+                equals: normalizedControlNumber,
                 mode: 'insensitive',
             };
         }
@@ -152,7 +158,7 @@ export class InventoryService {
 
         for (const item of history) {
             const day = item.movementDate.toISOString().slice(0, 10);
-            const control = item.controlNumber || '';
+            const control = this.normalizeControlNumber(item.controlNumber);
             const key = `${control}-${day}`;
 
             if (!groupedMap.has(key)) {
@@ -243,6 +249,8 @@ export class InventoryService {
                     controlNumber = `MOV-${this.formatControlDate(row.movementDate)}`;
                 }
 
+                controlNumber = this.normalizeControlNumber(controlNumber);
+
                 await this.prismaService.historyInventory.update({
                     where: { id: row.id },
                     data: { controlNumber },
@@ -267,11 +275,13 @@ export class InventoryService {
 
     async saveInventory(inventory: DTOInventory) {
         try {
+            const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
+
             const saveHistory = await this.prismaService.historyInventory.createMany({
                 data: inventory.details.map(detail => ({
                     productId: detail.productId,
                     quantity: detail.quantity,
-                    controlNumber: inventory.controlNumber,
+                    controlNumber: normalizedControlNumber,
                     movementType: 'IN',
                     description: `Entrada de mercancía ${inventory.description ? `- ${inventory.description}` : ''}`,
                     movementDate: inventory.date
@@ -358,6 +368,8 @@ export class InventoryService {
 
     async updateInventoryInvoice(inventory: DTOInventory) {
         try {
+            const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
+
             inventory.details.map(async (detail) => {
                 const findProductInventory = await this.prismaService.inventory.findFirst({
                     where: { productId: detail.productId }
@@ -375,7 +387,7 @@ export class InventoryService {
                 await this.prismaService.historyInventory.create({
                     data: {
                         productId: findProductInInventory.productId,
-                        controlNumber: inventory.controlNumber,
+                        controlNumber: normalizedControlNumber,
                         quantity: detail.quantity,
                         description: inventory.description,
                         movementDate: inventory.date,
@@ -426,6 +438,41 @@ export class InventoryService {
 
             baseResponse.message = 'Inventario modificado.'
             return baseResponse
+        }
+        catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
+            })
+            badResponse.message = err instanceof Error ? err.message : String(err);
+            return badResponse;
+        }
+    }
+
+    async updateHistoryInventory(inventory: DTOUpdateHistoryInventory) {
+        try {
+            const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
+
+            const findHistory = await this.prismaService.historyInventory.findMany({
+                where: { controlNumber: inventory.controlNumberOld },
+                orderBy: { movementDate: 'desc' }
+            });
+            if (!findHistory || findHistory.length === 0) {
+                badResponse.message = 'Numero de control no encontrado.';
+                return badResponse;
+            }
+
+            findHistory.forEach(async (history) => {
+                await this.prismaService.historyInventory.update({
+                    where: { id: history.id },
+                    data: {
+                        controlNumber: normalizedControlNumber,
+                        movementDate: inventory.date
+                    }
+                });
+            })
+
+            baseResponse.message = 'Historial de inventario actualizado.';
+            return baseResponse;
         }
         catch (err) {
             await this.prismaService.errorMessages.create({

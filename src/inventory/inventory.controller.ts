@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import { DTOInventory, DTOInventorySimple } from './inventory.dto';
+import { DTOInventory, DTOInventorySimple, DTOUpdateHistoryInventory } from './inventory.dto';
 
 @Controller('inventory')
 export class InventoryController {
@@ -34,6 +34,11 @@ export class InventoryController {
     @Put('/:id')
     async updateAmountInventory(@Body() inventory: DTOInventorySimple, @Param('id') id: string) {
         return await this.inventoryService.updateAmountInventory(inventory, Number(id));
+    }
+
+    @Put('/history')
+    async updateHistoryInventory(@Body() inventory: DTOUpdateHistoryInventory) {
+        return await this.inventoryService.updateHistoryInventory(inventory);
     }
 
     @Post('/history/update-control-number')
