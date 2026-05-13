@@ -1,3 +1,4 @@
+import { Currency } from "@prisma/client";
 import { Transform, Type } from "class-transformer";
 import { IsArray, IsDate, IsNotEmpty, IsOptional, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
 
@@ -51,4 +52,34 @@ export class AccountsDTO {
     bank: string;
     @IsNumber()
     methodId: number;
+}
+
+export class PaymentEnterpriseDTO {
+    @IsNumber()
+    amount: number;
+    @IsDate()
+    @Transform(({ value }) => new Date(value))
+    paymentDate: Date;
+    @IsString()
+    currency: Currency;
+    @IsString()
+    description: string;
+    @IsString()
+    controlNumber: string;
+
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => PaymentEnterpriseItemsDTO)
+    items: PaymentEnterpriseItemsDTO[];
+}
+
+export class PaymentEnterpriseItemsDTO {
+    @IsNumber()
+    productId: number;
+    @IsNumber()
+    @IsPositive()
+    quantity: number;
+    @IsNumber()
+    @IsPositive()
+    price: number;
 }

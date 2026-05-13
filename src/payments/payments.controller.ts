@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
-import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
+import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO, PaymentEnterpriseDTO } from './payment.dto';
 import { DTODateRangeFilter } from 'src/dto/base.dto';
 
 @Controller('payments')
@@ -72,7 +72,7 @@ export class PaymentsController {
     async getPaymentDetails(@Param('id', ParseIntPipe) id: number) {
         return await this.paymentService.getPaymentDetails(id);
     }
-    
+
     @Get('/descriptions')
     async getTypeDescription() {
         return await this.paymentService.getTypeDescription();
@@ -147,5 +147,40 @@ export class PaymentsController {
     @Delete('/:id')
     async deletePayment(@Param('id') id: string) {
         return await this.paymentService.deletePayment(Number(id))
+    }
+
+    @Get('/enterprise')
+    async getPaymentsEnterprise(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('startDate') startDate?: string,
+        @Query('endDate') endDate?: string,
+        @Query('controlNumber') controlNumber?: string,
+        @Query('type') type?: string,
+        @Query('typeDescription') typeDescription?: string,
+    ) {
+        return await this.paymentService.getPaymentsEnterprise({
+            page: page ? parseInt(page) : 1,
+            limit: limit ? parseInt(limit) : 50,
+            startDate,
+            endDate,
+            controlNumber,
+            type
+        })
+    }
+
+    @Post('/enterprise')
+    async createPaymentsEnterprise(@Body() payment: PaymentEnterpriseDTO) {
+        return await this.paymentService.createPaymentsEnterprise(payment)
+    }
+
+    @Put('/enterprise/:id')
+    async updatePaymentsEnterprise(@Param('id') id: string, @Body() payment: PaymentEnterpriseDTO) {
+        return await this.paymentService.updatePaymentsEnterprise(Number(id), payment)
+    }
+
+    @Delete('/enterprise/:id')
+    async deletePaymentsEnterprise(@Param('id') id: string) {
+        return await this.paymentService.deletePaymentsEnterprise(Number(id))
     }
 }

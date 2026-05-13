@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
+import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO, PaymentEnterpriseDTO } from './payment.dto';
 import { ProductsService } from 'src/products/products.service';
 import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
@@ -9,6 +9,11 @@ import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 import { calculateInvoiceRemainingUsd, calculatePaymentRemaining } from 'src/common/remaining-calculator';
 
 // Añadir estos métodos al PaymentsService existente
+
+interface DolarData {
+    dolar: number;
+    date: Date; // o Date, si ya está parseado
+}
 
 interface PaymentFilterPaginate extends PaymentFilter {
     page: number;
@@ -25,6 +30,18 @@ interface PaymentFilter {
     typeDescription?: string;
     search?: string;
     credit?: 'credit' | 'noCredit';
+}
+
+interface EnterpriseFilter {
+    startDate?: string;
+    endDate?: string;
+    type?: string;
+    controlNumber?: string;
+}
+
+interface PaymentEnterpriseFilter extends EnterpriseFilter {
+    page: number;
+    limit: number;
 }
 
 @Injectable()
@@ -826,7 +843,7 @@ export class PaymentsService {
                 where: { id: payment.accountId },
                 include: { method: true }
             });
-            const getDolar = await this.productService.getDolar()
+            const getDolar = await this.productService.getDolar();
 
             await this.prismaService.payment.create({
                 data: {
@@ -1574,10 +1591,184 @@ export class PaymentsService {
 
         return Array.from(map.values());
     }
-}
+
+    async getPaymentsEnterprise({ page, limit, startDate, endDate, controlNumber, type }: PaymentEnterpriseFilter) {
+        try {
+            const skip = (page - 1) * limit;
+
+            const where: any = {};
+
+            if (startDate && endDate) {
+                where.paymentDate = {
+                    gte: this.getStartOfDayUtc(startDate),
+                    lte: this.getEndOfDayUtc(endDate)
+                };
+            }
+            if (controlNumber) {
+                where.controlNumber = controlNumber;
+            }
+            if (type) {
+                where.items = {
+                    some: {
+                        product: {
+                            type: type
+                        }
+                    }
+                }
+            }
+
+            const [paymentEnterprise, totalCount] = await Promise.all([
+                this.prismaService.paymentEnterprise.findMany({
+                    where,
+                    skip,
+                    take: limit,
+                    include: {
+                        dolar: true,
+                        items: {
+                            include: {
+                                product: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        presentation: true,
+                                        type: true,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }).then(data => data.map(item => ({
+                    ...item,
+                    quantity: item.items.reduce((acc, curr) => acc + Number(curr.quantity), 0),
+                    dolar: Number(item.dolar.dolar).toFixed(2),
+                    amount: Number(item.amount).toFixed(2),
+                    total: item.currency === 'BS' ? Number(Number(item.amount) / Number(item.dolar.dolar)).toFixed(2) : Number(item.amount).toFixed(2)
+                }))),
+                this.prismaService.paymentEnterprise.count({ where })
+            ])
+
+            const totalPages = Math.ceil(totalCount / limit);
+            const hasNext = page < totalPages;
+            const hasPrev = page > 1;
+
+            return {
+                paymentEnterprise: paymentEnterprise,
+                pagination: {
+                    page,
+                    limit,
+                    totalCount,
+                    totalPages,
+                    hasNext,
+                    hasPrev
+                }
+            };
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
+            return badResponse;
+        }
+    }
+
+    async createPaymentsEnterprise(paymentEnterpriseData: PaymentEnterpriseDTO) {
+        try {
+            const getDolar = await this.productService.getDolar();
+
+            const paymentEnterprise = await this.prismaService.paymentEnterprise.create({
+                data: {
+                    amount: paymentEnterpriseData.amount,
+                    paymentDate: paymentEnterpriseData.paymentDate,
+                    currency: paymentEnterpriseData.currency,
+                    controlNumber: paymentEnterpriseData.controlNumber,
+                    description: paymentEnterpriseData.description,
+                    dolarId: getDolar.id,
+                }
+            });
+
+            const items = paymentEnterpriseData.items.map((item) => {
+                return {
+                    ...item,
+                    paymentEnterpriseId: paymentEnterprise.id,
+                }
+            });
+
+            await this.prismaService.paymentEnterpriseItems.createMany({
+                data: items
+            });
+
+            baseResponse.message = 'Pago empresarial guardado exitosamente.';
+            return baseResponse;
+
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
+            return badResponse;
+        }
+    }
+
+    async updatePaymentsEnterprise(id: number, paymentEnterpriseData: PaymentEnterpriseDTO) {
+        try {
+            const getDolar = await this.productService.getDolar();
+            await this.prismaService.paymentEnterprise.update({
+                where: { id },
+                data: {
+                    amount: paymentEnterpriseData.amount,
+                    paymentDate: paymentEnterpriseData.paymentDate,
+                    currency: paymentEnterpriseData.currency,
+                    controlNumber: paymentEnterpriseData.controlNumber,
+                    description: paymentEnterpriseData.description,
+                    dolarId: getDolar.id,
+                }
+            });
+
+            await this.prismaService.paymentEnterpriseItems.deleteMany({
+                where: {
+                    paymentEnterpriseId: id
+                }
+            });
+
+            const items = paymentEnterpriseData.items.map((item) => {
+                return {
+                    ...item,
+                    paymentEnterpriseId: id,
+                }
+            });
+
+            await this.prismaService.paymentEnterpriseItems.createMany({
+                data: items
+            });
+
+            baseResponse.message = 'Pago empresarial actualizado exitosamente.';
+            return baseResponse;
+
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
+            return badResponse;
+        }
+    }
 
 
-interface DolarData {
-    dolar: number;
-    date: Date; // o Date, si ya está parseado
+    async deletePaymentsEnterprise(id: number) {
+        try {
+            await this.prismaService.paymentEnterpriseItems.deleteMany({
+                where: {
+                    paymentEnterpriseId: id
+                }
+            });
+
+            await this.prismaService.paymentEnterprise.delete({
+                where: {
+                    id: id
+                }
+            });
+
+            baseResponse.message = 'Pago empresarial eliminado exitosamente.';
+            return baseResponse;
+
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            badResponse.message = errMsg;
+            return badResponse;
+        }
+    }
 }
