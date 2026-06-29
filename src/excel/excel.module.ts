@@ -10,6 +10,7 @@ import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 import { PaymentsService } from 'src/payments/payments.service';
 import { PaymentsModule } from 'src/payments/payments.module';
+import { N8nService } from 'src/n8n/n8n.service';
 
 @Module({
   imports: [InvoicesModule, PaymentsModule],
@@ -21,7 +22,8 @@ import { PaymentsModule } from 'src/payments/payments.module';
     ProductsService, 
     InventoryService, 
     ClientsService,
-    PaymentsService
+    PaymentsService,
+    N8nService
   ]
 })
 export class ExcelModule { }

@@ -12,6 +12,7 @@ import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
+import { N8nService } from 'src/n8n/n8n.service';
 
 interface FilterInvoice {
     page?: number;
@@ -35,6 +36,7 @@ export class InvoicesService {
         private readonly productService: ProductsService,
         private readonly inventoryService: InventoryService,
         private readonly clientService: ClientsService,
+        private readonly n8nService: N8nService,
     ) {
 
     }
@@ -51,6 +53,51 @@ export class InvoicesService {
             return new Date(date);
         }
         return new Date(`${date}T23:59:59.999Z`);
+    }
+
+    private async notifyInvoiceCreated(invoiceId: number, clientId: number, controlNumber: string, totalAmount: number) {
+        try {
+            const client = await this.prismaService.client.findUnique({
+                where: { id: clientId },
+                select: {
+                    name: true,
+                    block: {
+                        select: { name: true, id: true }
+                    }
+                }
+            });
+
+            if (!client) return;
+
+            const invoiceItems = await this.prismaService.invoiceProduct.findMany({
+                where: { invoiceId },
+                select: {
+                    quantity: true,
+                    type: true,
+                    product: {
+                        select: { presentation: true, type: true }
+                    }
+                }
+            });
+
+            const itemsPending = invoiceItems
+                .filter(item => item.type === 'SALE')
+                .reduce((sum, item) => {
+                    const conversionFactor = item.product.presentation === '1kilo' && item.product.type === 'Cafe' ? 0.2 : 1;
+                    return sum + Number(item.quantity) * conversionFactor;
+                }, 0);
+
+            await this.n8nService.sendInvoiceCreated({
+                client: client.name,
+                controlNumber,
+                itemsPending: Math.round(itemsPending * 100) / 100,
+                moneyPending: Math.round(totalAmount * 100) / 100,
+                block: client.block?.name || '',
+                blockId: client.block?.id || 0
+            });
+        } catch (error: any) {
+            console.error('Error notifying n8n:', error.message);
+        }
     }
 
     async getInvoicesPaginated(filters: FilterInvoice) {
@@ -1299,6 +1346,8 @@ export class InvoicesService {
                     type: 'inactivity',
                 },
             });
+
+            this.notifyInvoiceCreated(saveInvoice.id, newInvoice.clientId, newInvoice.controlNumber, calculateTotalInvoice);
 
             baseResponse.message = 'Factura creada correctamente';
             return baseResponse;
