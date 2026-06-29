@@ -55,7 +55,7 @@ export class InvoicesService {
         return new Date(`${date}T23:59:59.999Z`);
     }
 
-    private async notifyInvoiceCreated(invoiceId: number, clientId: number, controlNumber: string, totalAmount: number) {
+    async notifyInvoiceCreated(invoiceId: number, clientId: number, controlNumber: string, totalAmount: number) {
         try {
             const client = await this.prismaService.client.findUnique({
                 where: { id: clientId },
@@ -79,6 +79,9 @@ export class InvoicesService {
                     }
                 }
             });
+
+            const hasCafeProduct = invoiceItems.some(item => item.product.type === 'Cafe');
+            if (!hasCafeProduct) return;
 
             const itemsPending = invoiceItems
                 .filter(item => item.type === 'SALE')

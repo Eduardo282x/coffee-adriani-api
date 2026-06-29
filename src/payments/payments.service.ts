@@ -7,6 +7,7 @@ import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
 import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 import { calculateInvoiceRemainingUsd, calculatePaymentRemaining } from 'src/common/remaining-calculator';
+import { InvoicesService } from 'src/invoices/invoices.service';
 
 // Añadir estos métodos al PaymentsService existente
 
@@ -49,7 +50,8 @@ export class PaymentsService {
 
     constructor(
         private readonly prismaService: PrismaService,
-        private readonly productService: ProductsService
+        private readonly productService: ProductsService,
+        private readonly invoicesService: InvoicesService,
     ) { }
 
     private getStartOfDayUtc(date: string) {
@@ -952,6 +954,7 @@ export class PaymentsService {
             }
 
             let paymentUpdated;
+            const paidInvoices: { id: number; clientId: number; controlNumber: string; totalAmount: number }[] = [];
 
             // Usar transacción Prisma para atomicidad
             await this.prismaService.$transaction(async (prisma) => {
@@ -1018,6 +1021,12 @@ export class PaymentsService {
                         if (findClientReminder) {
                             await prisma.clientReminder.delete({ where: { id: findClientReminder.id } });
                         }
+                        paidInvoices.push({
+                            id: findInvoice.id,
+                            clientId: findInvoice.clientId,
+                            controlNumber: findInvoice.controlNumber,
+                            totalAmount: Number(findInvoice.totalAmount),
+                        });
                     }
                 }
 
@@ -1094,6 +1103,15 @@ export class PaymentsService {
                     },
                 })
             });
+
+            for (const invoice of paidInvoices) {
+                this.invoicesService.notifyInvoiceCreated(
+                    invoice.id,
+                    invoice.clientId,
+                    invoice.controlNumber,
+                    invoice.totalAmount,
+                );
+            }
 
             const paymentUpdatedParse = paymentUpdated ? {
                 ...paymentUpdated,
