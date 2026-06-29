@@ -29,6 +29,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { N8nModule } from './n8n/n8n.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     WhatsAppModule,
     N8nModule,
     SuppliersModule,
+    EntryPaymentsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,4 +1,4 @@
-import { Currency } from "@prisma/client";
+import { AccountType, Currency } from "@prisma/client";
 import { Transform, Type } from "class-transformer";
 import { IsArray, IsDate, IsNotEmpty, IsOptional, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
 
@@ -52,6 +52,9 @@ export class AccountsDTO {
     bank: string;
     @IsNumber()
     methodId: number;
+    @IsString()
+    @IsOptional()
+    type?: AccountType;
 }
 
 export class PaymentEnterpriseDTO {
