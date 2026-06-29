@@ -7,12 +7,45 @@ import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
 import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 import { calculateInvoiceRemainingUsd, calculatePaymentRemaining } from 'src/common/remaining-calculator';
+import { N8nService } from 'src/n8n/n8n.service';
 
 // Añadir estos métodos al PaymentsService existente
 
 interface DolarData {
     dolar: number;
-    date: Date; // o Date, si ya está parseado
+    date: Date;
+}
+
+interface PaymentInvoiceItem {
+    amount: number | string;
+}
+
+interface PaymentUpdatedInvoicePayment {
+    id: number;
+    invoiceId: number;
+    paymentId: number;
+    amount: number;
+    createdAt: Date;
+    invoice: {
+        id: number;
+        controlNumber: string;
+        totalAmount: number;
+        status: string;
+        clientId?: number;
+        InvoicePayment: PaymentInvoiceItem[];
+        client: {
+            id: number;
+            name: string;
+            block: {
+                id: number;
+                name: string;
+            } | null;
+        } | null;
+    } | null;
+}
+
+interface PaymentUpdatedData {
+    InvoicePayment: PaymentUpdatedInvoicePayment[];
 }
 
 interface PaymentFilterPaginate extends PaymentFilter {
@@ -49,8 +82,58 @@ export class PaymentsService {
 
     constructor(
         private readonly prismaService: PrismaService,
-        private readonly productService: ProductsService
+        private readonly productService: ProductsService,
+        private readonly n8nService: N8nService,
     ) { }
+
+    private async notifyPaymentAssociated(paymentData: PaymentUpdatedData) {
+        try {
+            if (!paymentData?.InvoicePayment) return;
+
+            for (const invPayment of paymentData.InvoicePayment) {
+                const invoice = invPayment.invoice;
+                if (!invoice?.client) continue;
+
+                const clientId = invoice.client.id;
+
+                const invoiceItems = await this.prismaService.invoiceProduct.findMany({
+                    where: { invoiceId: invoice.id },
+                    select: {
+                        quantity: true,
+                        type: true,
+                        product: { select: { presentation: true, type: true } }
+                    }
+                });
+
+                const totalItems = invoiceItems
+                    .filter(i => i.type === 'SALE')
+                    .reduce((sum, i) => {
+                        const factor = i.product.presentation === '1kilo' && i.product.type === 'Cafe' ? 0.2 : 1;
+                        return sum + Number(i.quantity) * factor;
+                    }, 0);
+
+                const allPayments = await this.prismaService.invoicePayment.findMany({
+                    where: { invoiceId: invoice.id },
+                    select: { amount: true }
+                });
+
+                const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, allPayments);
+                const proportionPending = Number(invoice.totalAmount) > 0 ? remaining / Number(invoice.totalAmount) : 0;
+                const itemsPending = Math.round(totalItems * proportionPending * 100) / 100;
+
+                await this.n8nService.sendInvoicePaymentAssociated({
+                    client: invoice.client.name,
+                    controlNumber: invoice.controlNumber,
+                    itemsPending,
+                    moneyPending: Math.round(remaining * 100) / 100,
+                    block: invoice.client.block?.name || '',
+                    blockId: invoice.client.block?.id || 0,
+                });
+            }
+        } catch (error: any) {
+            console.error('Error notifying n8n payment:', error.message);
+        }
+    }
 
     private getStartOfDayUtc(date: string) {
         return new Date(`${date}T00:00:00.000Z`);
@@ -745,7 +828,8 @@ export class PaymentsService {
                 data: {
                     name: account.name,
                     bank: account.bank,
-                    methodId: account.methodId
+                    methodId: account.methodId,
+                    type: account.type || 'INCOME'
                 }
             });
             baseResponse.message = 'Cuenta de pago creada correctamente';
@@ -763,7 +847,8 @@ export class PaymentsService {
                 data: {
                     name: account.name,
                     bank: account.bank,
-                    methodId: account.methodId
+                    methodId: account.methodId,
+                    type: account.type || 'INCOME'
                 },
                 where: { id }
             });
@@ -1094,6 +1179,8 @@ export class PaymentsService {
                     },
                 })
             });
+
+            this.notifyPaymentAssociated(paymentUpdated);
 
             const paymentUpdatedParse = paymentUpdated ? {
                 ...paymentUpdated,

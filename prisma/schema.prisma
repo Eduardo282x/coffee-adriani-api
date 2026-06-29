@@ -95,6 +95,7 @@ model Product {
   invoiceItems           InvoiceProduct[]
   HistoryInventory       HistoryInventory[]
   paymentEnterpriseItems PaymentEnterpriseItems[]
+  inventoryEntryDetails  InventoryEntryDetail[]
 }
 
 model HistoryProduct {
@@ -169,25 +170,27 @@ model AccountsPayments {
   bank      String
   methodId  Int
   method    PaymentMethod @relation(references: [id], fields: [methodId])
+  type      AccountType   @default(INCOME)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   Payment   Payment[]
 }
 
 model Payment {
-  id             Int              @id @default(autoincrement())
-  amount         Decimal          @db.Decimal(10, 2)
-  accountId      Int
-  account        AccountsPayments @relation(fields: [accountId], references: [id])
-  reference      String
-  description    String           @default("")
-  dolarId        Int
-  dolar          HistoryDolar     @relation(fields: [dolarId], references: [id])
-  paymentDate    DateTime
-  status         PaymentStatus
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  InvoicePayment InvoicePayment[]
+  id                      Int                      @id @default(autoincrement())
+  amount                  Decimal                  @db.Decimal(10, 2)
+  accountId               Int
+  account                 AccountsPayments         @relation(fields: [accountId], references: [id])
+  reference               String
+  description             String                   @default("")
+  dolarId                 Int
+  dolar                   HistoryDolar             @relation(fields: [dolarId], references: [id])
+  paymentDate             DateTime
+  status                  PaymentStatus
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  InvoicePayment          InvoicePayment[]
+  inventoryEntryPayments  InventoryEntryPayment[]
 }
 
 model InvoicePayment {
@@ -221,6 +224,19 @@ enum Currency {
   BS
 }
 
+enum AccountType {
+  INCOME
+  EXPENSE
+  SUPPLIER
+}
+
+enum EntryStatus {
+  CREADA
+  PENDIENTE
+  PAGADO
+  CANCELADA
+}
+
 model Notification {
   id        Int      @id @default(autoincrement())
   type      String
@@ -252,15 +268,16 @@ model Sale {
 }
 
 model Supplier {
-  id        Int                @id @default(autoincrement())
-  name      String
-  rif       String?
-  phone     String?
-  address   String?
-  email     String?
-  active    Boolean            @default(true)
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  id              Int                @id @default(autoincrement())
+  name            String
+  rif             String?
+  phone           String?
+  address         String?
+  email           String?
+  active          Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  inventoryEntries InventoryEntry[]
 }
 
 model ErrorMessages {
@@ -330,4 +347,47 @@ model PaymentEnterpriseItems {
   price               Decimal           @db.Decimal(10, 2)
   paymentEnterpriseId Int
   paymentEnterprise   PaymentEnterprise @relation(fields: [paymentEnterpriseId], references: [id])
+}
+
+model InventoryEntry {
+  id              Int                    @id @default(autoincrement())
+  controlNumber   String                 @unique
+  movementType    InventoryType
+  totalAmount     Decimal                @db.Decimal(10, 2)
+  status          EntryStatus            @default(CREADA)
+  title           String                 @default("")
+  description     String                 @default("")
+  date            DateTime
+  supplierId      Int?
+  supplier        Supplier?              @relation(fields: [supplierId], references: [id])
+  details         InventoryEntryDetail[]
+  payments        InventoryEntryPayment[]
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+}
+
+model InventoryEntryDetail {
+  id               Int              @id @default(autoincrement())
+  inventoryEntryId Int
+  inventoryEntry   InventoryEntry   @relation(fields: [inventoryEntryId], references: [id])
+  productId        Int
+  product          Product          @relation(fields: [productId], references: [id])
+  quantity         Int
+  unitPrice        Decimal          @db.Decimal(10, 2)
+  unitPriceUSD     Decimal          @db.Decimal(10, 2)
+  subtotal         Decimal          @db.Decimal(10, 2)
+
+  @@unique([inventoryEntryId, productId])
+}
+
+model InventoryEntryPayment {
+  id               Int              @id @default(autoincrement())
+  inventoryEntryId Int
+  inventoryEntry   InventoryEntry   @relation(fields: [inventoryEntryId], references: [id])
+  paymentId        Int
+  payment          Payment          @relation(fields: [paymentId], references: [id])
+  amount           Decimal          @db.Decimal(10, 2)
+  createdAt        DateTime         @default(now())
+
+  @@unique([inventoryEntryId, paymentId])
 }
