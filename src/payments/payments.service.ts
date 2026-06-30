@@ -13,7 +13,39 @@ import { InvoicesService } from 'src/invoices/invoices.service';
 
 interface DolarData {
     dolar: number;
-    date: Date; // o Date, si ya está parseado
+    date: Date;
+}
+
+interface PaymentInvoiceItem {
+    amount: number | string;
+}
+
+interface PaymentUpdatedInvoicePayment {
+    id: number;
+    invoiceId: number;
+    paymentId: number;
+    amount: number;
+    createdAt: Date;
+    invoice: {
+        id: number;
+        controlNumber: string;
+        totalAmount: number;
+        status: string;
+        clientId?: number;
+        InvoicePayment: PaymentInvoiceItem[];
+        client: {
+            id: number;
+            name: string;
+            block: {
+                id: number;
+                name: string;
+            } | null;
+        } | null;
+    } | null;
+}
+
+interface PaymentUpdatedData {
+    InvoicePayment: PaymentUpdatedInvoicePayment[];
 }
 
 interface PaymentFilterPaginate extends PaymentFilter {
@@ -747,7 +779,8 @@ export class PaymentsService {
                 data: {
                     name: account.name,
                     bank: account.bank,
-                    methodId: account.methodId
+                    methodId: account.methodId,
+                    type: account.type || 'INCOME'
                 }
             });
             baseResponse.message = 'Cuenta de pago creada correctamente';
@@ -765,7 +798,8 @@ export class PaymentsService {
                 data: {
                     name: account.name,
                     bank: account.bank,
-                    methodId: account.methodId
+                    methodId: account.methodId,
+                    type: account.type || 'INCOME'
                 },
                 where: { id }
             });
