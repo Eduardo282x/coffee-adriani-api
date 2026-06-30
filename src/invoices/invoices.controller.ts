@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res } from '@nestjs/common';
 import { DTOInvoice } from './invoice.dto';
-import { DTODateRangeFilter } from 'src/dto/base.dto';
+import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
 import { Response } from 'express';
 import { FastifyReply } from 'fastify';
 import { ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
@@ -120,7 +120,7 @@ export class InvoicesController {
     }
 
     @Post('/export')
-    async exportInvoicesExcel(@Res({ passthrough: true }) res: FastifyReply, @Body() query: DTODateRangeFilter) {
+    async exportInvoicesExcel(@Res({ passthrough: true }) res: FastifyReply, @Body() query: DashboardExcel) {
         const buffer = await this.invoicesService.exportInvoicesToExcelWithExcelJS(query);
         res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.header('Content-Disposition', 'attachment; filename=facturas.xlsx');

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { badResponse, baseResponse, DTOBaseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
+import { badResponse, baseResponse, DashboardExcel, DTOBaseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DetProducts, DTOInvoice, IInvoiceWithDetails, InvoiceStatistics, OptionalFilterInvoices, ResponseInvoice } from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
@@ -1764,13 +1764,20 @@ export class InvoicesService {
         };
     }
 
-    async exportInvoicesToExcelWithExcelJS(dateRange?: DTODateRangeFilter): Promise<Buffer> {
+    async exportInvoicesToExcelWithExcelJS(dateRange: DashboardExcel): Promise<Buffer> {
         const where: any = {};
-        if (dateRange?.startDate && dateRange?.endDate) {
+        if (dateRange.startDate && dateRange.endDate) {
             where.dispatchDate = {
                 gte: this.getStartOfDayUtc(dateRange.startDate.toString()),
                 lte: this.getEndOfDayUtc(dateRange.endDate.toString())
             };
+            where.invoiceItems = {
+                every: {
+                    product: {
+                        type: dateRange.type
+                    }
+                }
+            }
         }
 
         const invoices = await this.prismaService.invoice.findMany({

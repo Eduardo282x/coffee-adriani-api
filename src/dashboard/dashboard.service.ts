@@ -7,6 +7,7 @@ import { format, eachDayOfInterval, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatistics } from 'src/invoices/invoice.dto';
+import { PaymentsService } from 'src/payments/payments.service';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
@@ -14,7 +15,8 @@ export class DashboardService {
 
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly invoicesService: InvoicesService
+    private readonly invoicesService: InvoicesService,
+    private readonly paymentsService: PaymentsService,
   ) { }
 
   private getStartOfDayUtc(date: Date | string) {
@@ -39,30 +41,36 @@ export class DashboardService {
 
   async getDashboardData(filter: DashboardExcel) {
     try {
-      // 1. Ejecutar todas las consultas en paralelo
-      const [invoiceStatsRaw, inventory, lastPending, totalClients] = await Promise.all([
-        // Agrupar por invoiceId y productId, incluir estado y tipo
-        this.prismaService.invoiceProduct.findMany({
-          where: {
-            invoice: {
-              createdAt: { gte: filter.startDate, lte: filter.endDate }
-            },
-            product: {
-              type: {
-                contains: filter.type,
-                mode: 'insensitive'
-              }
-            }
-          },
-          select: {
-            invoiceId: true,
-            productId: true,
-            invoice: { select: { status: true } },
-            product: { select: { type: true } },
-          }
+      const startDateStr = filter.startDate instanceof Date
+        ? filter.startDate.toISOString()
+        : new Date(filter.startDate).toISOString();
+      const endDateStr = filter.endDate instanceof Date
+        ? filter.endDate.toISOString()
+        : new Date(filter.endDate).toISOString();
+
+      // 1. Ejecutar todas las consultas en paralelo usando los servicios estandarizados
+      const [
+        invoiceStatistics,
+        paymentStatistics,
+        inventory,
+        lastPending,
+        totalClients
+      ] = await Promise.all([
+        // Usar InvoicesService.getInvoiceStatistics() para estadísticas de facturas
+        this.invoicesService.getInvoiceStatistics({
+          type: filter.type,
+          startDate: startDateStr,
+          endDate: endDateStr,
+        }) as Promise<InvoiceStatistics>,
+
+        // Usar PaymentsService.getPaymentsStatistics() para estadísticas de pagos
+        this.paymentsService.getPaymentsStatistics({
+          startDate: startDateStr,
+          endDate: endDateStr,
+          type: filter.type,
         }),
 
-        // Obtener solo los campos necesarios de productos
+        // Obtener solo los campos necesarios de productos (inventario es específico del dashboard)
         this.prismaService.inventory.findMany({
           select: {
             id: true,
@@ -84,9 +92,9 @@ export class DashboardService {
           }
         }),
 
-        // Últimas 100 facturas pendientes con solo campos necesarios
+        // Últimas 100 facturas pendientes - usando dispatchDate para consistencia
         this.prismaService.invoice.findMany({
-          orderBy: { createdAt: 'desc' },
+          orderBy: { dispatchDate: 'desc' },
           take: 100,
           select: {
             id: true,
@@ -106,7 +114,7 @@ export class DashboardService {
             status: {
               in: ['Pagado', 'Pendiente', 'Vencida']
             },
-            createdAt: { gte: filter.startDate, lte: filter.endDate },
+            dispatchDate: { gte: filter.startDate, lte: filter.endDate },
             invoiceItems: {
               every: {
                 product: {
@@ -123,24 +131,11 @@ export class DashboardService {
         this.prismaService.client.count()
       ]);
 
-
-      // 2. Procesar estadísticas de facturas agrupadas por estado
-      // Agrupar por invoiceId para evitar duplicados
-      const invoiceStatusMap = new Map<string, string>();
-      invoiceStatsRaw.forEach(stat => {
-        invoiceStatusMap.set(stat.invoiceId.toString(), stat.invoice.status);
-      });
-
-      // Contar facturas por estado
-      const statusCount: Record<string, number> = {};
-      invoiceStatusMap.forEach(status => {
-        statusCount[status] = (statusCount[status] || 0) + 1;
-      });
-
-      const totalInvoices = invoiceStatusMap.size;
-      const payed = statusCount['Pagado'] || 0;
-      const expired = statusCount['Vencida'] || 0;
-      const pending = statusCount['Pendiente'] || 0;
+      // 2. Calcular estadísticas de facturas por estado usando los datos del servicio
+      const totalInvoices = invoiceStatistics.summary.invoiceCount;
+      const payed = invoiceStatistics.packagePaid;
+      const expired = invoiceStatistics.packagePending; // Paquetes pendientes incluyen vencidos
+      const pending = invoiceStatistics.packagePending;
 
       const percent = (amount: number) =>
         totalInvoices === 0 ? 0 : Number(((amount / totalInvoices) * 100).toFixed(2));
@@ -165,9 +160,28 @@ export class DashboardService {
         invoices: {
           total: totalInvoices,
           totalClients: totalClients,
+          totalPackages: invoiceStatistics.package,
+          packagePaid: invoiceStatistics.packagePaid,
+          packagePending: invoiceStatistics.packagePending,
+          packagePaidUSD: invoiceStatistics.packagePaidUSD,
+          packagePaidBS: invoiceStatistics.packagePaidBS,
+          packagePendingUSD: invoiceStatistics.packagePendingUSD,
+          packagePendingBS: invoiceStatistics.packagePendingBS,
           payed: { amount: payed, percent: percent(payed) },
           expired: { amount: expired, percent: percent(expired) },
           pending: { amount: pending, percent: percent(pending) },
+          payments: invoiceStatistics.payments,
+          summary: invoiceStatistics.summary,
+        },
+        payments: {
+          totalUSD: paymentStatistics.totals.totalUSD,
+          totalBs: paymentStatistics.totals.totalBs,
+          total: paymentStatistics.totals.total,
+          remaining: paymentStatistics.totals.remaining,
+          totalRemainingBs: paymentStatistics.totals.totalRemainingBs,
+          totalRemainingUSD: paymentStatistics.totals.totalRemainingUSD,
+          counts: paymentStatistics.counts,
+          byMethod: paymentStatistics.byMethod,
         },
         inventory: {
           products: productsPercent,
