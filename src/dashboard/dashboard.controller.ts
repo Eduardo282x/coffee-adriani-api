@@ -9,7 +9,12 @@ export class DashboardController {
 
   @Post()
   async getDashboardData(@Body() dateRange: DashboardExcel) {
-    return await this.dashboardService.getDashboardData(dateRange);
+    try {
+      return await this.dashboardService.getDashboardData(dateRange);
+    } catch (error) {
+      console.error('Error al obtener los datos del dashboard:', error);
+      throw new Error(`Error al obtener los datos del dashboard: ${error}`);
+    }
   }
 
   @Get('/clients-demand')

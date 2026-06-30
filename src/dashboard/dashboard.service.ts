@@ -41,12 +41,13 @@ export class DashboardService {
 
   async getDashboardData(filter: DashboardExcel) {
     try {
-      const startDateStr = filter.startDate instanceof Date
-        ? filter.startDate.toISOString()
-        : new Date(filter.startDate).toISOString();
-      const endDateStr = filter.endDate instanceof Date
-        ? filter.endDate.toISOString()
-        : new Date(filter.endDate).toISOString();
+      // Formatear fechas como YYYY-MM-DD para compatibilidad con los servicios
+      const formatDateStr = (date: Date | string): string => {
+        const d = date instanceof Date ? date : new Date(date);
+        return format(d, 'yyyy-MM-dd');
+      };
+      const startDateStr = formatDateStr(filter.startDate);
+      const endDateStr = formatDateStr(filter.endDate);
 
       // 1. Ejecutar todas las consultas en paralelo usando los servicios estandarizados
       const [
@@ -132,10 +133,11 @@ export class DashboardService {
       ]);
 
       // 2. Calcular estadísticas de facturas por estado usando los datos del servicio
+      const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
       const totalInvoices = invoiceStatistics.summary.invoiceCount;
-      const payed = invoiceStatistics.packagePaid;
-      const expired = invoiceStatistics.packagePending; // Paquetes pendientes incluyen vencidos
-      const pending = invoiceStatistics.packagePending;
+      const payed = r2(invoiceStatistics.packagePaid);
+      const expired = r2(invoiceStatistics.packagePending);
+      const pending = r2(invoiceStatistics.packagePending);
 
       const percent = (amount: number) =>
         totalInvoices === 0 ? 0 : Number(((amount / totalInvoices) * 100).toFixed(2));
@@ -148,7 +150,7 @@ export class DashboardService {
         return {
           id: p.id,
           name: `${p.product.name} ${p.product.presentation}`,
-          amount: p.quantity as number,
+          amount: r2(p.quantity as number),
           percent: productPercent
         };
       });
@@ -160,26 +162,36 @@ export class DashboardService {
         invoices: {
           total: totalInvoices,
           totalClients: totalClients,
-          totalPackages: invoiceStatistics.package,
-          packagePaid: invoiceStatistics.packagePaid,
-          packagePending: invoiceStatistics.packagePending,
-          packagePaidUSD: invoiceStatistics.packagePaidUSD,
-          packagePaidBS: invoiceStatistics.packagePaidBS,
-          packagePendingUSD: invoiceStatistics.packagePendingUSD,
-          packagePendingBS: invoiceStatistics.packagePendingBS,
+          totalPackages: r2(invoiceStatistics.package),
+          packagePaid: r2(invoiceStatistics.packagePaid),
+          packagePending: r2(invoiceStatistics.packagePending),
+          packagePaidUSD: r2(invoiceStatistics.packagePaidUSD),
+          packagePaidBS: r2(invoiceStatistics.packagePaidBS),
+          packagePendingUSD: r2(invoiceStatistics.packagePendingUSD),
+          packagePendingBS: r2(invoiceStatistics.packagePendingBS),
           payed: { amount: payed, percent: percent(payed) },
           expired: { amount: expired, percent: percent(expired) },
           pending: { amount: pending, percent: percent(pending) },
-          payments: invoiceStatistics.payments,
-          summary: invoiceStatistics.summary,
+          payments: {
+            total: r2(invoiceStatistics.payments.total),
+            totalPaid: r2(invoiceStatistics.payments.totalPaid),
+            totalPending: r2(invoiceStatistics.payments.totalPending),
+            debt: r2(invoiceStatistics.payments.debt),
+            remaining: r2(invoiceStatistics.payments.remaining),
+          },
+          summary: {
+            invoiceCount: invoiceStatistics.summary.invoiceCount,
+            averageInvoiceValue: r2(invoiceStatistics.summary.averageInvoiceValue),
+            paymentPercentage: r2(invoiceStatistics.summary.paymentPercentage),
+          },
         },
         payments: {
-          totalUSD: paymentStatistics.totals.totalUSD,
-          totalBs: paymentStatistics.totals.totalBs,
-          total: paymentStatistics.totals.total,
-          remaining: paymentStatistics.totals.remaining,
-          totalRemainingBs: paymentStatistics.totals.totalRemainingBs,
-          totalRemainingUSD: paymentStatistics.totals.totalRemainingUSD,
+          totalUSD: r2(paymentStatistics.totals.totalUSD),
+          totalBs: r2(paymentStatistics.totals.totalBs),
+          total: r2(paymentStatistics.totals.total),
+          remaining: r2(paymentStatistics.totals.remaining),
+          totalRemainingBs: r2(paymentStatistics.totals.totalRemainingBs),
+          totalRemainingUSD: r2(paymentStatistics.totals.totalRemainingUSD),
           counts: paymentStatistics.counts,
           byMethod: paymentStatistics.byMethod,
         },
@@ -190,6 +202,7 @@ export class DashboardService {
         lastPending
       };
     } catch (error) {
+      console.log(error)
       // Manejar el error adecuadamente
       throw new Error(`Error al generar el dashboard: ${error}`);
     }
@@ -501,11 +514,27 @@ export class DashboardService {
       0
     );
 
-    // 4. Calcular bultos pagados optimizado
-    let bultosPagados = 0;
-    let bultosPagadosEnRango = 0;
+    // 4. Estadísticas de facturas usando el servicio para consistencia
+    const baseStartDate = new Date(2020, 1, 1);
+    const [invoiceStatisticsWeek, invoiceStatistics] = await Promise.all([
+      // Estadísticas de la semana (rango del filtro)
+      this.invoicesService.getInvoiceStatistics({
+        type: filter.type,
+        startDate: filter.startDate instanceof Date ? filter.startDate.toISOString() : new Date(filter.startDate).toISOString(),
+        endDate: filter.endDate instanceof Date ? filter.endDate.toISOString() : new Date(filter.endDate).toISOString(),
+      }) as Promise<InvoiceStatistics>,
+      // Estadísticas acumuladas (desde 2020 hasta endDate) para bultosPorCobrar
+      this.invoicesService.getInvoiceStatistics({
+        type: filter.type,
+        startDate: baseStartDate.toISOString(),
+        endDate: new Date(filter.endDate).toISOString(),
+      }) as Promise<InvoiceStatistics>,
+    ]);
 
-    // Cache para totales de facturas
+    const bultosPagados = invoiceStatisticsWeek.packagePaid;
+    const bultosPorCobrar = invoiceStatistics.packagePending;
+
+    // Cache para totales de facturas (mantenido para métricas de centro)
     const facturaTotalesCache = new Map();
     facturas.forEach(f => {
       const totalBultos = f.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
@@ -516,46 +545,27 @@ export class DashboardService {
       });
     });
 
-    // Calcular bultos pagados en rango
-    facturas.forEach(factura => {
-      const cache = facturaTotalesCache.get(factura.id);
-      if (cache.totalAmount > 0) {
-        const porcentajePagado = (cache.totalAmount - cache.remaining) / cache.totalAmount;
-        bultosPagadosEnRango += cache.totalBultos * porcentajePagado;
-      }
-    });
-
-    // Calcular bultos pagados por pagos
-    pagosEnRango.forEach(pago => {
-      pago.InvoicePayment.forEach(invoicePayment => {
-        const factura = invoicePayment.invoice;
-        const montoAsignado = Number(invoicePayment.amount);
-        const totalFactura = Number(factura.totalAmount);
-        const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
-        const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
-        bultosPagados += cantidadTotalItems * porcentajePagado;
-      });
-    });
-
-    // 5. Calcular despachados agrupados
-    const categoryProducto = {
+    // 5. Calcular despachados agrupados usando detPackage del servicio (aplica factor de conversión)
+    // detPackage[].product tiene formato "Cafe Gourmet Gourmet 100 y 200" (nombre + presentación)
+    const categoryProducto: Record<string, string> = {
       'Cafe Gourmet': 'Gourmet 100 y 200',
       'Cafe Premium': 'Premium 100 y 200',
       'Cafe Especial': 'Especial 250',
       'Cafe en Grano': 'Grano Kg'
     };
 
-    const despachados = {};
-    facturas.forEach(factura => {
-      factura.invoiceItems.forEach(item => {
-        const category = categoryProducto[item.product.name];
-        if (category) {
-          despachados[category] = (despachados[category] || 0) + Number(item.quantity);
+    const despachados: Record<string, number> = {};
+    invoiceStatisticsWeek.detPackage.forEach(det => {
+      // Buscar cuál categoría del mapa coincide con el nombre del producto
+      for (const [productKey, category] of Object.entries(categoryProducto)) {
+        if (det.product.startsWith(productKey)) {
+          despachados[category] = (despachados[category] || 0) + det.totalQuantity;
+          break;
         }
-      });
+      }
     });
 
-    // 6. Calcular despachos por día y producto de forma eficiente
+    // 6. Calcular despachos por día y producto con factor de conversión
     const despachosPorDiaYProducto = {};
     dias.forEach(dia => {
       const fechaKey = format(dia, 'yyyy-MM-dd');
@@ -570,7 +580,8 @@ export class DashboardService {
       if (despachosPorDiaYProducto[fechaDespacho]) {
         factura.invoiceItems.forEach(item => {
           if (despachosPorDiaYProducto[fechaDespacho][item.productId] !== undefined) {
-            despachosPorDiaYProducto[fechaDespacho][item.productId] += Number(item.quantity);
+            const conversionFactor = item.product.presentation === '1kilo' ? 0.2 : 1;
+            despachosPorDiaYProducto[fechaDespacho][item.productId] += Number(item.quantity) * conversionFactor;
           }
         });
       }
@@ -610,19 +621,13 @@ export class DashboardService {
       }
     });
 
-    // 8. Calcular deuda por cobrar y bultos por cobrar
+    // 8. Calcular deuda por cobrar
     const deudaPorCobrar = facturasHastaCierre.reduce(
       (sum, f) => sum + calculateInvoiceRemainingUsd(f.totalAmount, f.InvoicePayment),
       0
     );
 
-    const baseStartDate = new Date(2020, 1, 1);
-    const invoiceStatistics = await this.invoicesService.getInvoiceStatistics({
-      type: filter.type,
-      startDate: baseStartDate.toISOString(),
-      endDate: new Date(filter.endDate).toISOString(),
-    }) as InvoiceStatistics;
-    const bultosPorCobrar = invoiceStatistics.packagePending;
+    // bultosPorCobrar ya se obtuvo en el paso 4 (invoiceStatistics.packagePending)
 
     // ============== GENERACIÓN DEL EXCEL ==============
     const workbook = new ExcelJS.Workbook();
@@ -704,9 +709,33 @@ export class DashboardService {
     wsReporte.getCell('B23').font = { bold: true };
     wsReporte.getCell('C23').value = bultosPendientesCentroTotal.toFixed(2);
 
+    // Detalle por producto (datos de getInvoiceStatistics)
+    let detailRow = 25;
+    wsReporte.getCell(`B${detailRow}`).value = 'Detalle por producto:';
+    wsReporte.getCell(`B${detailRow}`).font = { bold: true, size: 11 };
+    detailRow++;
+
+    wsReporte.getCell(`B${detailRow}`).value = 'Producto';
+    wsReporte.getCell(`C${detailRow}`).value = 'Total';
+    wsReporte.getCell(`D${detailRow}`).value = 'Pagado';
+    wsReporte.getCell(`E${detailRow}`).value = 'Pendiente';
+    wsReporte.getCell(`B${detailRow}`).font = { bold: true };
+    wsReporte.getCell(`C${detailRow}`).font = { bold: true };
+    wsReporte.getCell(`D${detailRow}`).font = { bold: true };
+    wsReporte.getCell(`E${detailRow}`).font = { bold: true };
+    detailRow++;
+
+    invoiceStatisticsWeek.detPackage.forEach(det => {
+      wsReporte.getCell(`B${detailRow}`).value = det.product;
+      wsReporte.getCell(`C${detailRow}`).value = Number(det.totalQuantity.toFixed(4));
+      wsReporte.getCell(`D${detailRow}`).value = Number(det.paidQuantity.toFixed(4));
+      wsReporte.getCell(`E${detailRow}`).value = Number(det.pendingQuantity.toFixed(4));
+      detailRow++;
+    });
+
     // Aplicar bordes
-    for (let row = 2; row <= 25; row++) {
-      for (let col = 2; col <= 4; col++) {
+    for (let row = 2; row <= detailRow; row++) {
+      for (let col = 2; col <= 5; col++) {
         const cell = wsReporte.getCell(row, col);
         cell.border = {
           top: { style: 'thin' },
