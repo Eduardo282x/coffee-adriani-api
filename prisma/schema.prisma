@@ -94,7 +94,6 @@ model Product {
   inventoryMovements     Inventory[]
   invoiceItems           InvoiceProduct[]
   HistoryInventory       HistoryInventory[]
-  paymentEnterpriseItems PaymentEnterpriseItems[]
   inventoryEntryDetails  InventoryEntryDetail[]
 }
 
@@ -137,11 +136,10 @@ model HistoryInventory {
 }
 
 model HistoryDolar {
-  id                 Int                 @id @default(autoincrement())
-  dolar              Decimal             @db.Decimal(10, 2)
-  date               DateTime            @default(now())
-  Payment            Payment[]
-  paymentEnterprises PaymentEnterprise[]
+  id        Int       @id @default(autoincrement())
+  dolar     Decimal   @db.Decimal(10, 2)
+  date      DateTime  @default(now())
+  Payment   Payment[]
 }
 
 model InvoiceProduct {
@@ -324,29 +322,6 @@ model Settings {
   id    Int    @id @default(autoincrement())
   name  String
   value String
-}
-
-model PaymentEnterprise {
-  id            Int                      @id @default(autoincrement())
-  amount        Decimal                  @db.Decimal(10, 2) // Monto asignado de este pago a este producto
-  controlNumber String                   @default("")
-  description   String                   @default("")
-  dolarId       Int
-  dolar         HistoryDolar             @relation(fields: [dolarId], references: [id])
-  currency      Currency
-  items         PaymentEnterpriseItems[]
-  paymentDate   DateTime                 @default(now())
-  createdAt     DateTime                 @default(now())
-}
-
-model PaymentEnterpriseItems {
-  id                  Int               @id @default(autoincrement())
-  productId           Int
-  product             Product           @relation(fields: [productId], references: [id])
-  quantity            Decimal           @db.Decimal(10, 2)
-  price               Decimal           @db.Decimal(10, 2)
-  paymentEnterpriseId Int
-  paymentEnterprise   PaymentEnterprise @relation(fields: [paymentEnterpriseId], references: [id])
 }
 
 model InventoryEntry {

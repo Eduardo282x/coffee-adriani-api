@@ -106,6 +106,7 @@ export class InventoryController {
         @Query('limit') limit?: string,
         @Query('startDate') startDate?: string,
         @Query('endDate') endDate?: string,
+        @Query('typeProduct') typeProduct?: string,
         @Query('controlNumber') controlNumber?: string,
         @Query('supplierId') supplierId?: string,
     ) {
@@ -114,6 +115,7 @@ export class InventoryController {
             limit: limit ? parseInt(limit) : 50,
             startDate,
             endDate,
+            typeProduct,
             controlNumber,
             supplierId: supplierId ? parseInt(supplierId) : undefined,
         });

@@ -4,6 +4,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOLogin, DTOLoginResponse } from './auth.dto';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -18,12 +19,17 @@ export class AuthService {
             const findUser = await this.prismaService.users.findFirst({
                 where: {
                     username: credentials.username,
-                    password: credentials.password
                 },
                 include: { roles: true }
             })
 
             if (!findUser) {
+                badResponse.message = 'Usuario o contraseña no encontrados.';
+                return badResponse;
+            }
+
+            const isPasswordValid = await bcrypt.compare(credentials.password, findUser.password);
+            if (!isPasswordValid) {
                 badResponse.message = 'Usuario o contraseña no encontrados.';
                 return badResponse;
             }
@@ -69,14 +75,43 @@ export class AuthService {
                 return badResponse;
             }
 
+            const hashedPassword = await bcrypt.hash(credentials.password, 12);
             const updateUser = await this.prismaService.users.update({
                 where: { id: findUser.id },
-                data: { password: credentials.password },
+                data: { password: hashedPassword },
                 include: { roles: true }
             })
 
             baseResponse.message = `Contraseña Recuperada.`;
 
+            return baseResponse;
+        } catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err.message, from: 'AuthService' }
+            })
+            badResponse.message = err.message;
+            return badResponse;
+        }
+    }
+
+    async migratePasswords(): Promise<DTOBaseResponse> {
+        try {
+            const users = await this.prismaService.users.findMany();
+            let migratedCount = 0;
+
+            for (const user of users) {
+                const isAlreadyHashed = user.password.startsWith('$2b$');
+                if (!isAlreadyHashed) {
+                    const hashedPassword = await bcrypt.hash(user.password, 12);
+                    await this.prismaService.users.update({
+                        where: { id: user.id },
+                        data: { password: hashedPassword }
+                    });
+                    migratedCount++;
+                }
+            }
+
+            baseResponse.message = `${migratedCount} contraseñas migradas exitosamente.`;
             return baseResponse;
         } catch (err) {
             await this.prismaService.errorMessages.create({

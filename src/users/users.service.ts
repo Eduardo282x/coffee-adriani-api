@@ -3,6 +3,7 @@ import { Role, Users } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOUser } from './user.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -23,12 +24,13 @@ export class UsersService {
 
     async createUsers(user: DTOUser): Promise<DTOBaseResponse> {
         try {
+            const hashedPassword = await bcrypt.hash('1234', 12);
             await this.prismaService.users.create({
                 data: {
                     username: user.username,
                     name: user.name,
                     lastName: user.lastName,
-                    password: '1234',
+                    password: hashedPassword,
                     rolId: user.rolId,
                 }
             })

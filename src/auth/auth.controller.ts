@@ -17,4 +17,8 @@ export class AuthController {
     async authRecover(@Body() credentials: DTOLogin) {
         return await this.authService.recover(credentials);
     }
+    @Post('/migrate-passwords')
+    async migratePasswords() {
+        return await this.authService.migratePasswords();
+    }
 }

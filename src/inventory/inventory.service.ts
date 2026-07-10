@@ -958,7 +958,7 @@ export class InventoryService {
 
     async getEnterpriseEntries(filter: InventoryEntryFilterDTO) {
         try {
-            const { page = 1, limit = 50, startDate, endDate, controlNumber, supplierId } = filter;
+            const { page = 1, limit = 50, startDate, endDate, controlNumber, supplierId, typeProduct } = filter;
             const skip = (page - 1) * limit;
 
             const where: any = {
@@ -981,6 +981,19 @@ export class InventoryService {
 
             if (supplierId) {
                 where.supplierId = supplierId;
+            }
+
+            if (typeProduct) {
+                where.details = {
+                    some: {
+                        product: {
+                            type: {
+                                equals: typeProduct,
+                                mode: 'insensitive'
+                            }
+                        }
+                    }
+                };
             }
 
             const [entries, totalCount] = await Promise.all([
@@ -1030,8 +1043,8 @@ export class InventoryService {
                     totalPaid: totalPaid.toFixed(2),
                     remaining: remaining.toFixed(2),
                     supplier: entry.supplier,
-                    detailsCount: entry.details.length,
-                    paymentsCount: entry.payments.length
+                    details: entry.details,
+                    payments: entry.payments
                 };
             });
 
