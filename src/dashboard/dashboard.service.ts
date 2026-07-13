@@ -395,6 +395,9 @@ export class DashboardService {
           paymentDate: {
             gte: filter.startDate,
             lte: endDatePlusOne
+          },
+          account: {
+            type: 'INCOME'
           }
         },
         select: {
@@ -455,7 +458,10 @@ export class DashboardService {
       this.prismaService.payment.findMany({
         where: {
           paymentDate: { lte: endDatePlusOne },
-          InvoicePayment: { none: {} }
+          InvoicePayment: { none: {} },
+          account: {
+            type: 'INCOME'
+          }
         },
         select: {
           amount: true,

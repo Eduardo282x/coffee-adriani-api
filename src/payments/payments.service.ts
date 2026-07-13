@@ -60,6 +60,7 @@ interface PaymentFilter {
     methodId?: number;
     associated?: boolean;
     type?: string;
+    accountType?: string;
     typeDescription?: string;
     search?: string;
     credit?: 'credit' | 'noCredit';
@@ -352,7 +353,7 @@ export class PaymentsService {
 
     async getPaymentsStatistics(filters: PaymentFilter) {
         try {
-            const { startDate, endDate, accountId, methodId, associated, type, typeDescription, credit, search } = filters;
+            const { startDate, endDate, accountId, methodId, associated, type, accountType, typeDescription, credit, search } = filters;
 
             // Construir where clause dinámicamente
             const where: any = {};
@@ -455,6 +456,13 @@ export class PaymentsService {
             if (methodId) {
                 where.account = {
                     methodId: methodId
+                };
+            }
+
+            if (accountType) {
+                where.account = {
+                    ...where.account,
+                    type: accountType
                 };
             }
 

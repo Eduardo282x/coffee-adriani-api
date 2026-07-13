@@ -53,6 +53,7 @@ export class PaymentsController {
         @Query('credit') credit?: 'credit' | 'noCredit',
         @Query('search') search?: string,
         @Query('type') type?: string,
+        @Query('accountType') accountType?: string,
         @Query('typeDescription') typeDescription?: string,
     ) {
         return await this.paymentService.getPaymentsStatistics({
@@ -63,6 +64,7 @@ export class PaymentsController {
             associated: associated === 'true' ? true : associated === 'false' ? false : undefined,
             search: search as string,
             type: type as string,
+            accountType: accountType as string,
             typeDescription: typeDescription as string,
             credit: credit as 'credit' | 'noCredit',
         });
