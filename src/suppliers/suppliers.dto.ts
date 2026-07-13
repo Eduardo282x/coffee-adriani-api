@@ -20,6 +20,10 @@ export class CreateSupplierDTO {
     @IsString()
     @IsOptional()
     email?: string;
+
+    @IsString()
+    @IsOptional()
+    rubro?: string;
 }
 
 export class UpdateSupplierDTO {
@@ -41,6 +45,10 @@ export class UpdateSupplierDTO {
     @IsString()
     @IsOptional()
     email?: string;
+
+    @IsString()
+    @IsOptional()
+    rubro?: string;
 }
 
 export class SupplierFilterDTO {

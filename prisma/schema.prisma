@@ -84,17 +84,17 @@ model Product {
   presentation String
   type         String @default("Cafe")
 
-  purchasePrice          Decimal                  @db.Decimal(10, 2)
-  purchasePriceUSD       Decimal                  @default(0) @db.Decimal(10, 2)
-  price                  Decimal                  @db.Decimal(10, 2)
-  priceUSD               Decimal                  @db.Decimal(10, 2)
-  amount                 Int
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
-  inventoryMovements     Inventory[]
-  invoiceItems           InvoiceProduct[]
-  HistoryInventory       HistoryInventory[]
-  inventoryEntryDetails  InventoryEntryDetail[]
+  purchasePrice         Decimal                @db.Decimal(10, 2)
+  purchasePriceUSD      Decimal                @default(0) @db.Decimal(10, 2)
+  price                 Decimal                @db.Decimal(10, 2)
+  priceUSD              Decimal                @db.Decimal(10, 2)
+  amount                Int
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  inventoryMovements    Inventory[]
+  invoiceItems          InvoiceProduct[]
+  HistoryInventory      HistoryInventory[]
+  inventoryEntryDetails InventoryEntryDetail[]
 }
 
 model HistoryProduct {
@@ -136,10 +136,10 @@ model HistoryInventory {
 }
 
 model HistoryDolar {
-  id        Int       @id @default(autoincrement())
-  dolar     Decimal   @db.Decimal(10, 2)
-  date      DateTime  @default(now())
-  Payment   Payment[]
+  id      Int       @id @default(autoincrement())
+  dolar   Decimal   @db.Decimal(10, 2)
+  date    DateTime  @default(now())
+  Payment Payment[]
 }
 
 model InvoiceProduct {
@@ -175,20 +175,20 @@ model AccountsPayments {
 }
 
 model Payment {
-  id                      Int                      @id @default(autoincrement())
-  amount                  Decimal                  @db.Decimal(10, 2)
-  accountId               Int
-  account                 AccountsPayments         @relation(fields: [accountId], references: [id])
-  reference               String
-  description             String                   @default("")
-  dolarId                 Int
-  dolar                   HistoryDolar             @relation(fields: [dolarId], references: [id])
-  paymentDate             DateTime
-  status                  PaymentStatus
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  InvoicePayment          InvoicePayment[]
-  inventoryEntryPayments  InventoryEntryPayment[]
+  id                     Int                     @id @default(autoincrement())
+  amount                 Decimal                 @db.Decimal(10, 2)
+  accountId              Int
+  account                AccountsPayments        @relation(fields: [accountId], references: [id])
+  reference              String
+  description            String                  @default("")
+  dolarId                Int
+  dolar                  HistoryDolar            @relation(fields: [dolarId], references: [id])
+  paymentDate            DateTime
+  status                 PaymentStatus
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  InvoicePayment         InvoicePayment[]
+  inventoryEntryPayments InventoryEntryPayment[]
 }
 
 model InvoicePayment {
@@ -266,15 +266,16 @@ model Sale {
 }
 
 model Supplier {
-  id              Int                @id @default(autoincrement())
-  name            String
-  rif             String?
-  phone           String?
-  address         String?
-  email           String?
-  active          Boolean            @default(true)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id               Int              @id @default(autoincrement())
+  name             String
+  rif              String?
+  phone            String?
+  address          String?
+  email            String?
+  rubro            String           @default("")
+  active           Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
   inventoryEntries InventoryEntry[]
 }
 
@@ -325,44 +326,44 @@ model Settings {
 }
 
 model InventoryEntry {
-  id              Int                    @id @default(autoincrement())
-  controlNumber   String                 @unique
-  movementType    InventoryType
-  totalAmount     Decimal                @db.Decimal(10, 2)
-  status          EntryStatus            @default(CREADA)
-  title           String                 @default("")
-  description     String                 @default("")
-  date            DateTime
-  supplierId      Int?
-  supplier        Supplier?              @relation(fields: [supplierId], references: [id])
-  details         InventoryEntryDetail[]
-  payments        InventoryEntryPayment[]
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
+  id            Int                     @id @default(autoincrement())
+  controlNumber String                  @unique
+  movementType  InventoryType
+  totalAmount   Decimal                 @db.Decimal(10, 2)
+  status        EntryStatus             @default(CREADA)
+  title         String                  @default("")
+  description   String                  @default("")
+  date          DateTime
+  supplierId    Int?
+  supplier      Supplier?               @relation(fields: [supplierId], references: [id])
+  details       InventoryEntryDetail[]
+  payments      InventoryEntryPayment[]
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
 }
 
 model InventoryEntryDetail {
-  id               Int              @id @default(autoincrement())
+  id               Int            @id @default(autoincrement())
   inventoryEntryId Int
-  inventoryEntry   InventoryEntry   @relation(fields: [inventoryEntryId], references: [id])
+  inventoryEntry   InventoryEntry @relation(fields: [inventoryEntryId], references: [id])
   productId        Int
-  product          Product          @relation(fields: [productId], references: [id])
+  product          Product        @relation(fields: [productId], references: [id])
   quantity         Int
-  unitPrice        Decimal          @db.Decimal(10, 2)
-  unitPriceUSD     Decimal          @db.Decimal(10, 2)
-  subtotal         Decimal          @db.Decimal(10, 2)
+  unitPrice        Decimal        @db.Decimal(10, 2)
+  unitPriceUSD     Decimal        @db.Decimal(10, 2)
+  subtotal         Decimal        @db.Decimal(10, 2)
 
   @@unique([inventoryEntryId, productId])
 }
 
 model InventoryEntryPayment {
-  id               Int              @id @default(autoincrement())
+  id               Int            @id @default(autoincrement())
   inventoryEntryId Int
-  inventoryEntry   InventoryEntry   @relation(fields: [inventoryEntryId], references: [id])
+  inventoryEntry   InventoryEntry @relation(fields: [inventoryEntryId], references: [id])
   paymentId        Int
-  payment          Payment          @relation(fields: [paymentId], references: [id])
-  amount           Decimal          @db.Decimal(10, 2)
-  createdAt        DateTime         @default(now())
+  payment          Payment        @relation(fields: [paymentId], references: [id])
+  amount           Decimal        @db.Decimal(10, 2)
+  createdAt        DateTime       @default(now())
 
   @@unique([inventoryEntryId, paymentId])
 }

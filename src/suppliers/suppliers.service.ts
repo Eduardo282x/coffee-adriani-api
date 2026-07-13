@@ -115,6 +115,7 @@ export class SuppliersService {
                     phone: data.phone || null,
                     address: data.address || null,
                     email: data.email || null,
+                    rubro: data.rubro || null,
                 }
             });
 
@@ -161,6 +162,7 @@ export class SuppliersService {
                     phone: data.phone || null,
                     address: data.address || null,
                     email: data.email || null,
+                    rubro: data.rubro || null,
                 }
             });
 
