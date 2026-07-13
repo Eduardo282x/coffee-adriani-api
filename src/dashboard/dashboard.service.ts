@@ -598,6 +598,19 @@ export class DashboardService {
     let bultosPagadosCentroTotal = 0;
     let bultosPendientesCentroTotal = 0;
 
+    const centroInvoicesById = new Map(
+      facturasCentros.map(facturaCentro => {
+        const totalBultos = facturaCentro.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
+        return [
+          facturaCentro.id,
+          {
+            totalBultos,
+            totalFactura: Number(facturaCentro.totalAmount),
+          }
+        ] as const;
+      })
+    );
+
     facturas.forEach(factura => {
       if (factura.client.block.name.toLowerCase().includes('centro')) {
         bultosDespachadosCentro += factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
@@ -608,22 +621,30 @@ export class DashboardService {
       pago.InvoicePayment.forEach(invoicePayment => {
         const factura = invoicePayment.invoice;
         if (factura.client.block.name.toLowerCase().includes('centro')) {
+          const centroFactura = centroInvoicesById.get(factura.id);
+          if (!centroFactura) {
+            return;
+          }
+
           const montoAsignado = Number(invoicePayment.amount);
-          const totalFactura = Number(factura.totalAmount);
-          const cantidadTotalItems = factura.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
-          const porcentajePagado = totalFactura > 0 ? (montoAsignado / totalFactura) : 0;
-          bultosPagadosCentroTotal += cantidadTotalItems * porcentajePagado;
+          const porcentajePagado = centroFactura.totalFactura > 0
+            ? Math.min(Math.max(montoAsignado / centroFactura.totalFactura, 0), 1)
+            : 0;
+          bultosPagadosCentroTotal += centroFactura.totalBultos * porcentajePagado;
         }
       });
     });
 
     facturasCentros.forEach(facturaCentro => {
-      const totalBultos = facturaCentro.invoiceItems.reduce((sum, item) => sum + Number(item.quantity), 0);
-      const totalFactura = Number(facturaCentro.totalAmount);
+      const centroFactura = centroInvoicesById.get(facturaCentro.id);
+      if (!centroFactura) {
+        return;
+      }
+
       const pendiente = calculateInvoiceRemainingUsd(facturaCentro.totalAmount, facturaCentro.InvoicePayment);
-      if (totalFactura > 0) {
-        const porcentajePendiente = pendiente / totalFactura;
-        bultosPendientesCentroTotal += totalBultos * porcentajePendiente;
+      if (centroFactura.totalFactura > 0) {
+        const porcentajePendiente = Math.min(Math.max(pendiente / centroFactura.totalFactura, 0), 1);
+        bultosPendientesCentroTotal += centroFactura.totalBultos * porcentajePendiente;
       }
     });
 
