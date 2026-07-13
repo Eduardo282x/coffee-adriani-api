@@ -26,6 +26,7 @@ export class PaymentsController {
         @Query('associated') associated?: string,
         @Query('type') type?: string,
         @Query('typeDescription') typeDescription?: string,
+        @Query('accountType') accountType?: string,
         @Query('credit') credit?: 'credit' | 'noCredit'
     ) {
         return await this.paymentService.getPaymentsPaginated({
@@ -38,6 +39,7 @@ export class PaymentsController {
             search: search as string,
             associated: associated === 'true' ? true : associated === 'false' ? false : undefined,
             type: type as string,
+            accountType: accountType as string,
             typeDescription: typeDescription as string,
             credit: credit as 'credit' | 'noCredit',
         });

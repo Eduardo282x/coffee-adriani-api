@@ -87,7 +87,7 @@ export class PaymentsService {
 
     async getPaymentsPaginated(filters: PaymentFilterPaginate) {
         try {
-            const { page, limit, startDate, endDate, accountId, methodId, associated, type, typeDescription, credit, search } = filters;
+            const { page, limit, startDate, endDate, accountId, methodId, associated, type, typeDescription, accountType, credit, search } = filters;
             const skip = (page - 1) * limit;
 
             // Construir where clause dinámicamente
@@ -193,6 +193,13 @@ export class PaymentsService {
             if (methodId) {
                 where.account = {
                     methodId: methodId
+                };
+            }
+
+            if (accountType) {
+                where.account = {
+                    ...where.account,
+                    type: accountType
                 };
             }
 
