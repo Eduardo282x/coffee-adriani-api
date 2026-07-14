@@ -1557,7 +1557,7 @@ export class InvoicesService {
                 lte: this.getEndOfDayUtc(dateRange.endDate.toString())
             };
             where.invoiceItems = {
-                every: {
+                some: {
                     product: {
                         type: dateRange.type
                     }
