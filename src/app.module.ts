@@ -22,7 +22,6 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from './guards/auth/auth.guard';
 import { RolesGuard } from './guards/roles/roles.guard';
 import { APP_GUARD } from '@nestjs/core';
-import { ExcelModule } from './excel/excel.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { CollectionModule } from './collection/collection.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
@@ -52,7 +51,6 @@ import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'], // primero busca en .env.local
     }),
-    ExcelModule,
     ExpensesModule,
     CollectionModule,
     DashboardModule,

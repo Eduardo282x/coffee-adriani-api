@@ -4,17 +4,9 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO } from './payment.dto';
 import { ProductsService } from 'src/products/products.service';
 import { BankData } from './payments.data';
-import { PaymentParseExcel } from 'src/excel/excel.interfaces';
 import { calculateInvoiceRemainingUsd, calculatePaymentRemaining } from 'src/common/remaining-calculator';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatus, PaymentStatus } from 'src/generated/prisma/enums';
-
-// Añadir estos métodos al PaymentsService existente
-
-interface DolarData {
-    dolar: number;
-    date: Date;
-}
 
 interface PaymentInvoiceItem {
     amount: number | string;
@@ -630,22 +622,17 @@ export class PaymentsService {
             const associatedPayments = processedPayments.filter(p => p.InvoicePayment && p.InvoicePayment.length > 0).length;
             const unassociatedPayments = processedPayments.filter(p => !p.InvoicePayment || p.InvoicePayment.length === 0).length;
 
-            // Estadísticas por método de pago
-            const paymentsByMethod = await this.prismaService.payment.groupBy({
-                by: ['accountId'],
-                where,
-                _sum: {
-                    amount: true
-                },
-                _count: {
-                    id: true
-                }
-            });
-
-            // Obtener detalles de las cuentas
-            const accountsDetails = await this.prismaService.accountsPayments.findMany({
-                include: { method: true }
-            });
+            const [paymentsByMethod, accountsDetails] = await Promise.all([
+                this.prismaService.payment.groupBy({
+                    by: ['accountId'],
+                    where,
+                    _sum: { amount: true },
+                    _count: { id: true }
+                }),
+                this.prismaService.accountsPayments.findMany({
+                    include: { method: true }
+                })
+            ]);
 
             const methodStatistics = paymentsByMethod.map(stat => {
                 const account = accountsDetails.find(acc => acc.id === stat.accountId);
@@ -878,11 +865,13 @@ export class PaymentsService {
 
     async registerPayment(payment: PaymentDTO) {
         try {
-            const accountZelle = await this.prismaService.accountsPayments.findFirst({
-                where: { id: payment.accountId },
-                include: { method: true }
-            });
-            const getDolar = await this.productService.getDolar();
+            const [accountZelle, getDolar] = await Promise.all([
+                this.prismaService.accountsPayments.findFirst({
+                    where: { id: payment.accountId },
+                    include: { method: true }
+                }),
+                this.productService.getDolar()
+            ]);
 
             await this.prismaService.payment.create({
                 data: {
@@ -896,23 +885,22 @@ export class PaymentsService {
                 }
             })
 
-            baseResponse.message = 'Pago guardado correctamente';
-            return baseResponse;
+            return { message: 'Pago guardado correctamente', success: true };
         }
         catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
+            return { message: error instanceof Error ? error.message : String(error), success: false };
         }
     }
 
     async updatePayment(id: number, payment: PaymentDTO) {
         try {
-            const accountZelle = await this.prismaService.accountsPayments.findFirst({
-                where: { id: payment.accountId },
-                include: { method: true }
-            });
-            const getDolar = await this.productService.getDolar()
+            const [accountZelle, getDolar] = await Promise.all([
+                this.prismaService.accountsPayments.findFirst({
+                    where: { id: payment.accountId },
+                    include: { method: true }
+                }),
+                this.productService.getDolar()
+            ]);
 
             await this.prismaService.payment.update({
                 data: {
@@ -927,34 +915,24 @@ export class PaymentsService {
                 where: { id }
             })
 
-            baseResponse.message = 'Pago actualizado correctamente';
-            return baseResponse;
+            return { message: 'Pago actualizado correctamente', success: true };
         }
         catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
+            return { message: error instanceof Error ? error.message : String(error), success: false };
         }
     }
 
     async updatePaymentZelle(id: number) {
         try {
-            const payment = await this.prismaService.payment.findFirst({
-                where: { id: id }
-            })
-
             await this.prismaService.payment.update({
                 data: { status: 'CONFIRMED' },
-                where: { id: id }
+                where: { id }
             })
 
-            baseResponse.message = 'Pago actualizado correctamente';
-            return baseResponse;
+            return { message: 'Pago actualizado correctamente', success: true };
         }
         catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
+            return { message: error instanceof Error ? error.message : String(error), success: false };
         }
     }
 
@@ -1193,39 +1171,28 @@ export class PaymentsService {
                 throw new Error(`No se encontró la asociación de pago con ID ${pay.id}`);
             }
 
-            await this.prismaService.invoicePayment.delete({
-                where: { id: pay.id }
-            });
+            const invoiceAfter = await this.prismaService.$transaction(async (tx) => {
+                await tx.invoicePayment.delete({ where: { id: pay.id } });
 
-            const invoiceAfter = await this.prismaService.invoice.findUnique({
-                where: { id: pay.invoiceId },
-                include: {
-                    InvoicePayment: {
-                        select: { amount: true }
-                    }
-                }
-            });
-
-            if (invoiceAfter) {
-                const remaining = calculateInvoiceRemainingUsd(
-                    invoiceAfter.totalAmount,
-                    invoiceAfter.InvoicePayment
-                );
-
-                await this.prismaService.invoice.update({
-                    where: { id: invoiceAfter.id },
-                    data: {
-                        status: remaining <= 2 ? 'Pagado' : 'Pendiente'
-                    }
+                const invoice = await tx.invoice.findUnique({
+                    where: { id: pay.invoiceId },
+                    include: { InvoicePayment: { select: { amount: true } } }
                 });
-            }
 
-            baseResponse.message = `Pago Desasociado de factura exitosamente.`
-            return baseResponse
+                if (invoice) {
+                    const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
+                    await tx.invoice.update({
+                        where: { id: invoice.id },
+                        data: { status: remaining <= 2 ? 'Pagado' : 'Pendiente' }
+                    });
+                }
+
+                return invoice;
+            });
+
+            return { message: 'Pago Desasociado de factura exitosamente.', success: true };
         } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            badResponse.message = errMsg;
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
@@ -1238,43 +1205,35 @@ export class PaymentsService {
             if (findPaymentAssociate.length > 0) {
                 const invoiceIds = [...new Set(findPaymentAssociate.map(item => item.invoiceId))];
 
-                await this.prismaService.invoicePayment.deleteMany({
-                    where: { paymentId: id }
+                const invoicesWithPayments = await this.prismaService.invoice.findMany({
+                    where: { id: { in: invoiceIds } },
+                    include: { InvoicePayment: { select: { amount: true } } }
                 });
 
-                for (const invoiceId of invoiceIds) {
-                    const invoice = await this.prismaService.invoice.findUnique({
-                        where: { id: invoiceId },
-                        include: {
-                            InvoicePayment: {
-                                select: { amount: true }
-                            }
-                        }
-                    });
-
-                    if (!invoice) {
-                        continue;
-                    }
-
+                const invoiceUpdates = invoicesWithPayments.map(invoice => {
                     const remaining = calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
-                    await this.prismaService.invoice.update({
-                        where: { id: invoice.id },
-                        data: {
-                            status: remaining <= 2 ? 'Pagado' : 'Pendiente'
-                        }
-                    });
-                }
+                    return {
+                        id: invoice.id,
+                        status: (remaining <= 2 ? 'Pagado' : 'Pendiente') as InvoiceStatus
+                    };
+                });
+
+                await this.prismaService.$transaction(async (tx) => {
+                    await tx.invoicePayment.deleteMany({ where: { paymentId: id } });
+
+                    for (const update of invoiceUpdates) {
+                        await tx.invoice.update({
+                            where: { id: update.id },
+                            data: { status: update.status }
+                        });
+                    }
+                });
             }
 
-            await this.prismaService.payment.delete({
-                where: { id }
-            })
-            baseResponse.message = 'Pago eliminado exitosamente';
-            return baseResponse;
+            await this.prismaService.payment.delete({ where: { id } });
+            return { message: 'Pago eliminado exitosamente', success: true };
         } catch (err: unknown) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            badResponse.message = errMsg;
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
@@ -1295,355 +1254,47 @@ export class PaymentsService {
     async validateAssociatedPaymentsInvoices() {
         try {
             let invoicesAffected = 0;
-            let invoicesAffectedData = [];
-            let messages = [];
-            // Obtener todas las facturas con sus pagos
+            const messages: string[] = [];
+
             const allInvoices = await this.prismaService.invoice.findMany({
-                include: {
-                    InvoicePayment: true,
-                },
+                include: { InvoicePayment: true },
                 where: {
-                    status: {
-                        notIn: ['Pagado', 'Cancelada', 'Creada']
-                    }
+                    status: { notIn: ['Pagado', 'Cancelada', 'Creada'] }
                 }
             });
+
+            const toUpdate: { id: number; status: InvoiceStatus }[] = [];
 
             for (const invoice of allInvoices) {
-                // Sumar los montos pagados
-                const totalPaid = invoice.InvoicePayment.reduce((sum, payment) => {
-                    return sum + Number(payment.amount);
-                }, 0);
-
-                // Calcular lo que queda por pagar
+                const totalPaid = invoice.InvoicePayment.reduce((sum, payment) => sum + Number(payment.amount), 0);
                 const remaining = Number(invoice.totalAmount) - totalPaid;
+
                 if (remaining < 0) {
                     messages.push(`Factura #${invoice.controlNumber} tiene un saldo negativo: ${remaining}`);
-                    continue; // O manejar el error de otra manera
+                    continue;
                 }
-                // Determinar nuevo estado
-                const newStatus = remaining === 0 ? 'Pagado' : 'Pendiente';
 
-                // Verificar si hay cambios necesarios
+                const newStatus = (remaining === 0 ? 'Pagado' : 'Pendiente') as InvoiceStatus;
                 if (invoice.status !== newStatus) {
+                    toUpdate.push({ id: invoice.id, status: newStatus });
                     invoicesAffected++;
-                    invoicesAffectedData.push(invoice)
-                    await this.prismaService.invoice.update({
-                        where: { id: invoice.id },
-                        data: {
-                            status: newStatus,
-                        },
-                    });
                 }
             }
 
-            // baseResponse.data = { invoices: invoicesAffectedData, message: messages };
-            baseResponse.message = `Se actualizaron ${invoicesAffected} facturas.`;
-            return baseResponse;
+            if (toUpdate.length > 0) {
+                await this.prismaService.$transaction(
+                    toUpdate.map(u =>
+                        this.prismaService.invoice.update({
+                            where: { id: u.id },
+                            data: { status: u.status }
+                        })
+                    )
+                );
+            }
+
+            return { message: `Se actualizaron ${invoicesAffected} facturas.`, success: true };
         } catch (error) {
-            console.error('Error al validar facturas:', error);
             throw new Error('No se pudo completar la validación de facturas');
         }
-    }
-
-    async saveDataExcelPaymentsNew(payments: PaymentParseExcel[]) {
-        const accounts = await this.prismaService.accountsPayments.findMany();
-        const dolarHistory = await this.prismaService.historyDolar.findMany();
-        const invoicesDB = await this.prismaService.invoice.findMany();
-        const dolarBase = await this.productService.getDolar();
-
-        try {
-            payments.map(async (item) => {
-                let findAccount;
-                const normalizeBank = item.bank ? item.bank.toString().toLowerCase().trim() : ''
-                const findDolar = dolarHistory.find(data => Number(data.dolar).toFixed(2) == Number(item.dolar).toFixed(2));
-
-                switch (normalizeBank) {
-                    case 'bnscfrancs':
-                        findAccount = accounts.find(data => data.bank == 'Banesco' && data.name == 'Francisco')
-                        break;
-                    case 'bnc':
-                        findAccount = accounts.find(data => data.bank == 'BNC' && data.name == 'Adriani')
-                        break;
-                    case 'bncant':
-                        findAccount = accounts.find(data => data.bank == 'BNC' && data.name == 'Antonio')
-                        break;
-                    case 'bnscjose':
-                        findAccount = accounts.find(data => data.bank == 'Banesco' && data.name == 'Jose')
-                        break;
-                    case 'divisa':
-                        findAccount = accounts.find(data => data.bank == 'Divisa' && data.name == 'Adriani')
-                        break;
-                    case 'bolivares':
-                        findAccount = accounts.find(data => data.bank == 'Divisa Bs' && data.name == 'Adriani')
-                        break;
-                    case 'mercantil':
-                        findAccount = accounts.find(data => data.bank == 'Mercantil' && data.name == 'Adriani')
-                        break;
-                    case 'provincial':
-                        findAccount = accounts.find(data => data.bank == 'Provincial' && data.name == 'Adriani')
-                        break;
-                    case 'venezuela':
-                        findAccount = accounts.find(data => data.bank == 'Venezuela' && data.name == 'Adriani')
-                        break;
-                    case 'vnzlfrancs':
-                        findAccount = accounts.find(data => data.bank == 'Venezuela' && data.name == 'Francisco')
-                        break;
-                    case 'zelle':
-                        findAccount = accounts.find(data => data.bank == 'Zelle' && data.name == 'Adriani')
-                        break;
-                    default:
-                        findAccount = {
-                            id: 13,
-                            method: {
-                                currency: 'USD'
-                            }
-                        }
-                }
-
-                if (!item.controlNumber) {
-                    return;
-                }
-                const findInvoices = invoicesDB.find(data => data.controlNumber === item.controlNumber.toString().padStart(4, '0'))
-
-                if (!findInvoices) {
-                    return;
-                }
-
-                const savePayments = await this.prismaService.payment.create({
-                    data: {
-                        amount: item.amount ? item.amount : item.total,
-                        reference: item.reference ? item.reference.toString() : '',
-                        accountId: findAccount.id,
-                        dolarId: findDolar ? findDolar.id : dolarBase.id,
-                        status: 'CONFIRMED' as PaymentStatus,
-                        paymentDate: new Date(item.date),
-                    }
-                })
-
-                const associate = await this.prismaService.invoicePayment.create({
-                    data: {
-                        invoiceId: findInvoices.id,
-                        paymentId: savePayments.id,
-                        amount: savePayments.amount
-                    }
-                })
-
-                const setStatus = Number(findInvoices.totalAmount).toFixed(2) == Number(findAccount.method.currency === 'USD' ? savePayments.amount : Number(savePayments.amount) / Number(findDolar.dolar)).toFixed(2) ? 'Pagado' : 'Pendiente'
-
-                await this.prismaService.invoice.update({
-                    data: { status: setStatus },
-                    where: { id: associate.invoiceId }
-                })
-            })
-
-
-            baseResponse.message = 'Pagos, dolar y asociación guardados exitosamente.';
-            return baseResponse;
-        } catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
-        }
-    }
-
-    async saveDataExcelPaymentsAssociate(payments: PaymentParseExcel[]) {
-        const accounts = await this.prismaService.accountsPayments.findMany();
-        const dolarHistory = await this.prismaService.historyDolar.findMany();
-        const invoicesDB = await this.prismaService.invoice.findMany();
-        const paymentsDB = await this.prismaService.payment.findMany();
-        const paymentsBsDB = await this.prismaService.payment.findMany({ where: { account: { method: { currency: 'BS' } } } });
-
-        const paymentsData = payments.map(item => {
-            let findAccount;
-            const normalizeBank = item.bank.toLowerCase().trim()
-            const findDolar = dolarHistory.find(data => Number(data.dolar).toFixed(2) == Number(item.dolar).toFixed(2));
-            const findInvoices = invoicesDB.find(data => data.controlNumber === item.controlNumber.toString().padStart(4, '0'))
-
-            switch (normalizeBank) {
-                case 'bnscfrancs':
-                    findAccount = accounts.find(data => data.bank == 'Banesco' && data.name == 'Francisco')
-                    break;
-                case 'bnc':
-                    findAccount = accounts.find(data => data.bank == 'BNC' && data.name == 'Adriani')
-                    break;
-                case 'bncant':
-                    findAccount = accounts.find(data => data.bank == 'BNC' && data.name == 'Antonio')
-                    break;
-                case 'bnscjose':
-                    findAccount = accounts.find(data => data.bank == 'Banesco' && data.name == 'Jose')
-                    break;
-                case 'divisa':
-                    findAccount = accounts.find(data => data.bank == 'Divisa' && data.name == 'Adriani')
-                    break;
-                case 'bolivares':
-                    findAccount = accounts.find(data => data.bank == 'Divisa Bs' && data.name == 'Adriani')
-                    break;
-                case 'mercantil':
-                    findAccount = accounts.find(data => data.bank == 'Mercantil' && data.name == 'Adriani')
-                    break;
-                case 'provincial':
-                    findAccount = accounts.find(data => data.bank == 'Provincial' && data.name == 'Adriani')
-                    break;
-                case 'venezuela':
-                    findAccount = accounts.find(data => data.bank == 'Venezuela' && data.name == 'Adriani')
-                    break;
-                case 'vnzlfrancs':
-                    findAccount = accounts.find(data => data.bank == 'Venezuela' && data.name == 'Francisco')
-                    break;
-                case 'zelle':
-                    findAccount = accounts.find(data => data.bank == 'Zelle' && data.name == 'Adriani')
-                    break;
-                default:
-                    findAccount = { id: 13 }
-            }
-
-            if (!findInvoices) {
-                console.log(`No se encontro factura ${item.controlNumber.toString().padStart(4, '0')}, total: ${item.amount}`);
-                return;
-            }
-
-            const parseAmountPay = Number(item.amount ? (item.amount / Number(findDolar.dolar)) : item.total).toFixed(2);
-
-            const findPayments = paymentsDB.find(data =>
-                data.accountId == findAccount.id &&
-                data.dolarId == findDolar.id &&
-                data.paymentDate == new Date(item.date) &&
-                Number(findAccount.method.currency == 'USD' ? data.amount : (Number(data.amount) * Number(findDolar.dolar)).toFixed(2) == parseAmountPay)
-            )
-
-            const findPaymentsBs = paymentsBsDB.find(data => data.reference == item.reference)
-
-            const selectedPayment = findPaymentsBs || findPayments;
-
-            if (!selectedPayment) {
-                const dataFilter = {
-                    accounts: findAccount.id,
-                    dolar: findDolar?.id,
-                    date: new Date(item.date),
-                    amount: item.amount,
-                    amountParse: parseAmountPay,
-                    other: findPaymentsBs,
-                };
-
-                throw new Error(`No se encontró el pago para la factura #${item.controlNumber}`);
-            }
-
-            if (!findDolar) console.warn('❌ Dólar no encontrado:', item.dolar);
-            if (!findInvoices) console.warn('❌ Factura no encontrada:', item.controlNumber);
-            if (!findPayments && !findPaymentsBs) console.warn('❌ Pago no encontrado:', item);
-
-
-            return {
-                invoiceId: findInvoices.id,
-                paymentId: selectedPayment.id,
-                amount: selectedPayment.amount,
-                status: Number(findInvoices.totalAmount).toFixed(2) === Number(findPayments.amount).toFixed(2) ? 'Pagada' : 'Pendiente'
-            }
-        })
-
-        try {
-            await this.prismaService.invoicePayment.createMany({
-                data: paymentsData
-            })
-
-            paymentsData.filter(item => item != null).map(async (data) => {
-                await this.prismaService.invoice.update({
-                    data: { status: data.status as InvoiceStatus },
-                    where: { id: data.invoiceId }
-                })
-            })
-
-            baseResponse.message = 'Pagos asociación guardados exitosamente.';
-            return baseResponse;
-        } catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
-        }
-    }
-
-    async saveDataExcelPayments(payments: PaymentParseExcel[]) {
-        const dataPayments = payments.map(pay => {
-            return {
-                date: pay.date,
-                controlNumber: pay.controlNumber ? pay.controlNumber.toString().padStart(4, '0') : '',
-                amount: Number(Number(pay.amount).toFixed(2)),
-                bank: pay.bank,
-                client: pay.client,
-                dolar: Number(Number(pay.dolar).toFixed(2)),
-                total: Number(Number(pay.total).toFixed(2)),
-                reference: pay.reference ? pay.reference : ''
-            }
-        });
-
-        const invoicesDB = await this.prismaService.invoice.findMany();
-        const paymentsDB = await this.prismaService.payment.findMany();
-
-        try {
-            const updatePaymentsInvoices = dataPayments.map(data => {
-                const totalPayInvoice = Number(data.amount / data.dolar).toFixed(2);
-                const findInvoice = invoicesDB.find(item => item.controlNumber == data.controlNumber);
-                const findPayment = paymentsDB.filter(pay => pay.reference != null || pay.reference != '').find(item => item.reference == data.reference);
-
-                if (!findInvoice) {
-                    return null
-                }
-                const setStatusInvoice = Number(totalPayInvoice) === Number(findInvoice.totalAmount)
-                    ? 'Pagado'
-                    : 'Pendiente';
-
-                return {
-                    invoiceId: findInvoice.id,
-                    paymentId: findPayment.id,
-                    status: setStatusInvoice
-                }
-            })
-
-            updatePaymentsInvoices.filter(item => item != null).map(async (data) => {
-                await this.prismaService.invoice.update({
-                    data: { status: data.status as InvoiceStatus },
-                    where: { id: data.invoiceId }
-                })
-            })
-            baseResponse.message = 'Pagos, dolar y asociación guardados exitosamente.';
-            return baseResponse;
-        } catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
-        }
-    }
-
-    async saveDolarHistory(dolarData: DolarData[]) {
-        try {
-            await this.prismaService.historyDolar.createMany({
-                data: dolarData
-            });
-
-            baseResponse.message = 'Historial del dolar cargado';
-            return baseResponse;
-        } catch (error: unknown) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            badResponse.message = errMsg;
-            return badResponse;
-        }
-    }
-
-    removeDuplicateDolarEntries(data: DolarData[]): DolarData[] {
-        const map = new Map<number, DolarData>();
-
-        for (const item of data) {
-            const current = map.get(item.dolar);
-            const currentDate = current ? new Date(current.date) : null;
-            const newDate = new Date(item.date);
-
-            // Si no existe o si esta fecha es más reciente
-            if (!current || newDate > currentDate) {
-                map.set(item.dolar, item);
-            }
-        }
-
-        return Array.from(map.values());
     }
 }

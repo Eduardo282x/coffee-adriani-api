@@ -5,7 +5,6 @@ import { DetProducts, DTOInvoice, IInvoiceWithDetails, InvoiceStatistics, Option
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
-import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.interfaces';
 // import * as XLSX from 'xlsx';
 import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
@@ -716,34 +715,24 @@ export class InvoicesService {
                 where.status = filter.status as InvoiceStatus;
             }
 
-            const dolar = await this.productService.getDolar();
-            const invoices = await this.prismaService.invoice.findMany({
-                include: {
-                    client: {
-                        include: { block: true }
+            const [dolar, rawInvoices] = await Promise.all([
+                this.productService.getDolar(),
+                this.prismaService.invoice.findMany({
+                    include: {
+                        client: { include: { block: true } },
+                        invoiceItems: { include: { product: true } },
+                        InvoicePayment: { include: { payment: { include: { account: true } } } }
                     },
-                    invoiceItems: {
-                        include: {
-                            product: true
-                        }
-                    },
-                    InvoicePayment: {
-                        include: { payment: { include: { account: true } } }
-                    }
-                },
-                orderBy: {
-                    dispatchDate: 'desc'
-                },
-                where
-            }).then(inv =>
-                inv.map(data => {
-                    return {
-                        ...data,
-                        totalAmount: data.totalAmount.toFixed(2),
-                        remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment).toFixed(2)
-                    }
+                    orderBy: { dispatchDate: 'desc' },
+                    where
                 })
-            )
+            ]);
+
+            const invoices = rawInvoices.map(data => ({
+                ...data,
+                totalAmount: data.totalAmount.toFixed(2),
+                remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment).toFixed(2)
+            }));
 
             const groupedByClient = invoices.reduce((acc, invoice) => {
                 const clientId = invoice.client.id;
@@ -756,7 +745,7 @@ export class InvoicesService {
                 }
 
                 const invoiceWithoutClient = { ...invoice };
-                delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
+                delete invoiceWithoutClient.client;
                 acc[clientId].invoices.push(invoiceWithoutClient);
                 return acc;
             }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
@@ -784,8 +773,7 @@ export class InvoicesService {
             await this.prismaService.errorMessages.create({
                 data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
@@ -956,52 +944,51 @@ export class InvoicesService {
             });
 
             const clientReminderList = await this.prismaService.clientReminder.findMany();
+            const existingReminderClientIds = new Set(clientReminderList.map(cr => cr.clientId));
 
-            const invoicesModify = {
-                pending: 0,
-                expired: 0
-            }
+            const toPending = invoices.filter(inv =>
+                this.isDateExpired(inv.dispatchDate) && inv.status === 'Creada'
+            );
 
-            invoices.map(async (inv) => {
-                if (this.isDateExpired(inv.dispatchDate) && inv.status == 'Creada') {
-                    await this.prismaService.invoice.update({
-                        where: { id: inv.id },
+            const toExpired = invoices.filter(inv =>
+                this.isDateExpired(inv.dueDate) &&
+                (inv.status === 'Pendiente' || inv.status === 'Creada' || inv.status === 'Vencida')
+            );
+
+            const needReminder = toExpired.filter(inv =>
+                !existingReminderClientIds.has(inv.clientId)
+            );
+
+            await this.prismaService.$transaction(async (tx) => {
+                if (toPending.length > 0) {
+                    await tx.invoice.updateMany({
+                        where: { id: { in: toPending.map(i => i.id) } },
                         data: { status: 'Pendiente' }
                     });
-
-                    invoicesModify.pending += 1;
                 }
 
-                if (this.isDateExpired(inv.dueDate) && (inv.status == 'Pendiente' || inv.status == 'Creada' || inv.status == 'Vencida')) {
-                    await this.prismaService.invoice.update({
-                        where: { id: inv.id },
+                if (toExpired.length > 0) {
+                    await tx.invoice.updateMany({
+                        where: { id: { in: toExpired.map(i => i.id) } },
                         data: { status: 'Vencida' }
                     });
+                }
 
-                    const findClientReminder = clientReminderList.find(item => item.clientId == inv.clientId);
-
-                    if (findClientReminder) {
-                        return;
-                    }
-
-                    await this.prismaService.clientReminder.create({
-                        data: {
+                if (needReminder.length > 0) {
+                    await tx.clientReminder.createMany({
+                        data: needReminder.map(inv => ({
                             clientId: inv.clientId,
                             messageId: 1,
                             send: true,
-                        }
-                    })
-
-                    invoicesModify.expired += 1;
+                        }))
+                    });
                 }
             });
 
             await this.generateInactivityNotifications();
-            baseResponse.message = 'Facturas verificadas y agregadas a cobranza.'
-            return baseResponse;
+            return { message: 'Facturas verificadas y agregadas a cobranza.', success: true };
         } catch (err) {
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
@@ -1017,6 +1004,8 @@ export class InvoicesService {
             });
 
             const now = new Date();
+            const staleClientIds: number[] = [];
+            const notificationsToCreate: { clientId: number; type: string; message: string; seen: boolean }[] = [];
 
             for (const client of clients) {
                 const lastInvoice = client.invoices && client.invoices[0];
@@ -1025,33 +1014,27 @@ export class InvoicesService {
                 const threshold = addDays(new Date(lastInvoice.dueDate), 7);
                 if (threshold > now) continue;
 
-                // Eliminar notificaciones previas de inactividad para este cliente
-                await this.prismaService.notification.deleteMany({
-                    where: {
-                        clientId: client.id,
-                        type: 'inactivity',
-                    },
+                staleClientIds.push(client.id);
+                notificationsToCreate.push({
+                    clientId: client.id,
+                    type: 'inactivity',
+                    message: `El Cliente ${client.name} no tiene pedidos desde ${format(new Date(lastInvoice.dueDate), 'dd/MM/yyyy')}`,
+                    seen: false,
                 });
+            }
 
-                const message = `El Cliente ${client.name} no tiene pedidos desde ${format(
-                    new Date(lastInvoice.dueDate),
-                    'dd/MM/yyyy',
-                )}`;
-
-                await this.prismaService.notification.create({
-                    data: {
-                        clientId: client.id,
-                        type: 'inactivity',
-                        message,
-                        seen: false,
-                    },
+            if (staleClientIds.length > 0) {
+                await this.prismaService.$transaction(async (tx) => {
+                    await tx.notification.deleteMany({
+                        where: { clientId: { in: staleClientIds }, type: 'inactivity' }
+                    });
+                    await tx.notification.createMany({ data: notificationsToCreate });
                 });
             }
         } catch (error) {
             await this.prismaService.errorMessages.create({
                 data: { message: (error instanceof Error ? error.message : String(error)), from: 'ClientService - InactivityNotifications' }
             });
-            console.error('Error generating inactivity notifications:', error instanceof Error ? error.message : String(error));
         }
     }
 
@@ -1185,34 +1168,6 @@ export class InvoicesService {
         return calculateFinalTotal;
     }
 
-    setTotalProducts = (invoices: IInvoiceWithDetails[], type: string) => {
-        const totalPackage = invoices.reduce((acc, invoice) => {
-            const total = invoice.status === 'Creada' || invoice.status == 'Pendiente'
-                ? invoice.invoiceItems.reduce((acc, item) => acc + Number(item.quantity), 0)
-                : 0;
-            return acc + total;
-        }, 0);
-
-    }
-
-    // async checkInvoice() {
-    //     const invoices = await this.prismaService.invoice.findMany({
-    //         include: {
-    //             client: true,
-    //             invoiceItems: true
-    //         }
-    //     })
-
-    //     invoices.map(async (inv) => {
-    //         if (this.isDateExpired(inv.dueDate)) {
-    //             await this.prismaService.invoice.update({
-    //                 where: { id: inv.id },
-    //                 data: { status: 'Vencida' }
-    //             })
-    //         }
-    //     })
-    // }
-
     isDateExpired(dueDate: Date): boolean {
         const today = new Date();
         const cleanDueDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
@@ -1260,26 +1215,25 @@ export class InvoicesService {
 
     async createInvoice(newInvoice: DTOInvoice) {
         try {
-            const findDuplicateControlNumber = await this.prismaService.invoice.findFirst({
-                where: { controlNumber: newInvoice.controlNumber },
-                include: { client: true }
-            })
+            const [findDuplicateControlNumber, inventory] = await Promise.all([
+                this.prismaService.invoice.findFirst({
+                    where: { controlNumber: newInvoice.controlNumber },
+                    include: { client: true }
+                }),
+                this.inventoryService.getInventory()
+            ]);
 
             if (findDuplicateControlNumber) {
-                badResponse.message = `Ya existe una factura con ese numero de control del cliente ${findDuplicateControlNumber.client.name}`
-                return badResponse;
+                return { message: `Ya existe una factura con ese numero de control del cliente ${findDuplicateControlNumber.client.name}`, success: false };
             }
-
-            const products = await this.productService.getProducts();
-            const inventory = await this.inventoryService.getInventory();
 
             const productInvalid = newInvoice.details.map(det => {
                 const findProduct = inventory.find(prod => prod.productId === det.productId);
 
-                if (det.quantity > findProduct.quantity) {
+                if (!findProduct || det.quantity > findProduct.quantity) {
                     return {
-                        product: findProduct.product.name,
-                        quantity: findProduct.quantity,
+                        product: findProduct?.product?.name || 'Desconocido',
+                        quantity: findProduct?.quantity || 0,
                         amount: det.quantity
                     }
                 } else {
@@ -1288,39 +1242,38 @@ export class InvoicesService {
             })
 
             if (productInvalid.filter(pro => pro !== null).length > 0) {
-                badResponse.message = 'Estos productos exceden la cantidad que existe en inventario.'
-                return badResponse;
+                return { message: 'Estos productos exceden la cantidad que existe en inventario.', success: false };
             }
+
+            const calculateTotalInvoice = newInvoice.details
+                .filter(item => (item.type || 'SALE') === 'SALE')
+                .reduce((acc, det) => acc + Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity), 0);
 
             const saveInvoice = await this.prismaService.invoice.create({
                 data: {
                     clientId: newInvoice.clientId,
                     controlNumber: newInvoice.controlNumber,
-                    status: 'Creada',
+                    status: calculateTotalInvoice === 0 ? 'Pagado' : 'Creada',
                     dispatchDate: newInvoice.dispatchDate,
                     dueDate: newInvoice.dueDate,
                     consignment: newInvoice.consignment,
-                    totalAmount: 0
+                    totalAmount: calculateTotalInvoice
                 }
             })
 
-            const dataDetailsInvoice = newInvoice.details.map(det => {
-                return {
-                    invoiceId: saveInvoice.id,
-                    productId: det.productId,
-                    quantity: det.quantity,
-                    type: det.type || 'SALE', // Default to 'SALE' if not provided
-                    unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
-                    unitPriceUSD: Number(det.priceUSD),
-                    subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
-                }
-            })
+            const dataDetailsInvoice = newInvoice.details.map(det => ({
+                invoiceId: saveInvoice.id,
+                productId: det.productId,
+                quantity: det.quantity,
+                type: det.type || 'SALE',
+                unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+                unitPriceUSD: Number(det.priceUSD),
+                subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
+            }));
 
-            await this.prismaService.invoiceProduct.createMany({
-                data: dataDetailsInvoice
-            })
+            await this.prismaService.invoiceProduct.createMany({ data: dataDetailsInvoice });
 
-            const saveInventory = {
+            await this.inventoryService.updateInventoryInvoice({
                 controlNumber: saveInvoice.controlNumber,
                 description: `Salida de producto por factura ${saveInvoice.controlNumber}`,
                 date: saveInvoice.dispatchDate,
@@ -1328,21 +1281,8 @@ export class InvoicesService {
                     productId: det.productId,
                     quantity: det.quantity,
                 }))
-            }
-
-            await this.inventoryService.updateInventoryInvoice(saveInventory)
-
-            const calculateTotalInvoice = dataDetailsInvoice.filter(item => item.type == 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
-
-            await this.prismaService.invoice.update({
-                where: { id: saveInvoice.id },
-                data: {
-                    status: calculateTotalInvoice == 0 ? 'Pagado' : 'Creada',
-                    totalAmount: calculateTotalInvoice,
-                }
             });
 
-            // Eliminar notificación de inactividad si existe
             await this.prismaService.notification.deleteMany({
                 where: {
                     clientId: newInvoice.clientId,
@@ -1352,22 +1292,18 @@ export class InvoicesService {
 
             this.notifyInvoiceCreated(saveInvoice.id, newInvoice.clientId, newInvoice.controlNumber, calculateTotalInvoice);
 
-            baseResponse.message = 'Factura creada correctamente';
-            return baseResponse;
+            return { message: 'Factura creada correctamente', success: true };
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
                 data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
     async updateInvoice(id: number, newInvoice: DTOInvoice) {
         try {
-            const products = await this.productService.getProducts();
-
             const invoice = await this.prismaService.invoice.findUnique({
                 where: { id },
                 include: {
@@ -1376,90 +1312,86 @@ export class InvoicesService {
             });
 
             if (!invoice) {
-                badResponse.message = 'Factura no encontrada';
-                return badResponse;
+                return { message: 'Factura no encontrada', success: false };
             }
 
-            await this.prismaService.invoice.update({
-                where: { id },
-                data: {
-                    clientId: newInvoice.clientId,
-                    controlNumber: newInvoice.controlNumber,
-                    dispatchDate: newInvoice.dispatchDate,
-                    dueDate: newInvoice.dueDate,
-                    consignment: newInvoice.consignment,
-                }
+            const dataDetailsInvoice = newInvoice.details.map(det => ({
+                invoiceId: id,
+                productId: det.productId,
+                quantity: det.quantity,
+                type: det.type || 'SALE',
+                unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+                unitPriceUSD: Number(det.priceUSD),
+                subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
+            }));
+
+            const totalAmount = dataDetailsInvoice.filter(item => item.type === 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
+
+            await this.prismaService.$transaction(async (tx) => {
+                await tx.invoice.update({
+                    where: { id },
+                    data: {
+                        clientId: newInvoice.clientId,
+                        controlNumber: newInvoice.controlNumber,
+                        dispatchDate: newInvoice.dispatchDate,
+                        dueDate: newInvoice.dueDate,
+                        consignment: newInvoice.consignment,
+                        totalAmount,
+                    }
+                });
+
+                await tx.invoiceProduct.deleteMany({ where: { invoiceId: id } });
+
+                await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
             });
 
-            // if (invoice.invoiceItems.length === newInvoice.details.length) {
-            const dataDetailsInvoice = newInvoice.details.map(det => {
-                return {
-                    invoiceId: id,
-                    productId: det.productId,
-                    quantity: det.quantity,
-                    type: det.type || 'SALE', // Default to 'SALE' if not provided
-                    unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
-                    unitPriceUSD: Number(det.priceUSD),
-                    subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
-                }
-            });
-
-            await this.prismaService.invoiceProduct.deleteMany({
-                where: { invoiceId: id }
-            })
-
-            await this.prismaService.invoiceProduct.createMany({
-                data: dataDetailsInvoice
-            });
-
-            const totalAmount = dataDetailsInvoice.filter(item => item.type == 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0)
-
-            await this.prismaService.invoice.update({
-                data: {
-                    totalAmount: totalAmount,
-                },
-                where: { id }
-            })
-
-            baseResponse.message = 'Factura actualizada correctamente';
-            return baseResponse;
+            return { message: 'Factura actualizada correctamente', success: true };
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
                 data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
     async updateInvoiceDet() {
         try {
-            const getDetailsInvoice = await this.prismaService.invoiceProduct.findMany();
-            const historyProduct = await this.prismaService.historyProduct.findMany();
+            const [getDetailsInvoice, historyProduct] = await Promise.all([
+                this.prismaService.invoiceProduct.findMany(),
+                this.prismaService.historyProduct.findMany()
+            ]);
 
+            const toUpdate: { id: number; unitPriceUSD: number }[] = [];
             let notFound = 0;
-            getDetailsInvoice.map(async (item) => {
+
+            for (const item of getDetailsInvoice) {
                 const findProductHistory = historyProduct.find(data =>
                     Number(data.price).toFixed(2) === Number(item.unitPrice).toFixed(2)
-                )
+                );
 
                 if (!findProductHistory || !findProductHistory.priceUSD) {
                     notFound += 1;
                 } else {
-                    await this.prismaService.invoiceProduct.update({
-                        data: { unitPriceUSD: findProductHistory.priceUSD },
-                        where: { id: item.id }
-                    })
+                    toUpdate.push({ id: item.id, unitPriceUSD: Number(findProductHistory.priceUSD) });
                 }
-            })
+            }
 
-            baseResponse.message = 'Detalles actualizados.'
-            return baseResponse;
+            if (toUpdate.length > 0) {
+                await this.prismaService.$transaction(
+                    toUpdate.map(u =>
+                        this.prismaService.invoiceProduct.update({
+                            data: { unitPriceUSD: u.unitPriceUSD },
+                            where: { id: u.id }
+                        })
+                    )
+                );
+            }
+
+            return { message: `Detalles actualizados. ${toUpdate.length} actualizados, ${notFound} sin coincidencia.`, success: true };
 
         } catch (err) {
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
@@ -1510,8 +1442,7 @@ export class InvoicesService {
             });
 
             if (!invoice) {
-                badResponse.message = 'Factura no encontrada';
-                return badResponse;
+                return { message: 'Factura no encontrada', success: false };
             }
 
             const findInvoicePayment = await this.prismaService.invoicePayment.findFirst({
@@ -1519,250 +1450,55 @@ export class InvoicesService {
             })
 
             if (findInvoicePayment) {
-                badResponse.message = 'Esta factura ya se encuentra paga.';
-                return badResponse;
+                return { message: 'Esta factura ya se encuentra paga.', success: false };
             }
 
             const detInvoice = await this.prismaService.invoiceProduct.findMany({
                 where: { invoiceId: id }
             });
 
-            detInvoice.map(async (det) => {
-                const findInventory = await this.prismaService.inventory.findFirst({
-                    where: { productId: det.productId }
-                });
+            await this.prismaService.$transaction(async (tx) => {
+                for (const det of detInvoice) {
+                    const findInventory = await tx.inventory.findFirst({
+                        where: { productId: det.productId }
+                    });
 
-                if (findInventory) {
-                    await this.prismaService.inventory.update({
-                        where: { id: findInventory.id },
-                        data: { quantity: Number(findInventory.quantity) + Number(det.quantity) }
-                    })
-                    await this.prismaService.historyInventory.create({
-                        data: {
-                            productId: findInventory.productId,
-                            quantity: Number(det.quantity),
-                            description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
-                            movementType: 'ADJUSTMENT'
-                        }
-                    })
+                    if (findInventory) {
+                        await tx.inventory.update({
+                            where: { id: findInventory.id },
+                            data: { quantity: Number(findInventory.quantity) + Number(det.quantity) }
+                        })
+                        await tx.historyInventory.create({
+                            data: {
+                                productId: findInventory.productId,
+                                quantity: Number(det.quantity),
+                                description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
+                                movementType: 'ADJUSTMENT'
+                            }
+                        })
+                    }
                 }
-            })
 
-            await this.prismaService.invoiceProduct.deleteMany({
-                where: { invoiceId: invoice.id }
-            })
+                await tx.invoiceProduct.deleteMany({
+                    where: { invoiceId: invoice.id }
+                })
 
-            await this.prismaService.invoice.delete({
-                where: { id: invoice.id }
-            })
+                await tx.invoice.delete({
+                    where: { id: invoice.id }
+                })
+            });
 
-            baseResponse.message = 'Factura eliminada correctamente';
-            return baseResponse;
+            return { message: 'Factura eliminada correctamente', success: true };
 
         } catch (err) {
             await this.prismaService.errorMessages.create({
                 data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
             })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
+            return { message: err instanceof Error ? err.message : String(err), success: false };
         }
     }
 
     // ----------------------------------------------------------------
-
-    async syncInvoiceExcel(invoices: ExcelTransformV2[]) {
-        const existingInvoices = await this.prismaService.invoice.findMany();
-
-        // Normalizamos los controlNumbers existentes con padding
-        const existingControlNumbers = new Set(
-            existingInvoices.map(inv => inv.controlNumber.toString().padStart(4, '0'))
-        );
-
-        // Filtramos solo los que no existen aún
-        const newInvoices = invoices.filter(inv => {
-            const controlNum = inv.controlNumber.toString().padStart(4, '0');
-            return !existingControlNumbers.has(controlNum);
-        });
-
-        // Si no hay facturas nuevas, salimos
-        if (newInvoices.length === 0) {
-            return {
-                success: false,
-                message: 'Todas las facturas ya existen en la base de datos.',
-            };
-        }
-
-        try {
-            const clients = await this.clientService.getClients();
-
-            const dataInvoice = invoices.map((data, index) => {
-                const findClient = clients.find(item => item.name.toLowerCase().trim() == data.client.toLowerCase().trim());
-
-                if (!findClient) {
-                    throw new Error(`Cliente no encontrado para la factura #${data.controlNumber} (cliente: ${data.client})`);
-                }
-
-                return {
-                    consignment: data.consignment,
-                    controlNumber: data.controlNumber.toString().padStart(4, '0'),
-                    dispatchDate: new Date(data.dispatchDate),
-                    dueDate: new Date(data.dueDate),
-                    status: 'Creada' as InvoiceStatus,
-                    totalAmount: data.totalAmount,
-                    clientId: findClient.id,
-                }
-            })
-
-            await this.prismaService.invoice.createMany({
-                data: dataInvoice
-            });
-
-            baseResponse.message = 'Facturas guardadas exitosamente.';
-            return baseResponse;
-        } catch (err) {
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    async validateClient(invoice: ExcelTransformV2[]) {
-        const clients = await this.clientService.getClients();
-
-        const dataInvoice = invoice.map(data => {
-            const findClient = clients.find(item => item.name.trim() == data.client.trim());
-
-            return {
-                consignment: data.consignment,
-                controlNumber: data.controlNumber.toString().padStart(4, '0'),
-                dispatchDate: new Date(data.dispatchDate),
-                dueDate: new Date(data.dueDate),
-                status: 'Creada' as InvoiceStatus,
-                totalAmount: data.totalAmount,
-                clientId: findClient ? findClient.id : 0,
-            }
-        })
-        return dataInvoice
-    }
-
-    findDuplicateControlNumbers(data: ExcelTransformV2[]): ExcelTransformV2[] {
-        const countMap = new Map<number, number>();
-        const duplicates: ExcelTransformV2[] = [];
-
-        // Contamos cuántas veces aparece cada controlNumber
-        for (const item of data) {
-            countMap.set(item.controlNumber, (countMap.get(item.controlNumber) || 0) + 1);
-        }
-
-        // Filtramos los elementos que están duplicados
-        for (const item of data) {
-            if (countMap.get(item.controlNumber)! > 1) {
-                duplicates.push(item);
-            }
-        }
-
-        return duplicates;
-    };
-
-    async syncDetInvoiceExcel(devInvoice: DetInvoiceDataExcel[]) {
-        const validDevInvoice = devInvoice.filter(d => d.product && d.invoice);
-        const products = await this.productService.getProducts();
-        const invoices = await this.prismaService.invoice.findMany();
-
-        const findDuplicate = this.findDuplicateInvoiceProducts(validDevInvoice);
-        if (findDuplicate.duplicates.length > 0) {
-            return {
-                data: findDuplicate
-            }
-        }
-
-        const dataDetInvoice = validDevInvoice.map(data => {
-            const findProduct = products.find(item => item.name.toString().toLowerCase().trim() == data.product.toString().toLowerCase().trim());
-            const findInvoice = invoices.find(item => item.controlNumber.toString().padStart(4, '0') == data.invoice.toString().padStart(4, '0'));
-
-            if (!findInvoice || !findProduct) {
-                throw new Error(`Producto no encontrado para la factura #${data.invoice} (producto: ${data.product})`);
-            }
-
-            return {
-                invoiceId: findInvoice.id,
-                productId: findProduct.id,
-                quantity: data.quantity,
-                subtotal: data.subtotal,
-                unitPrice: data.unitPrice,
-                unitPriceUSD: data.unitPrice,
-            }
-        })
-
-        try {
-            await this.prismaService.invoiceProduct.createMany({
-                data: dataDetInvoice
-            });
-
-            baseResponse.message = 'Facturas y detalles agregados exitosamente.'
-            return baseResponse;
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { from: 'InvoiceServiceExcel', message: err instanceof Error ? err.message : String(err) }
-            })
-            badResponse.message = `Ah ocurrido un error ${err instanceof Error ? err.message : String(err)}`
-            return badResponse;
-        }
-    }
-
-    async syncClientExcelLocal(client: ClientExcel[]) {
-        const parseDataClient = client.map(cli => {
-            return {
-                name: cli.name,
-                rif: cli.rif ? cli.rif.toString() : 'J',
-                address: cli.address ? cli.address : '',
-                phone: cli.phone ? cli.phone.toString().padStart(11, '0') : '',
-                zone: cli.zone,
-                blockId: cli.blockId,
-                active: true,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-            }
-        })
-
-        try {
-            await this.prismaService.client.createMany({
-                data: parseDataClient
-            })
-            baseResponse.message = 'Clientes agregados exitosamente';
-            return baseResponse;
-        } catch (err) {
-            return {
-                message: err instanceof Error ? err.message : String(err),
-                success: false,
-                data: parseDataClient
-            }
-        }
-    }
-
-    findDuplicateInvoiceProducts(data: DetInvoiceDataExcel[]) {
-        const seen = new Map<string, number>();
-        const duplicates: DetInvoiceDataExcel[] = [];
-
-        for (const item of data) {
-            const key = `${item.invoice}-${item.product.trim().toLowerCase()}`;
-
-            if (seen.has(key)) {
-                duplicates.push(item);
-            } else {
-                seen.set(key, 1);
-            }
-        }
-
-        // Lista de invoice únicos que tienen productos duplicados
-        const duplicateInvoices = Array.from(
-            new Set(duplicates.map(d => d.invoice))
-        );
-
-        return {
-            duplicates,         // Registros exactos duplicados
-            duplicateInvoices,  // Lista de invoice con productos repetidos
-        };
-    }
 
     async exportInvoicesToExcelWithExcelJS(dateRange: DashboardExcel): Promise<Buffer> {
         const where: any = {};
