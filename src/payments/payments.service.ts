@@ -528,6 +528,10 @@ export class PaymentsService {
                 } as any;
             });
 
+            // InvoicePayment original (sin filtrar por tipo) para calcular remaining real
+            const originalInvoicePayments = new Map<number, any[]>();
+            payments.forEach(p => originalInvoicePayments.set(p.id, p.InvoicePayment));
+
             const paymentInvoiceWithType = payments.filter(data => data.InvoicePayment.some((ip: any) => !!ip.invoice && Array.isArray(ip.invoice.invoiceItems) && ip.invoice.invoiceItems.some((ii: any) => ii.product?.type === type)));
             const paymentInvoiceWithoutType = payments.filter(data => data.InvoicePayment.some((ip: any) => !!ip.invoice && Array.isArray(ip.invoice.invoiceItems) && ip.invoice.invoiceItems.every((ii: any) => ii.product?.type !== type)));
             const controlNumberInvoicesWihoutType = paymentInvoiceWithoutType.map(item => item.InvoicePayment.map(inv => inv.invoice.controlNumber)).flat();
@@ -574,15 +578,15 @@ export class PaymentsService {
 
             const totalRemainingBs = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
-                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal, 0);
+                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, originalInvoicePayments.get(data.id) || []).remainingOriginal, 0);
 
             const totalRemainingBsInUSD = processedPayments
                 .filter(item => item.account.method.currency === 'BS')
-                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingUSD, 0);
+                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, originalInvoicePayments.get(data.id) || []).remainingUSD, 0);
 
             const totalRemainingUSD = processedPayments
                 .filter(item => item.account.method.currency === 'USD')
-                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, data.InvoicePayment).remainingOriginal, 0);
+                .reduce((acc, data) => acc + calculatePaymentRemaining(data.amount, data.account.method.currency, data.dolar.dolar, originalInvoicePayments.get(data.id) || []).remainingOriginal, 0);
 
             const totalGrossUSD = totalAmountBsInUSD + totalAmountUSD;
 
@@ -618,9 +622,15 @@ export class PaymentsService {
                 ? (totalGrossUSD - otherTypeAllocatedUSD)
                 : totalGrossUSD;
 
-            // Contar asociados/no asociados a partir de los pagos procesados
-            const associatedPayments = processedPayments.filter(p => p.InvoicePayment && p.InvoicePayment.length > 0).length;
-            const unassociatedPayments = processedPayments.filter(p => !p.InvoicePayment || p.InvoicePayment.length === 0).length;
+            // Contar asociados/no asociados y calcular monto USD de no asociados
+            const unassociated = processedPayments.filter(p => !p.InvoicePayment || p.InvoicePayment.length === 0);
+            const associatedPayments = processedPayments.length - unassociated.length;
+            const unassociatedPayments = unassociated.length;
+            const unassociatedAmount = unassociated.reduce((acc, p) => {
+                return acc + (p.account?.method?.currency === 'USD'
+                    ? Number(p.amount)
+                    : Number(p.amount) / Number(p.dolar?.dolar || 1));
+            }, 0);
 
             const [paymentsByMethod, accountsDetails] = await Promise.all([
                 this.prismaService.payment.groupBy({
@@ -653,7 +663,8 @@ export class PaymentsService {
                     total: totalNetUSD,
                     remaining: totalRemainingBsInUSD + totalRemainingUSD,
                     totalRemainingBs,
-                    totalRemainingUSD
+                    totalRemainingUSD,
+                    unassociatedAmount
                 },
                 counts: {
                     total: payments.length,

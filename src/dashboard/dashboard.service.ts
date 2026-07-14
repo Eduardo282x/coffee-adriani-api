@@ -218,7 +218,7 @@ export class DashboardService {
       facturasCentros,
       facturasHastaCierre,
       pagosEnRango,
-      pagosSinAsociarTodos,
+      paymentStatistics,
       currentDolar,
       inventarioMovsAntes
     ] = await Promise.all([
@@ -454,28 +454,11 @@ export class DashboardService {
         orderBy: { paymentDate: 'asc' }
       }),
 
-      // Pagos sin asociar
-      this.prismaService.payment.findMany({
-        where: {
-          paymentDate: { lte: endDatePlusOne },
-          InvoicePayment: { none: {} },
-          account: {
-            type: 'INCOME'
-          }
-        },
-        select: {
-          amount: true,
-          dolar: {
-            select: { dolar: true }
-          },
-          account: {
-            select: {
-              method: {
-                select: { currency: true }
-              }
-            }
-          }
-        }
+      // Estadísticas de pagos (incluye unassociatedAmount)
+      this.paymentsService.getPaymentsStatistics({
+        startDate: format(new Date(2000,1,1), 'yyyy-MM-dd'),
+        endDate: format(new Date(filter.endDate), 'yyyy-MM-dd'),
+        type: filter.type,
       }),
 
       // Dólar actual
@@ -522,10 +505,7 @@ export class DashboardService {
         p.account.method.name.toLowerCase().includes('bs'))
       .reduce((sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)), 0);
 
-    const totalPagosSinAsociar = pagosSinAsociarTodos.reduce(
-      (sum, p) => sum + (p.account.method.currency == 'USD' ? Number(p.amount) : Number(p.amount) / Number(p.dolar.dolar)),
-      0
-    );
+    const totalPagosSinAsociar = paymentStatistics.totals.unassociatedAmount;
 
     // 4. Estadísticas de facturas usando el servicio para consistencia
     const baseStartDate = new Date(2020, 1, 1);
