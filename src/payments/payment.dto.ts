@@ -1,6 +1,6 @@
-import { AccountType } from "@prisma/client";
 import { Transform, Type } from "class-transformer";
 import { IsArray, IsDate, IsNotEmpty, IsOptional, IsNumber, IsPositive, IsString, ValidateNested } from "class-validator";
+import { AccountType } from "src/generated/prisma/enums";
 
 export class PaymentDTO {
     @IsString()

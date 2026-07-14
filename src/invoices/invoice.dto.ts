@@ -1,7 +1,7 @@
 import { Transform, Type } from "class-transformer";
 import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, ValidateNested } from "class-validator";
-import { DTOInventory, DTOInventoryHistory, DTOInventorySimple } from "src/inventory/inventory.dto";
-import { InvoiceStatus } from "@prisma/client";
+import { InvoiceStatus } from "src/generated/prisma/enums";
+import { DTOInventoryHistory, DTOInventorySimple } from "src/inventory/inventory.dto";
 
 export class DTOInvoice {
     @IsNumber()

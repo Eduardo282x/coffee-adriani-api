@@ -354,7 +354,7 @@ export class DashboardService {
         where: {
           dispatchDate: { lte: endDatePlusOne },
           invoiceItems: {
-            every: {
+            some: {
               product: {
                 type: {
                   contains: filter.type,
@@ -467,6 +467,13 @@ export class DashboardService {
           amount: true,
           dolar: {
             select: { dolar: true }
+          },
+          account: {
+            select: {
+              method: {
+                select: { currency: true }
+              }
+            }
           }
         }
       }),
@@ -516,7 +523,7 @@ export class DashboardService {
       .reduce((sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)), 0);
 
     const totalPagosSinAsociar = pagosSinAsociarTodos.reduce(
-      (sum, p) => sum + (Number(p.amount) / Number(p.dolar.dolar)),
+      (sum, p) => sum + (p.account.method.currency == 'USD' ? Number(p.amount) : Number(p.amount) / Number(p.dolar.dolar)),
       0
     );
 

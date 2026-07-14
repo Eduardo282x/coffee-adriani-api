@@ -5,9 +5,9 @@ import { AccountsDTO, PayDisassociateDTO, PayInvoiceDTO, PaymentDTO } from './pa
 import { ProductsService } from 'src/products/products.service';
 import { BankData } from './payments.data';
 import { PaymentParseExcel } from 'src/excel/excel.interfaces';
-import { InvoiceStatus, PaymentStatus } from '@prisma/client';
 import { calculateInvoiceRemainingUsd, calculatePaymentRemaining } from 'src/common/remaining-calculator';
 import { InvoicesService } from 'src/invoices/invoices.service';
+import { InvoiceStatus, PaymentStatus } from 'src/generated/prisma/enums';
 
 // Añadir estos métodos al PaymentsService existente
 

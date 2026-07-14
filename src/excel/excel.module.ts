@@ -5,7 +5,6 @@ import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoicesModule } from 'src/invoices/invoices.module';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ProductsService } from 'src/products/products.service';
-import { InvoiceStatus } from '@prisma/client';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 import { PaymentsService } from 'src/payments/payments.service';

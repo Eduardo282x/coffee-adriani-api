@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { Role, Users } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOUser } from './user.dto';
 import * as bcrypt from 'bcrypt';
+import { Role, Users } from 'src/generated/prisma/client';
 
 @Injectable()
 export class UsersService {
@@ -37,7 +37,7 @@ export class UsersService {
 
             baseResponse.message = 'Usuario creado exitosamente.'
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'UserService' }
             })
@@ -60,7 +60,7 @@ export class UsersService {
 
             baseResponse.message = 'Usuario actualizado exitosamente.'
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'UserService' }
             })
@@ -74,7 +74,7 @@ export class UsersService {
             await this.prismaService.users.delete({ where: { id } })
             baseResponse.message = ' Usuario eliminado'
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'UserService' }
             })

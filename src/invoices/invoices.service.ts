@@ -6,13 +6,13 @@ import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 import { ClientExcel, DetInvoiceDataExcel, ExcelTransformV2 } from 'src/excel/excel.interfaces';
-import { InvoiceStatus } from '@prisma/client';
 // import * as XLSX from 'xlsx';
 import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 import { N8nService } from 'src/n8n/n8n.service';
+import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 interface FilterInvoice {
     page?: number;

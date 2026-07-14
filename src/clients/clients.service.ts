@@ -1,15 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { Block, Client } from '@prisma/client';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
 import * as PDFDocument from 'pdfkit';
-// import * as fs from 'fs';
-import * as stream from 'stream';
 import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
+import { Block, Client } from 'src/generated/prisma/client';
 
 @Injectable()
 export class ClientsService {
