@@ -193,7 +193,7 @@ export class InvoicesService {
             }
 
             // Consulta optimizada con menos includes iniciales
-            const [invoices, totalCount] = await Promise.all([
+            const [invoices, totalCount, allMatchingInvoices] = await Promise.all([
                 this.prismaService.invoice.findMany({
                     select: {
                         id: true,
@@ -207,6 +207,13 @@ export class InvoicesService {
                         InvoicePayment: {
                             select: {
                                 amount: true
+                            }
+                        },
+                        invoiceItems: {
+                            select: {
+                                quantity: true,
+                                type: true,
+                                product: { select: { presentation: true } }
                             }
                         },
                         client: {
@@ -223,7 +230,6 @@ export class InvoicesService {
                                     }
                                 }
                             },
-                            // include: { block: true }
                         },
                     },
                     orderBy: {
@@ -233,15 +239,46 @@ export class InvoicesService {
                     skip: offset,
                     take: limit,
                 }),
-                this.prismaService.invoice.count({ where })
+                this.prismaService.invoice.count({ where }),
+                this.prismaService.invoice.findMany({
+                    select: {
+                        totalAmount: true,
+                        InvoicePayment: { select: { amount: true } },
+                        invoiceItems: {
+                            select: {
+                                quantity: true,
+                                type: true,
+                                product: { select: { presentation: true } }
+                            }
+                        }
+                    },
+                    where
+                })
             ]);
 
             // Formatear datos
-            const formattedInvoices = invoices.map(invoice => ({
-                ...invoice,
-                totalAmount: invoice.totalAmount.toFixed(2),
-                remaining: calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment).toFixed(2)
-            }));
+            const formattedInvoices = invoices.map(invoice => {
+                const totalItems = this.calculateInvoiceItems(invoice.invoiceItems);
+                const remaining = Number(calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment));
+                const totalAmount = Number(invoice.totalAmount);
+                return {
+                    ...invoice,
+                    totalAmount: totalAmount.toFixed(2),
+                    remaining: remaining.toFixed(2),
+                    totalItems: Number(totalItems.toFixed(4)),
+                    pendingItems: totalAmount > 0 ? Number((totalItems * (remaining / totalAmount)).toFixed(4)) : 0,
+                };
+            });
+
+            const summaryTotalItems = allMatchingInvoices.reduce(
+                (sum, inv) => sum + this.calculateInvoiceItems(inv.invoiceItems), 0
+            );
+            const summaryPendingItems = allMatchingInvoices.reduce((sum, inv) => {
+                const totalItems = this.calculateInvoiceItems(inv.invoiceItems);
+                const remaining = Number(calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment));
+                const totalAmount = Number(inv.totalAmount);
+                return sum + (totalAmount > 0 ? totalItems * (remaining / totalAmount) : 0);
+            }, 0);
 
             // Agrupar por cliente
             const groupedByClient = formattedInvoices.reduce((acc, invoice) => {
@@ -268,7 +305,9 @@ export class InvoicesService {
                     totalCount,
                     totalPages: Math.ceil(totalCount / limit),
                     hasNext: page < Math.ceil(totalCount / limit),
-                    hasPrev: page > 1
+                    hasPrev: page > 1,
+                    totalItems: Number(summaryTotalItems.toFixed(4)),
+                    pendingItems: Number(summaryPendingItems.toFixed(4)),
                 }
             };
         } catch (err) {
@@ -1166,6 +1205,16 @@ export class InvoicesService {
             }
         })
         return calculateFinalTotal;
+    }
+
+    private calculateInvoiceItems(invoiceItems: any[]): number {
+        return invoiceItems
+            .filter(item => item.type === 'SALE')
+            .reduce((sum, item) => sum + (
+                item.product.presentation === '1kilo'
+                    ? Number(item.quantity) * 0.2
+                    : Number(item.quantity)
+            ), 0);
     }
 
     isDateExpired(dueDate: Date): boolean {
