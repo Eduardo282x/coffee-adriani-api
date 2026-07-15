@@ -49,10 +49,6 @@ export class AuthService {
             };
 
             const secretKey = process.env.JWT_SECRET;
-            if (!secretKey) {
-                badResponse.message = 'JWT_SECRET no esta configurado en las variables de entorno.';
-                return badResponse;
-            }
             const token = jwt.sign(payload, secretKey, { expiresIn: '7d' });
 
             const responseLogin: DTOLoginResponse = {
