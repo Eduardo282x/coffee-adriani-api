@@ -48,7 +48,7 @@ export class AuthService {
                 rol: findUser.roles.rol,
             };
 
-            const secretKey = this.configService.get<string>('JWT_SECRET');
+            const secretKey = this.configService.get<string>('JWT_SECRET') || process.env.JWT_SECRET;
             if (!secretKey) {
                 badResponse.message = 'JWT_SECRET no esta configurado en las variables de entorno.';
                 return badResponse;
