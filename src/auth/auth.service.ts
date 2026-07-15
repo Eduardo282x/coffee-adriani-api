@@ -14,6 +14,10 @@ export class AuthService {
         private readonly configService: ConfigService
     ) { }
 
+    private getErrorMessage(err: unknown): string {
+        return err instanceof Error ? err.message : 'Error interno del servidor';
+    }
+
     async login(credentials: DTOLogin): Promise<DTOLoginResponse | DTOBaseResponse> {
         try {
             const findUser = await this.prismaService.users.findFirst({
@@ -45,6 +49,10 @@ export class AuthService {
             };
 
             const secretKey = this.configService.get<string>('JWT_SECRET');
+            if (!secretKey) {
+                badResponse.message = 'JWT_SECRET no esta configurado en las variables de entorno.';
+                return badResponse;
+            }
             const token = jwt.sign(payload, secretKey, { expiresIn: '7d' });
 
             const responseLogin: DTOLoginResponse = {
@@ -54,10 +62,11 @@ export class AuthService {
 
             return responseLogin;
         } catch (err) {
+            const errorMessage = this.getErrorMessage(err);
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'AuthService' }
+                data: { message: errorMessage, from: 'AuthService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = errorMessage;
             return badResponse;
         }
     }
@@ -86,10 +95,11 @@ export class AuthService {
 
             return baseResponse;
         } catch (err) {
+            const errorMessage = this.getErrorMessage(err);
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'AuthService' }
+                data: { message: errorMessage, from: 'AuthService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = errorMessage;
             return badResponse;
         }
     }
@@ -114,10 +124,11 @@ export class AuthService {
             baseResponse.message = `${migratedCount} contraseñas migradas exitosamente.`;
             return baseResponse;
         } catch (err) {
+            const errorMessage = this.getErrorMessage(err);
             await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'AuthService' }
+                data: { message: errorMessage, from: 'AuthService' }
             })
-            badResponse.message = err.message;
+            badResponse.message = errorMessage;
             return badResponse;
         }
     }
