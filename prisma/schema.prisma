@@ -96,6 +96,7 @@ model Product {
   invoiceItems          InvoiceProduct[]
   HistoryInventory      HistoryInventory[]
   inventoryEntryDetails InventoryEntryDetail[]
+  deleted               Boolean                 @default(false)
 }
 
 model HistoryProduct {

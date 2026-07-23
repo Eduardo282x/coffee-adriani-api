@@ -30,7 +30,7 @@ export class ProductsService {
                 date: new Date(response.fechaActualizacion)
             }
             return await this.saveDolar(parseResponse);
-        } catch (err) {
+        } catch (err: Error | any) {
             badResponse.message = 'Error al obtener el precio del dolar en estos momentos.'
             return badResponse;
         }
@@ -46,7 +46,7 @@ export class ProductsService {
             })
             baseResponse.message = 'Tasa de dolar guardada exitosamente.';
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'ProductService' }
             })
@@ -60,7 +60,8 @@ export class ProductsService {
             const getDolar = await this.getDolar();
 
             return await this.prismaService.product.findMany({
-                orderBy: { id: 'asc' }
+                orderBy: { id: 'asc' },
+                where: { deleted: false }
             }).then(res =>
                 res.map(data => {
                     return {
@@ -72,7 +73,7 @@ export class ProductsService {
                     }
                 })
             )
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'ProductService' }
             })
@@ -97,7 +98,7 @@ export class ProductsService {
                     }
                 })
             )
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'ProductService' }
             })
@@ -133,7 +134,7 @@ export class ProductsService {
 
             baseResponse.message = 'Producto agregado exitosamente.'
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'ProductService' }
             })
@@ -172,7 +173,7 @@ export class ProductsService {
 
             baseResponse.message = 'Producto actualizado exitosamente.'
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'ProductService' }
             })
@@ -182,22 +183,23 @@ export class ProductsService {
     }
     async deleteProduct(id: number): Promise<DTOBaseResponse> {
         try {
-            const findProductInInventory = await this.prismaService.inventory.findFirst({
-                where: { productId: id }
-            })
+            // const findProductInInventory = await this.prismaService.inventory.findFirst({
+            //     where: { productId: id }
+            // })
 
-            if (findProductInInventory) {
-                badResponse.message = 'Este producto se encuentra en el inventario';
-                return badResponse;
-            }
+            // if (findProductInInventory) {
+            //     badResponse.message = 'Este producto se encuentra en el inventario';
+            //     return badResponse;
+            // }
 
-            await this.prismaService.product.delete({
-                where: { id }
+            await this.prismaService.product.update({
+                where: { id },
+                data: { deleted: true }
             })
 
             baseResponse.message = 'Producto eliminado exitosamente.'
             return baseResponse;
-        } catch (err) {
+        } catch (err: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: err.message, from: 'ProductService' }
             })

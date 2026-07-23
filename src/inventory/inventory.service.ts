@@ -60,6 +60,11 @@ export class InventoryService {
                 orderBy: { id: 'asc' },
                 include: {
                     product: true
+                },
+                where: {
+                    product: {
+                        deleted: false
+                    }
                 }
             }).then(inv => inv.map(iv => {
                 return {
