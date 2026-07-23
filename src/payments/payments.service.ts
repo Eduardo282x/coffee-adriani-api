@@ -83,7 +83,9 @@ export class PaymentsService {
             const skip = (page - 1) * limit;
 
             // Construir where clause dinámicamente
-            const where: any = {};
+            const where: any = {
+                isProviderPayment: false,
+            };
 
             if (startDate && endDate) {
                 where.paymentDate = {
@@ -355,7 +357,9 @@ export class PaymentsService {
             const { startDate, endDate, accountId, methodId, associated, type, accountType, typeDescription, credit, search } = filters;
 
             // Construir where clause dinámicamente
-            const where: any = {};
+            const where: any = {
+                isProviderPayment: false
+            };
 
             if (startDate && endDate) {
                 where.paymentDate = {
@@ -893,6 +897,7 @@ export class PaymentsService {
                     paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
+                    isProviderPayment: payment.isProviderPayment || false
                 }
             })
 

@@ -6,7 +6,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
 }
 
 model Users {
@@ -96,7 +95,7 @@ model Product {
   invoiceItems          InvoiceProduct[]
   HistoryInventory      HistoryInventory[]
   inventoryEntryDetails InventoryEntryDetail[]
-  deleted               Boolean                 @default(false)
+  deleted               Boolean                @default(false)
 }
 
 model HistoryProduct {
@@ -189,6 +188,7 @@ model Payment {
   status                 PaymentStatus
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
+  isProviderPayment      Boolean                 @default(false)
   InvoicePayment         InvoicePayment[]
   inventoryEntryPayments InventoryEntryPayment[]
 }
