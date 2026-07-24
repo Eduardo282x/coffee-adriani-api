@@ -16,9 +16,6 @@ export class PaymentDTO {
     @IsDate()
     @Transform(({ value }) => new Date(value))
     paymentDate: Date;
-    @IsOptional()
-    @IsBoolean()
-    isProviderPayment?: boolean;
 }
 
 export class PayInvoiceDTO {

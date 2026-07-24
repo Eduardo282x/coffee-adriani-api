@@ -897,7 +897,7 @@ export class PaymentsService {
                     paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
-                    isProviderPayment: payment.isProviderPayment || false
+                    isProviderPayment: false
                 }
             })
 

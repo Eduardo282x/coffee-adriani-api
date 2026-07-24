@@ -1376,6 +1376,20 @@ export class InvoicesService {
 
             const totalAmount = dataDetailsInvoice.filter(item => item.type === 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
 
+            // Verificar que el controlNumber no esté en uso por otra factura
+            if (newInvoice.controlNumber !== invoice.controlNumber) {
+                const duplicate = await this.prismaService.invoice.findFirst({
+                    where: {
+                        controlNumber: newInvoice.controlNumber,
+                        id: { not: id }
+                    },
+                    include: { client: true }
+                });
+                if (duplicate) {
+                    return { message: `Ya existe una factura con ese número de control del cliente ${duplicate.client.name}`, success: false };
+                }
+            }
+
             await this.prismaService.$transaction(async (tx) => {
                 await tx.invoice.update({
                     where: { id },

@@ -172,7 +172,8 @@ export class EntryPaymentsService {
                     description: data.description || '',
                     dolarId: getDolar?.id || 1,
                     paymentDate: data.paymentDate,
-                    status: 'CONFIRMED'
+                    status: 'CONFIRMED',
+                    isProviderPayment: true
                 }
             });
 
