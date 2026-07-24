@@ -14,6 +14,31 @@ export class ProductsService {
         return await this.prismaService.historyDolar.findFirst({ orderBy: { id: 'desc' } })
     }
 
+    private getStartOfDayUtc(date: string) {
+        if (date.length > 10) {
+            return new Date(date);
+        }
+        return new Date(`${date}T00:00:00.000Z`);
+    }
+
+    private getEndOfDayUtc(date: string) {
+        if (date.length > 10) {
+            return new Date(date);
+        }
+        return new Date(`${date}T23:59:59.999Z`);
+    }
+
+    async getDolarFilter(date: string) {
+        return await this.prismaService.historyDolar.findMany({
+            where: {
+                date: {
+                    gte: this.getStartOfDayUtc(date),
+                    lt: this.getEndOfDayUtc(date)
+                }
+            }
+        })
+    }
+
     async getTypeProduct() {
         return await this.prismaService.product.groupBy({
             by: ['type'],

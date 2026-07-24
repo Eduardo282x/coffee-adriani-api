@@ -45,4 +45,7 @@ export class CreatePaymentForEntryDTO {
     @IsNumber()
     @IsPositive()
     entryAmount: number;
+
+    @IsNumber()
+    dolarId: number;
 }

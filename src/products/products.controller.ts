@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { DTODolar, DTOProducts } from './product.dto';
 
@@ -25,6 +25,12 @@ export class ProductsController {
     async getDolar() {
         return await this.productService.getDolar();
     }
+    @Get('/dolar-filter')
+    async getDolarFilter(
+        @Query('date') date: string
+    ) {
+        return await this.productService.getDolarFilter(date);
+    }
     @Post()
     async createProduct(@Body() product: DTOProducts) {
         return await this.productService.createProduct(product);
@@ -39,7 +45,7 @@ export class ProductsController {
     }
     @Put('/:id')
     async updateProduct(@Param('id') id: string, @Body() product: DTOProducts) {
-        return await this.productService.updateProduct(Number(id),  product);
+        return await this.productService.updateProduct(Number(id), product);
     }
     @Delete('/:id')
     async deleteProduct(@Param('id') id: string,) {

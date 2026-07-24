@@ -170,7 +170,7 @@ export class EntryPaymentsService {
                     accountId: data.accountId,
                     reference: data.reference,
                     description: data.description || '',
-                    dolarId: getDolar?.id || 1,
+                    dolarId: data.dolarId || getDolar?.id || 1,
                     paymentDate: data.paymentDate,
                     status: 'CONFIRMED',
                     isProviderPayment: true
@@ -236,26 +236,16 @@ export class EntryPaymentsService {
                 orderBy: { createdAt: 'desc' }
             });
 
+            console.log(entryPayments)
+
             const payments = entryPayments.map(ep => {
-                const currency = ep.payment.account?.method?.currency;
-                const dolarRate = Number(ep.payment.dolar?.dolar || 0);
 
                 let amountUSD = Number(ep.amount);
-                let amountBS = 0;
-
-                if (currency === 'BS') {
-                    amountUSD = dolarRate > 0 ? Number(ep.amount) / dolarRate : 0;
-                    amountBS = Number(ep.amount);
-                } else {
-                    amountUSD = Number(ep.amount);
-                    amountBS = Number(ep.amount) * dolarRate;
-                }
 
                 return {
                     id: ep.id,
                     amount: Number(ep.amount).toFixed(2),
                     amountUSD: amountUSD.toFixed(2),
-                    amountBS: amountBS.toFixed(2),
                     payment: ep.payment,
                     createdAt: ep.createdAt
                 };

@@ -31,7 +31,7 @@ export class DolarService {
         try {
             await this.productService.saveDolarAutomatic();
             this.logger.debug(`💵 Tasa BCV actualizada`);
-        } catch (error) {
+        } catch (error: Error | any) {
             await this.prismaService.errorMessages.create({
                 data: { message: error.message, from: 'DolarService' }
             })
