@@ -189,6 +189,7 @@ model Payment {
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   isProviderPayment      Boolean                 @default(false)
+  type                   AccountType             @default(INCOME)
   InvoicePayment         InvoicePayment[]
   inventoryEntryPayments InventoryEntryPayment[]
 }
@@ -350,7 +351,7 @@ model InventoryEntryDetail {
   inventoryEntry   InventoryEntry @relation(fields: [inventoryEntryId], references: [id])
   productId        Int
   product          Product        @relation(fields: [productId], references: [id])
-  quantity         Int
+  quantity         Decimal        @db.Decimal(10, 3)
   unitPrice        Decimal        @db.Decimal(10, 2)
   unitPriceUSD     Decimal        @db.Decimal(10, 2)
   subtotal         Decimal        @db.Decimal(10, 2)

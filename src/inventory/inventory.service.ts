@@ -655,7 +655,7 @@ export class InventoryService {
             ]);
 
             const processedEntries = entries.map(entry => {
-                const totalBultos = entry.details.reduce((sum, d) => sum + d.quantity, 0);
+                const totalBultos = entry.details.reduce((sum, d) => sum + Number(d.quantity), 0);
                 const totalPaid = entry.payments.reduce((sum, p) => sum + Number(p.amount), 0);
                 const remaining = Number(entry.totalAmount) - totalPaid;
 
@@ -719,7 +719,7 @@ export class InventoryService {
                 throw new Error('Entrada no encontrada');
             }
 
-            const totalBultos = entry.details.reduce((sum, d) => sum + d.quantity, 0);
+            const totalBultos = entry.details.reduce((sum, d) => sum + Number(d.quantity), 0);
             const totalPaid = entry.payments.reduce((sum, p) => sum + Number(p.amount), 0);
             const remaining = Number(entry.totalAmount) - totalPaid;
 
@@ -842,7 +842,7 @@ export class InventoryService {
                     await this.prismaService.inventory.update({
                         where: { id: existingInventory.id },
                         data: {
-                            quantity: Math.max(0, existingInventory.quantity - oldDetail.quantity)
+                            quantity: Math.max(0, Number(existingInventory.quantity) - Number(oldDetail.quantity))
                         }
                     });
                 }
@@ -938,7 +938,7 @@ export class InventoryService {
                     await this.prismaService.inventory.update({
                         where: { id: existingInventory.id },
                         data: {
-                            quantity: Math.max(0, existingInventory.quantity - detail.quantity)
+                            quantity: Math.max(0, Number(existingInventory.quantity) - Number(detail.quantity))
                         }
                     });
                 }
@@ -1032,7 +1032,7 @@ export class InventoryService {
             ]);
 
             const processedEntries = entries.map(entry => {
-                const totalBultos = entry.details.reduce((sum, d) => sum + d.quantity, 0);
+                const totalBultos = entry.details.reduce((sum, d) => sum + Number(d.quantity), 0);
                 const totalPaid = entry.payments.reduce((sum, p) => sum + Number(p.amount), 0);
                 const remaining = Number(entry.totalAmount) - totalPaid;
 
@@ -1107,7 +1107,7 @@ export class InventoryService {
                 throw new Error('Entrada de empresa no encontrada');
             }
 
-            const totalBultos = entry.details.reduce((sum, d) => sum + d.quantity, 0);
+            const totalBultos = entry.details.reduce((sum, d) => sum + Number(d.quantity), 0);
             const totalPaid = entry.payments.reduce((sum, p) => sum + Number(p.amount), 0);
             const remaining = Number(entry.totalAmount) - totalPaid;
 

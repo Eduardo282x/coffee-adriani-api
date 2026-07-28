@@ -122,7 +122,7 @@ export class EntryPaymentsService {
                 .reduce((sum, p) => sum + Number(p.amount), 0);
 
             const newStatus = totalPaid >= Number(entry.totalAmount) ? 'PAGADO' :
-                             totalPaid > 0 ? 'PENDIENTE' : 'CREADA';
+                totalPaid > 0 ? 'PENDIENTE' : 'CREADA';
 
             await this.prismaService.inventoryEntry.update({
                 where: { id: data.inventoryEntryId },
@@ -236,8 +236,6 @@ export class EntryPaymentsService {
                 orderBy: { createdAt: 'desc' }
             });
 
-            console.log(entryPayments)
-
             const payments = entryPayments.map(ep => {
 
                 let amountUSD = Number(ep.amount);
@@ -266,6 +264,99 @@ export class EntryPaymentsService {
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : String(error);
             throw new Error(`Error al obtener pagos: ${errMsg}`);
+        }
+    }
+
+    async updatePayment(paymentId: number, data: Partial<CreatePaymentForEntryDTO>) {
+        try {
+            const payment = await this.prismaService.payment.findUnique({
+                where: { id: paymentId }
+            });
+
+            if (!payment) {
+                throw new Error('Pago no encontrado');
+            }
+
+            const updatedPayment = await this.prismaService.payment.update({
+                where: { id: paymentId },
+                data: {
+                    amount: data.amount !== undefined ? data.amount : payment.amount,
+                    accountId: data.accountId !== undefined ? data.accountId : payment.accountId,
+                    reference: data.reference !== undefined ? data.reference : payment.reference,
+                    description: data.description !== undefined ? data.description : payment.description,
+                    paymentDate: data.paymentDate !== undefined ? data.paymentDate : payment.paymentDate,
+                    dolarId: data.dolarId !== undefined ? data.dolarId : payment.dolarId
+                }
+            });
+
+            const findInventoryEntryPayment = await this.prismaService.inventoryEntryPayment.findFirst({
+                where: {
+                    paymentId: paymentId
+                }
+            });
+
+
+            await this.prismaService.inventoryEntryPayment.update({
+                data: {
+                    amount: data.entryAmount
+                },
+                where: {
+                    id: findInventoryEntryPayment.id
+                }
+            })
+
+            return {
+                success: true,
+                message: 'Pago actualizado exitosamente',
+                payment: updatedPayment
+            };
+        } catch (error: Error | any) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error al actualizar pago: ${errMsg}`);
+        }
+    }
+
+    async deletePayment(paymentId: number) {
+        try {
+            const payment = await this.prismaService.payment.findUnique({
+                where: { id: paymentId }
+            });
+
+            const entryPayment = await this.prismaService.inventoryEntryPayment.findFirst({
+                where: { paymentId: paymentId }
+            });
+
+            if (!entryPayment) {
+                throw new Error('Pago no encontrado');
+            }
+            if (!payment) {
+                throw new Error('Pago no encontrado');
+            }
+
+            await this.prismaService.inventoryEntryPayment.delete({
+                where: { id: entryPayment.id }
+            })
+
+            await this.prismaService.inventoryEntry.update({
+                data: {
+                    status: 'PENDIENTE'
+                },
+                where: {
+                    id: entryPayment.inventoryEntryId
+                }
+            })
+
+            await this.prismaService.payment.delete({
+                where: { id: paymentId }
+            });
+
+            return {
+                message: 'Pago eliminado exitosamente',
+                success: true
+            };
+        } catch (error: Error | any) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error al eliminar pago: ${errMsg}`);
         }
     }
 }
