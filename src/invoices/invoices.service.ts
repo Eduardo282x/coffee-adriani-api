@@ -1298,45 +1298,53 @@ export class InvoicesService {
                 .filter(item => (item.type || 'SALE') === 'SALE')
                 .reduce((acc, det) => acc + Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity), 0);
 
-            const saveInvoice = await this.prismaService.invoice.create({
-                data: {
-                    clientId: newInvoice.clientId,
-                    controlNumber: newInvoice.controlNumber,
-                    status: calculateTotalInvoice === 0 ? 'Pagado' : 'Creada',
-                    dispatchDate: newInvoice.dispatchDate,
-                    dueDate: newInvoice.dueDate,
-                    consignment: newInvoice.consignment,
-                    totalAmount: calculateTotalInvoice
-                }
-            })
+            const saveInvoice = await this.prismaService.$transaction(async (tx) => {
+                const savedInvoice = await tx.invoice.create({
+                    data: {
+                        clientId: newInvoice.clientId,
+                        controlNumber: newInvoice.controlNumber,
+                        status: calculateTotalInvoice === 0 ? 'Pagado' : 'Creada',
+                        dispatchDate: newInvoice.dispatchDate,
+                        dueDate: newInvoice.dueDate,
+                        consignment: newInvoice.consignment,
+                        totalAmount: calculateTotalInvoice
+                    }
+                })
 
-            const dataDetailsInvoice = newInvoice.details.map(det => ({
-                invoiceId: saveInvoice.id,
-                productId: det.productId,
-                quantity: det.quantity,
-                type: det.type || 'SALE',
-                unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
-                unitPriceUSD: Number(det.priceUSD),
-                subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
-            }));
-
-            await this.prismaService.invoiceProduct.createMany({ data: dataDetailsInvoice });
-
-            await this.inventoryService.updateInventoryInvoice({
-                controlNumber: saveInvoice.controlNumber,
-                description: `Salida de producto por factura ${saveInvoice.controlNumber}`,
-                date: saveInvoice.dispatchDate,
-                details: newInvoice.details.map(det => ({
+                const dataDetailsInvoice = newInvoice.details.map(det => ({
+                    invoiceId: savedInvoice.id,
                     productId: det.productId,
                     quantity: det.quantity,
-                }))
-            });
+                    type: det.type || 'SALE',
+                    unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+                    unitPriceUSD: Number(det.priceUSD),
+                    subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
+                }));
 
-            await this.prismaService.notification.deleteMany({
-                where: {
-                    clientId: newInvoice.clientId,
-                    type: 'inactivity',
-                },
+                await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
+
+                const inventoryResult = await this.inventoryService.updateInventoryInvoice({
+                    controlNumber: savedInvoice.controlNumber,
+                    description: `Salida de producto por factura ${savedInvoice.controlNumber}`,
+                    date: savedInvoice.dispatchDate,
+                    details: newInvoice.details.map(det => ({
+                        productId: det.productId,
+                        quantity: det.quantity,
+                    }))
+                }, tx);
+
+                if (!inventoryResult.success) {
+                    throw new Error(inventoryResult.message);
+                }
+
+                await tx.notification.deleteMany({
+                    where: {
+                        clientId: newInvoice.clientId,
+                        type: 'inactivity',
+                    },
+                });
+
+                return savedInvoice;
             });
 
             this.notifyInvoiceCreated(saveInvoice.id, newInvoice.clientId, newInvoice.controlNumber, calculateTotalInvoice);
@@ -1521,23 +1529,58 @@ export class InvoicesService {
             });
 
             await this.prismaService.$transaction(async (tx) => {
+                const productAggregated = new Map<number, { quantity: number; unitPrice: number; unitPriceUSD: number }>();
+
                 for (const det of detInvoice) {
+                    const existing = productAggregated.get(det.productId);
+                    if (existing) {
+                        existing.quantity += Number(det.quantity);
+                    } else {
+                        productAggregated.set(det.productId, {
+                            quantity: Number(det.quantity),
+                            unitPrice: Number(det.unitPrice),
+                            unitPriceUSD: Number(det.unitPriceUSD),
+                        });
+                    }
+                }
+
+                const totalAmount = Array.from(productAggregated.values()).reduce(
+                    (sum, item) => sum + (item.unitPrice * item.quantity), 0
+                );
+
+                const entry = await tx.inventoryEntry.create({
+                    data: {
+                        controlNumber: `RETORNO-${invoice.controlNumber}`,
+                        movementType: 'ADJUSTMENT',
+                        totalAmount,
+                        status: 'CREADA',
+                        title: `Devolución por cancelación de factura ${invoice.controlNumber}`,
+                        description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
+                        date: new Date(),
+                        supplierId: null,
+                    }
+                });
+
+                for (const [productId, item] of productAggregated) {
+                    await tx.inventoryEntryDetail.create({
+                        data: {
+                            inventoryEntryId: entry.id,
+                            productId,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            unitPriceUSD: item.unitPriceUSD,
+                            subtotal: item.unitPrice * item.quantity,
+                        }
+                    });
+
                     const findInventory = await tx.inventory.findFirst({
-                        where: { productId: det.productId }
+                        where: { productId }
                     });
 
                     if (findInventory) {
                         await tx.inventory.update({
                             where: { id: findInventory.id },
-                            data: { quantity: Number(findInventory.quantity) + Number(det.quantity) }
-                        })
-                        await tx.historyInventory.create({
-                            data: {
-                                productId: findInventory.productId,
-                                quantity: Number(det.quantity),
-                                description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
-                                movementType: 'ADJUSTMENT'
-                            }
+                            data: { quantity: Number(findInventory.quantity) + item.quantity }
                         })
                     }
                 }

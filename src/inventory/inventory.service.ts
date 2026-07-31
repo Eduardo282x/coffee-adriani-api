@@ -3,16 +3,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOInventory, DTOInventoryHistory, DTOInventorySimple, DTOUpdateHistoryInventory, CreateInventoryEntryDTO, InventoryEntryFilterDTO } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
-
-interface InventoryHistoryFilter {
-    page: number;
-    limit: number;
-    startDate?: string;
-    endDate?: string;
-    typeMovement?: 'IN' | 'OUT' | 'EDIT' | 'ADJUSTMENT' | '';
-    typeProduct?: string;
-    controlNumber?: string;
-}
+import { Prisma } from 'src/generated/prisma/client';
 
 @Injectable()
 export class InventoryService {
@@ -35,21 +26,8 @@ export class InventoryService {
         return new Date(`${date}T23:59:59.999Z`);
     }
 
-    private formatControlDate(date: Date): string {
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const year = String(date.getFullYear()).slice(-2);
-        return `${month}${day}${year}`;
-    }
-
     private normalizeControlNumber(controlNumber?: string | null): string {
         return (controlNumber ?? '').trimEnd();
-    }
-
-    private extractControlFromDescription(description: string): string | null {
-        if (!description) return null;
-        const match = description.match(/factura\s*#?\s*([a-zA-Z0-9-]+)/i);
-        return match?.[1] ?? null;
     }
 
     async getInventory() {
@@ -86,7 +64,15 @@ export class InventoryService {
         }
     }
 
-    async getInventoryHistory(filter: InventoryHistoryFilter) {
+    async getInventoryHistory(filter: {
+        page: number;
+        limit: number;
+        startDate?: string;
+        endDate?: string;
+        typeMovement?: string;
+        typeProduct?: string;
+        controlNumber?: string;
+    }) {
         const { page, limit, startDate, endDate, typeMovement, typeProduct, controlNumber } = filter;
         const where: any = {};
         const getDolar = await this.productsService.getDolar();
@@ -95,7 +81,7 @@ export class InventoryService {
         const skip = (safePage - 1) * safeLimit;
 
         if (startDate && endDate) {
-            where.movementDate = {
+            where.date = {
                 gte: this.getStartOfDayUtc(startDate),
                 lte: this.getEndOfDayUtc(endDate),
             };
@@ -103,15 +89,6 @@ export class InventoryService {
 
         if (typeMovement) {
             where.movementType = typeMovement;
-        }
-
-        if (typeProduct) {
-            where.product = {
-                type: {
-                    equals: typeProduct,
-                    mode: 'insensitive',
-                },
-            };
         }
 
         const normalizedControlNumber = this.normalizeControlNumber(controlNumber);
@@ -122,66 +99,56 @@ export class InventoryService {
             };
         }
 
-        const [total, history] = await Promise.all([
-            this.prismaService.historyInventory.count({ where }),
-            this.prismaService.historyInventory.findMany({
+        if (typeProduct) {
+            where.details = {
+                some: {
+                    product: {
+                        type: {
+                            equals: typeProduct,
+                            mode: 'insensitive',
+                        },
+                    },
+                },
+            };
+        }
+
+        const [total, entries] = await Promise.all([
+            this.prismaService.inventoryEntry.count({ where }),
+            this.prismaService.inventoryEntry.findMany({
                 skip,
                 take: safeLimit,
-                orderBy: [{ movementDate: 'desc' }, { id: 'desc' }],
+                orderBy: [{ date: 'desc' }, { id: 'desc' }],
                 where,
                 include: {
-                    product: true,
+                    details: {
+                        include: {
+                            product: true
+                        }
+                    }
                 },
             }),
         ]);
 
-        const groupedMap = new Map<string, {
-            controlNumber: string;
-            description: string;
-            movementType: 'IN' | 'OUT' | 'EDIT' | 'ADJUSTMENT';
-            movementDate: string;
-            details: Array<{
-                productId: number;
-                name: string;
-                presentation: string;
-                quantity: number;
-                priceBs: string;
-                priceUSD: string;
-                date: string;
-            }>;
-        }>();
+        const history = entries.map(entry => ({
+            controlNumber: entry.controlNumber,
+            description: entry.description,
+            movementType: entry.movementType,
+            movementDate: entry.date.toISOString().slice(0, 10),
+            details: entry.details.map(detail => ({
+                productId: detail.productId,
+                name: detail.product.name,
+                presentation: detail.product.presentation,
+                quantity: Number(detail.quantity),
+                priceBs: (Number(detail.product.price) * Number(getDolar.dolar)).toFixed(2),
+                priceUSD: detail.product.priceUSD.toFixed(2),
+                date: entry.date.toISOString(),
+            })),
+        }));
 
-        for (const item of history) {
-            const day = item.movementDate.toISOString().slice(0, 10);
-            const control = this.normalizeControlNumber(item.controlNumber);
-            const key = `${control}-${day}`;
-
-            if (!groupedMap.has(key)) {
-                groupedMap.set(key, {
-                    controlNumber: control,
-                    description: item.description,
-                    movementType: item.movementType,
-                    movementDate: day,
-                    details: [],
-                });
-            }
-
-            groupedMap.get(key)!.details.push({
-                productId: item.productId,
-                name: item.product.name,
-                presentation: item.product.presentation,
-                quantity: item.quantity,
-                priceBs: (Number(item.product.price) * Number(getDolar.dolar)).toFixed(2),
-                priceUSD: item.product.priceUSD.toFixed(2),
-                date: item.movementDate.toISOString(),
-            });
-        }
-
-        const data = Array.from(groupedMap.values());
         const totalPages = Math.ceil(total / safeLimit);
 
         return {
-            history: data,
+            history,
             pagination: {
                 total,
                 page: safePage,
@@ -193,98 +160,63 @@ export class InventoryService {
         };
     }
 
-    async updateHistoryData() {
-        try {
-            const records = await this.prismaService.historyInventory.findMany({
-                where: {
-                    OR: [
-                        { controlNumber: '' },
-                        { controlNumber: { equals: '' } },
-                    ],
-                },
-                orderBy: { id: 'asc' },
-                select: {
-                    id: true,
-                    movementType: true,
-                    movementDate: true,
-                    description: true,
-                    controlNumber: true,
-                },
-            });
-
-            if (!records.length) {
-                return {
-                    success: true,
-                    message: 'No hay registros sin número de control.',
-                    updatedCount: 0,
-                };
-            }
-
-            let updatedCount = 0;
-
-            for (const row of records) {
-                let controlNumber = '';
-
-                if (row.movementType === 'OUT') {
-                    const extracted = this.extractControlFromDescription(row.description);
-                    if (extracted) {
-                        controlNumber = extracted;
-                    } else {
-                        controlNumber = `OUT-${this.formatControlDate(row.movementDate)}`;
-                    }
-                } else if (row.movementType === 'IN') {
-                    controlNumber = `Entrada-${this.formatControlDate(row.movementDate)}`;
-                } else if (row.movementType === 'EDIT') {
-                    controlNumber = `Edit-${this.formatControlDate(row.movementDate)}`;
-                }
-
-                if (!controlNumber) {
-                    controlNumber = `MOV-${this.formatControlDate(row.movementDate)}`;
-                }
-
-                controlNumber = this.normalizeControlNumber(controlNumber);
-
-                await this.prismaService.historyInventory.update({
-                    where: { id: row.id },
-                    data: { controlNumber },
-                });
-
-                updatedCount++;
-            }
-
-            return {
-                success: true,
-                message: 'Historial actualizado correctamente.',
-                updatedCount,
-            };
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
-            });
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
     async saveInventory(inventory: DTOInventory) {
         try {
             const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
 
-            const saveHistory = await this.prismaService.historyInventory.createMany({
-                data: inventory.details.map(detail => ({
-                    productId: detail.productId,
-                    quantity: detail.quantity,
-                    controlNumber: normalizedControlNumber,
-                    movementType: 'IN',
-                    description: `Entrada de mercancía ${inventory.description ? `- ${inventory.description}` : ''}`,
-                    movementDate: inventory.date
-                }))
+            const existingEntry = await this.prismaService.inventoryEntry.findUnique({
+                where: { controlNumber: normalizedControlNumber }
             });
 
-            inventory.details.map(async (detail) => {
+            if (existingEntry) {
+                badResponse.message = 'Ya existe una entrada de inventario con este número de control';
+                return badResponse;
+            }
+
+            const productIds = inventory.details.map(detail => detail.productId);
+            const products = await this.prismaService.product.findMany({
+                where: { id: { in: productIds } }
+            });
+            const productMap = new Map(products.map(product => [product.id, product]));
+
+            const totalAmount = inventory.details.reduce((sum, detail) => {
+                const price = Number(productMap.get(detail.productId)?.price || 0);
+                return sum + (price * detail.quantity);
+            }, 0);
+
+            const entry = await this.prismaService.inventoryEntry.create({
+                data: {
+                    controlNumber: normalizedControlNumber,
+                    movementType: 'IN',
+                    totalAmount,
+                    status: 'CREADA',
+                    title: inventory.description || 'Entrada de inventario',
+                    description: `Entrada de mercancía ${inventory.description ? `- ${inventory.description}` : ''}`,
+                    date: inventory.date,
+                    supplierId: null,
+                }
+            });
+
+            for (const detail of inventory.details) {
+                const product = productMap.get(detail.productId);
+                const unitPrice = Number(product?.price || 0);
+                const unitPriceUSD = Number(product?.priceUSD || 0);
+                const subtotal = unitPrice * detail.quantity;
+
+                await this.prismaService.inventoryEntryDetail.create({
+                    data: {
+                        inventoryEntryId: entry.id,
+                        productId: detail.productId,
+                        quantity: detail.quantity,
+                        unitPrice,
+                        unitPriceUSD,
+                        subtotal,
+                    }
+                });
+
                 const findProductInInventory = await this.prismaService.inventory.findFirst({
                     where: { productId: detail.productId }
-                })
+                });
 
                 if (findProductInInventory) {
                     await this.prismaService.inventory.update({
@@ -303,92 +235,9 @@ export class InventoryService {
                         }
                     })
                 }
-            })
-
-            baseResponse.message = 'Productos guardados en inventario.'
-            return baseResponse
-        }
-        catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
-            })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    async updateInventory(inventory: DTOInventorySimple, id: number) {
-        try {
-            const findProductInInventory = await this.prismaService.inventory.findFirst({
-                where: { id }
-            })
-
-            if (findProductInInventory) {
-                await this.prismaService.inventory.update({
-                    data: {
-                        quantity: inventory.quantity
-                    },
-                    where: {
-                        id: findProductInInventory.id
-                    }
-                })
-
-                await this.prismaService.historyInventory.create({
-                    data: {
-                        productId: findProductInInventory.productId,
-                        quantity: inventory.quantity,
-                        description: inventory.description,
-                        movementType: 'OUT'
-                    }
-                })
-            } else {
-                badResponse.message = 'No se encontró el producto en el inventario.';
-                return badResponse;
             }
 
-            baseResponse.message = 'Producto actualizado en inventario.'
-            return baseResponse
-        }
-        catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
-            })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    async updateInventoryInvoice(inventory: DTOInventory) {
-        try {
-            const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
-
-            inventory.details.map(async (detail) => {
-                const findProductInventory = await this.prismaService.inventory.findFirst({
-                    where: { productId: detail.productId }
-                })
-
-                const findProductInInventory = await this.prismaService.inventory.update({
-                    where: { id: findProductInventory.id },
-                    data: {
-                        quantity: {
-                            decrement: detail.quantity
-                        }
-                    },
-                });
-
-                await this.prismaService.historyInventory.create({
-                    data: {
-                        productId: findProductInInventory.productId,
-                        controlNumber: normalizedControlNumber,
-                        quantity: detail.quantity,
-                        description: inventory.description,
-                        movementDate: inventory.date,
-                        movementType: 'OUT'
-                    }
-                });
-            })
-
-            baseResponse.message = 'Productos actualizados en inventario.'
+            baseResponse.message = 'Productos guardados en inventario.'
             return baseResponse
         }
         catch (err) {
@@ -406,12 +255,22 @@ export class InventoryService {
                 where: { id }
             });
 
-            const findHistory = await this.prismaService.historyInventory.findFirst({
-                where: { productId: findProductInInventory.productId, movementType: 'IN' },
-                orderBy: { movementDate: 'desc' }
+            if (!findProductInInventory) {
+                badResponse.message = 'No se encontró el producto en el inventario.';
+                return badResponse;
+            }
+
+            const findDetail = await this.prismaService.inventoryEntryDetail.findFirst({
+                where: {
+                    productId: findProductInInventory.productId,
+                    inventoryEntry: { movementType: 'IN' }
+                },
+                orderBy: { inventoryEntry: { date: 'desc' } }
             });
 
-            const oldAmount = findProductInInventory.quantity - findHistory.quantity;
+            const oldAmount = findDetail
+                ? Number(findProductInInventory.quantity) - Number(findDetail.quantity)
+                : Number(findProductInInventory.quantity);
             const updateAmountHistory = inventory.quantity - oldAmount;
 
             await this.prismaService.inventory.update({
@@ -421,12 +280,14 @@ export class InventoryService {
                 where: { id }
             });
 
-            await this.prismaService.historyInventory.update({
-                where: { id: findHistory.id },
-                data: {
-                    quantity: updateAmountHistory,
-                }
-            })
+            if (findDetail) {
+                await this.prismaService.inventoryEntryDetail.update({
+                    where: { id: findDetail.id },
+                    data: {
+                        quantity: updateAmountHistory,
+                    }
+                })
+            }
 
             baseResponse.message = 'Inventario modificado.'
             return baseResponse
@@ -444,24 +305,22 @@ export class InventoryService {
         try {
             const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
 
-            const findHistory = await this.prismaService.historyInventory.findMany({
+            const findHistory = await this.prismaService.inventoryEntry.findMany({
                 where: { controlNumber: inventory.controlNumberOld },
-                orderBy: { movementDate: 'desc' }
+                orderBy: { date: 'desc' }
             });
             if (!findHistory || findHistory.length === 0) {
                 badResponse.message = 'Numero de control no encontrado.';
                 return badResponse;
             }
 
-            findHistory.forEach(async (history) => {
-                await this.prismaService.historyInventory.update({
-                    where: { id: history.id },
-                    data: {
-                        controlNumber: normalizedControlNumber,
-                        movementDate: inventory.date
-                    }
-                });
-            })
+            await this.prismaService.inventoryEntry.updateMany({
+                where: { controlNumber: inventory.controlNumberOld },
+                data: {
+                    controlNumber: normalizedControlNumber,
+                    date: inventory.date
+                }
+            });
 
             baseResponse.message = 'Historial de inventario actualizado.';
             return baseResponse;
@@ -475,110 +334,89 @@ export class InventoryService {
         }
     }
 
-    async migrateHistoryInventory() {
+    async updateInventoryInvoice(inventory: DTOInventory, tx?: Prisma.TransactionClient) {
         try {
-            const historyRecords = await this.prismaService.historyInventory.findMany({
-                include: { product: true },
-                orderBy: { id: 'asc' }
+            const prisma = tx ?? this.prismaService;
+            const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
+
+            const existingEntry = await prisma.inventoryEntry.findUnique({
+                where: { controlNumber: normalizedControlNumber }
             });
 
-            if (historyRecords.length === 0) {
-                return { message: 'No hay registros para migrar', migrated: 0 };
+            if (existingEntry) {
+                badResponse.message = 'Ya existe una entrada de inventario con este número de control';
+                return badResponse;
             }
 
-            const grouped = new Map<string, typeof historyRecords>();
+            const productIds = inventory.details.map(detail => detail.productId);
+            const products = await prisma.product.findMany({
+                where: { id: { in: productIds } }
+            });
+            const productMap = new Map(products.map(product => [product.id, product]));
 
-            for (const record of historyRecords) {
-                const day = record.movementDate.toISOString().slice(0, 10);
-                const key = `${record.controlNumber}-${day}`;
+            const totalAmount = inventory.details.reduce((sum, detail) => {
+                const price = Number(productMap.get(detail.productId)?.price || 0);
+                return sum + (price * detail.quantity);
+            }, 0);
 
-                if (!grouped.has(key)) {
-                    grouped.set(key, []);
+            const entry = await prisma.inventoryEntry.create({
+                data: {
+                    controlNumber: normalizedControlNumber,
+                    movementType: 'OUT',
+                    totalAmount,
+                    status: 'CREADA',
+                    title: inventory.description || 'Salida de inventario',
+                    description: inventory.description || '',
+                    date: inventory.date,
+                    supplierId: null,
                 }
-                grouped.get(key)!.push(record);
-            }
+            });
 
-            let migratedEntries = 0;
-            let migratedDetails = 0;
+            for (const detail of inventory.details) {
+                const product = productMap.get(detail.productId);
+                const unitPrice = Number(product?.price || 0);
+                const unitPriceUSD = Number(product?.priceUSD || 0);
+                const subtotal = unitPrice * detail.quantity;
 
-            for (const [key, records] of grouped) {
-                const firstRecord = records[0];
-                const controlNumber = firstRecord.controlNumber || `MIG-${key}`;
-
-                const existingEntry = await this.prismaService.inventoryEntry.findUnique({
-                    where: { controlNumber }
-                });
-
-                if (existingEntry) {
-                    continue;
-                }
-
-                const totalAmount = records.reduce((sum, r) => {
-                    const price = Number(r.product?.price || 0);
-                    return sum + (price * r.quantity);
-                }, 0);
-
-                const movementType = firstRecord.movementType;
-
-                const entry = await this.prismaService.inventoryEntry.create({
+                await prisma.inventoryEntryDetail.create({
                     data: {
-                        controlNumber,
-                        movementType,
-                        totalAmount,
-                        status: 'CREADA',
-                        title: `Migrado - ${controlNumber}`,
-                        description: firstRecord.description || '',
-                        date: firstRecord.movementDate,
+                        inventoryEntryId: entry.id,
+                        productId: detail.productId,
+                        quantity: detail.quantity,
+                        unitPrice,
+                        unitPriceUSD,
+                        subtotal,
                     }
                 });
 
-                const productAggregated = new Map<number, { quantity: number; price: number; priceUSD: number }>();
+                const findProductInventory = await prisma.inventory.findFirst({
+                    where: { productId: detail.productId }
+                });
 
-                for (const record of records) {
-                    const productId = record.productId;
-                    const price = Number(record.product?.price || 0);
-                    const priceUSD = Number(record.product?.priceUSD || 0);
-
-                    if (productAggregated.has(productId)) {
-                        const existing = productAggregated.get(productId)!;
-                        existing.quantity += record.quantity;
-                    } else {
-                        productAggregated.set(productId, {
-                            quantity: record.quantity,
-                            price,
-                            priceUSD
-                        });
-                    }
+                if (!findProductInventory) {
+                    badResponse.message = `El producto con ID ${detail.productId} no se encontró en el inventario.`;
+                    return badResponse;
                 }
 
-                for (const [productId, data] of productAggregated) {
-                    const subtotal = data.price * data.quantity;
-
-                    await this.prismaService.inventoryEntryDetail.create({
-                        data: {
-                            inventoryEntryId: entry.id,
-                            productId,
-                            quantity: data.quantity,
-                            unitPrice: data.price,
-                            unitPriceUSD: data.priceUSD,
-                            subtotal
+                await prisma.inventory.update({
+                    where: { id: findProductInventory.id },
+                    data: {
+                        quantity: {
+                            decrement: detail.quantity
                         }
-                    });
-                    migratedDetails++;
-                }
-
-                migratedEntries++;
+                    },
+                });
             }
 
-            return {
-                message: 'Migración completada exitosamente',
-                migratedEntries,
-                migratedDetails,
-                totalRecordsProcessed: historyRecords.length
-            };
-
-        } catch (error: any) {
-            throw new Error(`Error en la migración: ${error.message}`);
+            baseResponse.message = 'Productos actualizados en inventario.'
+            return baseResponse
+        }
+        catch (err) {
+            await this.prismaService.errorMessages.create({
+                data: { message: err instanceof Error ? err.message : String(err), from: 'inventoryService' }
+            })
+            badResponse.message = err instanceof Error ? err.message : String(err);
+            return badResponse;
         }
     }
 

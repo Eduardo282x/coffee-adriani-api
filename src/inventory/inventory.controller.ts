@@ -42,21 +42,6 @@ export class InventoryController {
         return await this.inventoryService.updateHistoryInventory(inventory);
     }
 
-    @Post('/history/update-control-number')
-    async updateHistoryData() {
-        return await this.inventoryService.updateHistoryData();
-    }
-
-    @Post('/migrate')
-    async migrateHistoryInventory() {
-        try {
-            return await this.inventoryService.migrateHistoryInventory();
-        } catch (error) {
-            console.error('Error migrating history inventory:', error);
-            throw error;
-        }
-    }
-
     @Get('/entries')
     async getInventoryEntries(
         @Query('page') page?: string,
