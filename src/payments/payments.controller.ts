@@ -27,6 +27,7 @@ export class PaymentsController {
         @Query('type') type?: string,
         @Query('typeDescription') typeDescription?: string,
         @Query('accountType') accountType?: string,
+        @Query('paymentType') paymentType?: string,
         @Query('credit') credit?: 'credit' | 'noCredit'
     ) {
         return await this.paymentService.getPaymentsPaginated({
@@ -40,6 +41,7 @@ export class PaymentsController {
             associated: associated === 'true' ? true : associated === 'false' ? false : undefined,
             type: type as string,
             accountType: accountType as string,
+            paymentType: paymentType as string,
             typeDescription: typeDescription as string,
             credit: credit as 'credit' | 'noCredit',
         });
@@ -57,6 +59,7 @@ export class PaymentsController {
         @Query('type') type?: string,
         @Query('accountType') accountType?: string,
         @Query('typeDescription') typeDescription?: string,
+        @Query('paymentType') paymentType?: string,
     ) {
         return await this.paymentService.getPaymentsStatistics({
             startDate: startDate ? startDate : undefined,
@@ -67,6 +70,7 @@ export class PaymentsController {
             search: search as string,
             type: type as string,
             accountType: accountType as string,
+            paymentType: paymentType as string,
             typeDescription: typeDescription as string,
             credit: credit as 'credit' | 'noCredit',
         });

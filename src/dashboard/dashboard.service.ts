@@ -194,6 +194,12 @@ export class DashboardService {
           totalRemainingUSD: r2(paymentStatistics.totals.totalRemainingUSD),
           counts: paymentStatistics.counts,
           byMethod: paymentStatistics.byMethod,
+          expenses: {
+            totalUSD: r2(paymentStatistics.expenses.totalUSD),
+            totalBs: r2(paymentStatistics.expenses.totalBs),
+            total: r2(paymentStatistics.expenses.total),
+            count: paymentStatistics.expenses.count,
+          },
         },
         inventory: {
           products: productsPercent,
@@ -396,9 +402,7 @@ export class DashboardService {
             gte: filter.startDate,
             lte: endDatePlusOne
           },
-          account: {
-            type: 'INCOME'
-          }
+          type: 'INCOME',
         },
         select: {
           paymentDate: true,

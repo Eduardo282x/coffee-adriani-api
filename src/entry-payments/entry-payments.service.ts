@@ -53,6 +53,11 @@ export class EntryPaymentsService {
                 return badResponse;
             }
 
+            await this.prismaService.payment.update({
+                where: { id: data.paymentId },
+                data: { type: 'SUPPLIER' }
+            });
+
             await this.prismaService.inventoryEntryPayment.create({
                 data: {
                     inventoryEntryId: data.inventoryEntryId,
@@ -173,7 +178,7 @@ export class EntryPaymentsService {
                     dolarId: data.dolarId || getDolar?.id || 1,
                     paymentDate: data.paymentDate,
                     status: 'CONFIRMED',
-                    isProviderPayment: true
+                    type: 'SUPPLIER'
                 }
             });
 

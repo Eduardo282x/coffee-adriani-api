@@ -59,14 +59,20 @@ export class ExpensesService {
 
     async getExpensesFilter(expenseFilter: ExpensesDTO) {
         try {
-            const [invoiceMetrics, payments, paymentsNoAssociatedRaw] = await Promise.all([
+            const [invoiceMetrics, payments, paymentsNoAssociatedRaw, paymentsExpensesRaw] = await Promise.all([
                 this.getInvoicesWithMetrics(expenseFilter),
                 this.getPayments(expenseFilter),
                 this.getPaymentsNoAssociated(expenseFilter),
+                this.getPaymentsExpenses(expenseFilter),
             ]);
 
             const paymentsNoAssociated = paymentsNoAssociatedRaw as unknown as any[];
             const calculateTotal = paymentsNoAssociated
+                .map(pay => Number(pay.amountUSD || 0))
+                .reduce((acc, item) => acc + item, 0)
+
+            const paymentsExpenses = paymentsExpensesRaw as unknown as any[];
+            const calculateTotalExpenses = paymentsExpenses
                 .map(pay => Number(pay.amountUSD || 0))
                 .reduce((acc, item) => acc + item, 0)
 
@@ -79,6 +85,10 @@ export class ExpensesService {
                 paymentsNoAssociated: {
                     payments: paymentsNoAssociated,
                     total: calculateTotal
+                },
+                paymentsExpenses: {
+                    payments: paymentsExpenses,
+                    total: calculateTotalExpenses
                 }
             };
         } catch (err) {
@@ -340,9 +350,7 @@ export class ExpensesService {
 
             const payments = await this.prismaService.payment.findMany({
                 where: {
-                    account: {
-                        name: { not: 'Gastos' }
-                    },
+                    type: 'INCOME',
                     paymentDate: {
                         gte: startDate,
                         lte: endDate
@@ -359,6 +367,41 @@ export class ExpensesService {
                     },
                     dolar: true
                 }
+            })
+
+            const parsePayments = payments.map(payment => ({
+                ...payment,
+                amountUSD: this.parsePaymentAmount(payment)
+            }));
+
+            return parsePayments;
+        } catch (err) {
+            badResponse.message = err instanceof Error ? err.message : 'Unknown error';
+            return badResponse;
+        }
+    }
+
+    async getPaymentsExpenses(expenseFilter: ExpensesDTO) {
+        try {
+            const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
+            const payments = await this.prismaService.payment.findMany({
+                where: {
+                    type: 'EXPENSE',
+                    paymentDate: {
+                        gte: startDate,
+                        lte: endDate
+                    }
+                },
+                include: {
+                    account: {
+                        include: {
+                            method: true
+                        }
+                    },
+                    dolar: true
+                },
+                orderBy: { paymentDate: 'desc' }
             })
 
             const parsePayments = payments.map(payment => ({

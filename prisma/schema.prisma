@@ -169,7 +169,6 @@ model AccountsPayments {
   bank      String
   methodId  Int
   method    PaymentMethod @relation(references: [id], fields: [methodId])
-  type      AccountType   @default(INCOME)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   Payment   Payment[]
@@ -188,7 +187,6 @@ model Payment {
   status                 PaymentStatus
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
-  isProviderPayment      Boolean                 @default(false)
   type                   AccountType             @default(INCOME)
   InvoicePayment         InvoicePayment[]
   inventoryEntryPayments InventoryEntryPayment[]
@@ -229,6 +227,7 @@ enum AccountType {
   INCOME
   EXPENSE
   SUPPLIER
+  PERSONAL_EXPENSES
 }
 
 enum EntryStatus {

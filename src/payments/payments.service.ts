@@ -54,6 +54,7 @@ interface PaymentFilter {
     type?: string;
     accountType?: string;
     typeDescription?: string;
+    paymentType?: string;
     search?: string;
     credit?: 'credit' | 'noCredit';
 }
@@ -79,12 +80,12 @@ export class PaymentsService {
 
     async getPaymentsPaginated(filters: PaymentFilterPaginate) {
         try {
-            const { page, limit, startDate, endDate, accountId, methodId, associated, type, typeDescription, accountType, credit, search } = filters;
+            const { page, limit, startDate, endDate, accountId, methodId, associated, type, typeDescription, accountType, paymentType, credit, search } = filters;
             const skip = (page - 1) * limit;
 
             // Construir where clause dinámicamente
             const where: any = {
-                isProviderPayment: false,
+                type: { not: 'SUPPLIER' },
             };
 
             if (startDate && endDate) {
@@ -106,7 +107,9 @@ export class PaymentsService {
                 } else {
                     where.InvoicePayment = {
                         none: {}
-                    }
+                    };
+                    // Los pagos sin relación con facturas se filtran por type INCOME
+                    where.type = 'INCOME';
                 }
             }
 
@@ -191,10 +194,7 @@ export class PaymentsService {
             }
 
             if (accountType) {
-                where.account = {
-                    ...where.account,
-                    type: accountType
-                };
+                where.type = accountType;
             }
 
             if (associated !== undefined) {
@@ -206,7 +206,13 @@ export class PaymentsService {
                     where.InvoicePayment = {
                         none: {}
                     };
+                    // Los pagos sin asociar a facturas se filtran por type INCOME
+                    where.type = 'INCOME';
                 }
+            }
+
+            if (paymentType) {
+                where.type = paymentType;
             }
 
             // Consulta principal con paginación
@@ -222,6 +228,7 @@ export class PaymentsService {
                         createdAt: true,
                         updatedAt: true,
                         accountId: true,
+                        type: true,
                         dolar: {
                             select: {
                                 id: true,
@@ -354,11 +361,12 @@ export class PaymentsService {
 
     async getPaymentsStatistics(filters: PaymentFilter) {
         try {
-            const { startDate, endDate, accountId, methodId, associated, type, accountType, typeDescription, credit, search } = filters;
+            const { startDate, endDate, accountId, methodId, associated, type, accountType, typeDescription, paymentType, credit, search } = filters;
 
             // Construir where clause dinámicamente
             const where: any = {
-                isProviderPayment: false
+                // Las estadísticas de ingresos solo consideran pagos INCOME
+                type: 'INCOME'
             };
 
             if (startDate && endDate) {
@@ -376,7 +384,8 @@ export class PaymentsService {
                 } else {
                     where.InvoicePayment = {
                         none: {}
-                    }
+                    };
+                    where.type = 'INCOME';
                 }
             }
 
@@ -463,10 +472,7 @@ export class PaymentsService {
             }
 
             if (accountType) {
-                where.account = {
-                    ...where.account,
-                    type: accountType
-                };
+                where.type = accountType;
             }
 
             if (associated !== undefined) {
@@ -478,7 +484,13 @@ export class PaymentsService {
                     where.InvoicePayment = {
                         none: {}
                     };
+                    // Los pagos sin asociar a facturas se filtran por type INCOME
+                    where.type = 'INCOME';
                 }
+            }
+
+            if (paymentType) {
+                where.type = paymentType;
             }
 
             const payments = await this.prismaService.payment.findMany({
@@ -660,6 +672,61 @@ export class PaymentsService {
                 };
             });
 
+            // Totales separados de gastos (pagos EXPENSE sin relación con facturas)
+            const expenseWhere: any = {
+                type: { in: ['EXPENSE', 'PERSONAL_EXPENSES'] }
+            };
+
+            if (startDate && endDate) {
+                expenseWhere.paymentDate = {
+                    gte: this.getStartOfDayUtc(startDate),
+                    lte: this.getEndOfDayUtc(endDate)
+                };
+            }
+
+            if (accountId) {
+                expenseWhere.accountId = accountId;
+            }
+
+            if (methodId) {
+                expenseWhere.account = {
+                    methodId: methodId
+                };
+            }
+
+            if (accountType) {
+                expenseWhere.type = accountType;
+            }
+
+            const expensePayments = await this.prismaService.payment.findMany({
+                where: expenseWhere,
+                select: {
+                    amount: true,
+                    account: {
+                        select: {
+                            method: {
+                                select: { currency: true }
+                            }
+                        }
+                    },
+                    dolar: {
+                        select: { dolar: true }
+                    }
+                }
+            });
+
+            const expensesTotalBs = expensePayments
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + Number(data.amount), 0);
+
+            const expensesTotalBsInUSD = expensePayments
+                .filter(item => item.account.method.currency === 'BS')
+                .reduce((acc, data) => acc + (Number(data.amount) / Number(data.dolar.dolar)), 0);
+
+            const expensesTotalUSD = expensePayments
+                .filter(item => item.account.method.currency === 'USD')
+                .reduce((acc, data) => acc + Number(data.amount), 0);
+
             return {
                 totals: {
                     totalBs: totalAmountBs,
@@ -669,6 +736,12 @@ export class PaymentsService {
                     totalRemainingBs,
                     totalRemainingUSD,
                     unassociatedAmount
+                },
+                expenses: {
+                    totalBs: expensesTotalBs,
+                    totalUSD: expensesTotalUSD,
+                    total: expensesTotalBsInUSD + expensesTotalUSD,
+                    count: expensePayments.length
                 },
                 counts: {
                     total: payments.length,
@@ -743,6 +816,9 @@ export class PaymentsService {
                     include: { invoice: { include: { client: { include: { block: true } } } } }
                 },
             },
+            where: {
+                type: { not: 'SUPPLIER' }
+            },
             orderBy: { paymentDate: 'desc' }
         }).then(pay =>
             pay.map(data => {
@@ -784,8 +860,7 @@ export class PaymentsService {
                 data: {
                     name: account.name,
                     bank: account.bank,
-                    methodId: account.methodId,
-                    type: account.type || 'INCOME'
+                    methodId: account.methodId
                 }
             });
             baseResponse.message = 'Cuenta de pago creada correctamente';
@@ -803,8 +878,7 @@ export class PaymentsService {
                 data: {
                     name: account.name,
                     bank: account.bank,
-                    methodId: account.methodId,
-                    type: account.type || 'INCOME'
+                    methodId: account.methodId
                 },
                 where: { id }
             });
@@ -833,7 +907,8 @@ export class PaymentsService {
                 paymentDate: {
                     gte: filter.startDate,
                     lte: filter.endDate
-                }
+                },
+                type: { not: 'SUPPLIER' }
             }
         }).then(pay =>
             pay.map(data => {
@@ -897,7 +972,7 @@ export class PaymentsService {
                     paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
-                    isProviderPayment: false
+                    type: payment.type || (accountZelle.name.toLowerCase().includes('gastos') ? 'EXPENSE' : 'INCOME')
                 }
             })
 
@@ -927,6 +1002,11 @@ export class PaymentsService {
                     paymentDate: payment.paymentDate,
                     status: accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
                     accountId: payment.accountId,
+                    ...(payment.type
+                        ? { type: payment.type }
+                        : accountZelle.name.toLowerCase().includes('gastos')
+                            ? { type: 'EXPENSE' }
+                            : {})
                 },
                 where: { id }
             })
@@ -969,6 +1049,16 @@ export class PaymentsService {
 
             if (!findPayment) {
                 badResponse.message = 'Pago no encontrado.';
+                return badResponse;
+            }
+
+            if (findPayment.type === 'SUPPLIER') {
+                badResponse.message = 'No se puede asociar un pago a proveedor a una factura.';
+                return badResponse;
+            }
+
+            if (findPayment.type === 'PERSONAL_EXPENSES') {
+                badResponse.message = 'No se puede asociar un gasto personal a una factura.';
                 return badResponse;
             }
 

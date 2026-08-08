@@ -1,5 +1,5 @@
 import { Transform, Type } from "class-transformer";
-import { IsArray, IsDate, IsNotEmpty, IsOptional, IsNumber, IsPositive, IsString, ValidateNested, IsBoolean } from "class-validator";
+import { IsArray, IsDate, IsNotEmpty, IsOptional, IsNumber, IsPositive, IsString, ValidateNested, IsBoolean, IsEnum } from "class-validator";
 import { AccountType } from "src/generated/prisma/enums";
 
 export class PaymentDTO {
@@ -16,6 +16,9 @@ export class PaymentDTO {
     @IsDate()
     @Transform(({ value }) => new Date(value))
     paymentDate: Date;
+    @IsOptional()
+    @IsEnum(AccountType)
+    type?: AccountType;
 }
 
 export class PayInvoiceDTO {
@@ -52,7 +55,4 @@ export class AccountsDTO {
     bank: string;
     @IsNumber()
     methodId: number;
-    @IsString()
-    @IsOptional()
-    type?: AccountType;
 }
