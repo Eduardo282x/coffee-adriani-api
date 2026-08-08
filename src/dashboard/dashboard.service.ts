@@ -143,14 +143,14 @@ export class DashboardService {
         totalInvoices === 0 ? 0 : Number(((amount / totalInvoices) * 100).toFixed(2));
 
       // 3. Procesar productos e inventario
-      const totalStock = inventory.reduce((acc, p) => acc + p.quantity, 0);
+      const totalStock = inventory.reduce((acc, p) => acc + Number(p.quantity), 0);
 
       const productsPercent = inventory.map(p => {
-        const productPercent = totalStock === 0 ? 0 : Number(((p.quantity / totalStock) * 100).toFixed(2));
+        const productPercent = totalStock === 0 ? 0 : Number(((Number(p.quantity) / totalStock) * 100).toFixed(2));
         return {
           id: p.id,
           name: `${p.product.name} ${p.product.presentation}`,
-          amount: r2(p.quantity as number),
+          amount: r2(Number(p.quantity)),
           percent: productPercent
         };
       });
