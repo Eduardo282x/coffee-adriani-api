@@ -1548,9 +1548,32 @@ export class InvoicesService {
                     (sum, item) => sum + (item.unitPrice * item.quantity), 0
                 );
 
+                const uniqueControlNumber = async (base: string) => {
+                    let candidate = base;
+                    let suffix = 1;
+                    while (await tx.inventoryEntry.findUnique({ where: { controlNumber: candidate } })) {
+                        candidate = `${base}-${suffix++}`;
+                    }
+                    return candidate;
+                };
+
+                const outEntry = await tx.inventoryEntry.findFirst({
+                    where: { controlNumber: invoice.controlNumber }
+                });
+
+                if (outEntry) {
+                    const cancelledControlNumber = await uniqueControlNumber(`ANULADO-${invoice.controlNumber}`);
+                    await tx.inventoryEntry.update({
+                        where: { id: outEntry.id },
+                        data: { controlNumber: cancelledControlNumber }
+                    });
+                }
+
+                const returnControlNumber = await uniqueControlNumber(`RETORNO-${invoice.controlNumber}`);
+
                 const entry = await tx.inventoryEntry.create({
                     data: {
-                        controlNumber: `RETORNO-${invoice.controlNumber}`,
+                        controlNumber: returnControlNumber,
                         movementType: 'ADJUSTMENT',
                         totalAmount,
                         status: 'CREADA',

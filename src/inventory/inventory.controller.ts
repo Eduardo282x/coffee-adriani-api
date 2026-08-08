@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import { DTOInventory, DTOInventorySimple, DTOUpdateHistoryInventory, CreateInventoryEntryDTO, InventoryEntryFilterDTO } from './inventory.dto';
+import { DTOInventory, DTOInventorySimple, DTOUpdateInventoryEntry, CreateInventoryEntryDTO, InventoryEntryFilterDTO } from './inventory.dto';
 
 @Controller('inventory')
 export class InventoryController {
@@ -15,7 +15,7 @@ export class InventoryController {
     }
 
     @Get('/history')
-    async getInventoryHistory(
+    async getInventoryMovements(
         @Query('page', ParseIntPipe) page: number,
         @Query('limit', ParseIntPipe) limit: number,
         @Query('startDate') startDate?: string,
@@ -24,7 +24,7 @@ export class InventoryController {
         @Query('typeProduct') typeProduct?: string,
         @Query('controlNumber') controlNumber?: string,
     ) {
-        return await this.inventoryService.getInventoryHistory({page, limit, startDate, endDate, typeMovement, typeProduct, controlNumber});
+        return await this.inventoryService.getInventoryMovements({page, limit, startDate, endDate, typeMovement, typeProduct, controlNumber});
     }
 
     @Post()
@@ -38,8 +38,8 @@ export class InventoryController {
     }
 
     @Put('/history')
-    async updateHistoryInventory(@Body() inventory: DTOUpdateHistoryInventory) {
-        return await this.inventoryService.updateHistoryInventory(inventory);
+    async updateInventoryEntryControlNumber(@Body() inventory: DTOUpdateInventoryEntry) {
+        return await this.inventoryService.updateInventoryEntryControlNumber(inventory);
     }
 
     @Get('/entries')

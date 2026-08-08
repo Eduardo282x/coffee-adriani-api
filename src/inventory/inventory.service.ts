@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DTOInventory, DTOInventoryHistory, DTOInventorySimple, DTOUpdateHistoryInventory, CreateInventoryEntryDTO, InventoryEntryFilterDTO } from './inventory.dto';
+import { DTOInventory, DTOInventoryDetail, DTOInventorySimple, DTOUpdateInventoryEntry, CreateInventoryEntryDTO, InventoryEntryFilterDTO } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
 import { Prisma } from 'src/generated/prisma/client';
@@ -35,7 +35,7 @@ export class InventoryService {
 
         try {
             return await this.prismaService.inventory.findMany({
-                orderBy: { id: 'asc' },
+                orderBy: { product: { priorityOrder: 'asc' } },
                 include: {
                     product: true
                 },
@@ -47,6 +47,7 @@ export class InventoryService {
             }).then(inv => inv.map(iv => {
                 return {
                     ...iv,
+                    quantity: Number(iv.quantity),
                     product: {
                         ...iv.product,
                         price: iv.product.price.toFixed(2),
@@ -64,7 +65,7 @@ export class InventoryService {
         }
     }
 
-    async getInventoryHistory(filter: {
+    async getInventoryMovements(filter: {
         page: number;
         limit: number;
         startDate?: string;
@@ -221,7 +222,7 @@ export class InventoryService {
                 if (findProductInInventory) {
                     await this.prismaService.inventory.update({
                         data: {
-                            quantity: findProductInInventory.quantity + detail.quantity
+                            quantity: Number(findProductInInventory.quantity) + Number(detail.quantity)
                         },
                         where: {
                             id: findProductInInventory.id
@@ -301,7 +302,7 @@ export class InventoryService {
         }
     }
 
-    async updateHistoryInventory(inventory: DTOUpdateHistoryInventory) {
+    async updateInventoryEntryControlNumber(inventory: DTOUpdateInventoryEntry) {
         try {
             const normalizedControlNumber = this.normalizeControlNumber(inventory.controlNumber);
 
@@ -624,7 +625,7 @@ export class InventoryService {
                     await this.prismaService.inventory.update({
                         where: { id: existingInventory.id },
                         data: {
-                            quantity: existingInventory.quantity + detail.quantity
+                            quantity: Number(existingInventory.quantity) + Number(detail.quantity)
                         }
                     });
                 } else {
@@ -728,7 +729,7 @@ export class InventoryService {
                     await this.prismaService.inventory.update({
                         where: { id: existingInventory.id },
                         data: {
-                            quantity: existingInventory.quantity + detail.quantity
+                            quantity: Number(existingInventory.quantity) + Number(detail.quantity)
                         }
                     });
                 } else {

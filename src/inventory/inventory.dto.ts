@@ -11,15 +11,15 @@ export class DTOInventory {
 
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => DTOInventoryHistory)
-    details: DTOInventoryHistory[];
+    @Type(() => DTOInventoryDetail)
+    details: DTOInventoryDetail[];
 
     @IsDate()
     @Transform(({ value }) => new Date(value))
     date: Date;
 }
 
-export class DTOInventoryHistory {
+export class DTOInventoryDetail {
     @IsNumber()
     @IsPositive()
     productId: number;
@@ -29,13 +29,13 @@ export class DTOInventoryHistory {
     quantity: number;
 }
 
-export class DTOInventorySimple extends DTOInventoryHistory{
+export class DTOInventorySimple extends DTOInventoryDetail{
     @IsString()
     @IsOptional()
     description?: string;
 }
 
-export class DTOUpdateHistoryInventory {
+export class DTOUpdateInventoryEntry {
     @IsString()
     controlNumberOld: string;
     @IsString()

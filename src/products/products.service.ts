@@ -85,7 +85,7 @@ export class ProductsService {
             const getDolar = await this.getDolar();
 
             return await this.prismaService.product.findMany({
-                orderBy: { id: 'asc' },
+                orderBy: { priorityOrder: 'desc' },
                 where: { deleted: false }
             }).then(res =>
                 res.map(data => {
