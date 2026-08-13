@@ -1,202 +1,213 @@
-import { Transform, Type } from "class-transformer";
-import { IsArray, IsBoolean, IsDate, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, ValidateNested } from "class-validator";
-import { InvoiceStatus } from "src/generated/prisma/enums";
-import { DTOInventoryDetail, DTOInventorySimple } from "src/inventory/inventory.dto";
+import { Transform, Type } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsDate,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
+import { InvoiceStatus } from 'src/generated/prisma/enums';
+import {
+  DTOInventoryDetail,
+  DTOInventorySimple,
+} from 'src/inventory/inventory.dto';
 
 export class DTOInvoice {
-    @IsNumber()
-    @IsNotEmpty({ message: 'El cliente es requerido' })
-    clientId: number;
-    @IsString()
-    @IsNotEmpty({ message: 'El numero de factura es requerido' })
-    controlNumber: string;
-    @IsBoolean()
-    consignment: boolean;
-    @IsBoolean()
-    priceUSD: boolean;
+  @IsNumber()
+  @IsNotEmpty({ message: 'El cliente es requerido' })
+  clientId: number;
+  @IsString()
+  @IsNotEmpty({ message: 'El numero de factura es requerido' })
+  controlNumber: string;
+  @IsBoolean()
+  consignment: boolean;
+  @IsBoolean()
+  priceUSD: boolean;
 
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    dispatchDate: Date;
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  dispatchDate: Date;
 
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    dueDate: Date;
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  dueDate: Date;
 
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => DetailInvoices)
-    details: DetailInvoices[]
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DetailInvoices)
+  details: DetailInvoices[];
 }
 
 export class DetailInvoices extends DTOInventoryDetail {
-    @IsString()
-    @IsOptional()
-    type: 'GIFT' | 'SALE';
-    @IsNumber()
-    @IsPositive()
-    price: number;
-    @IsNumber()
-    @IsPositive()
-    priceUSD: number;
+  @IsString()
+  @IsOptional()
+  type: 'GIFT' | 'SALE';
+  @IsNumber()
+  @IsPositive()
+  price: number;
+  @IsNumber()
+  @IsPositive()
+  priceUSD: number;
 }
 
 export interface IInvoice {
-    id: number;
-    clientId: number;
-    dispatchDate: Date;
-    dueDate: Date;
-    controlNumber: string;
-    exchangeRate: null;
-    totalAmount: number | any;
-    consignment: boolean;
-    status: string;
-    createdAt: Date;
-    updatedAt: Date;
-    payments: Payments[];
+  id: number;
+  clientId: number;
+  dispatchDate: Date;
+  dueDate: Date;
+  controlNumber: string;
+  exchangeRate: null;
+  totalAmount: number | any;
+  consignment: boolean;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  payments: Payments[];
 }
 export interface IInvoiceWithDetails extends IInvoice {
-    invoiceItems: DTOInventorySimple[];
+  invoiceItems: DTOInventorySimple[];
 }
 
 export interface Payments {
-    id: number;
-    invoiceId: number;
-    amount: number | null;
-    methodId: number;
-    exchangeRate: null;
-    paymentDate: Date;
-    status: string;
-    createdAt: Date;
-    updatedAt: Date;
+  id: number;
+  invoiceId: number;
+  amount: number | null;
+  methodId: number;
+  exchangeRate: null;
+  paymentDate: Date;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface DetProducts {
-    productId: number;
-    product: Product;
-    totalQuantity: number;
-    paidQuantity: number;
-    total: number;
+  productId: number;
+  product: Product;
+  totalQuantity: number;
+  paidQuantity: number;
+  total: number;
 }
 
 export interface Product {
-    id: number;
-    name: string;
-    presentation: string;
-    purchasePrice: string;
-    price: string;
-    priceUSD: string;
-    amount: number;
-    createdAt: Date;
-    updatedAt: Date;
+  id: number;
+  name: string;
+  presentation: string;
+  purchasePrice: string;
+  price: string;
+  priceUSD: string;
+  amount: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-
 export interface OptionalFilterInvoices {
-    status: InvoiceStatus;
+  status: InvoiceStatus;
 }
 
 export interface ResponseInvoice {
-    invoices: ResponseInvoiceInvoice[];
-    package: any;
-    detPackage: any;
-    payments: any;
+  invoices: ResponseInvoiceInvoice[];
+  package: any;
+  detPackage: any;
+  payments: any;
 }
 
-
 export interface ResponseInvoiceInvoice {
-    client: Client;
-    invoices: InvoiceInvoice[];
+  client: Client;
+  invoices: InvoiceInvoice[];
 }
 
 export interface Client {
-    id: number;
-    name: string;
-    rif: string;
-    address: string;
-    phone: string;
-    zone: string;
-    blockId: number;
-    active: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-    block: Block;
+  id: number;
+  name: string;
+  rif: string;
+  address: string;
+  phone: string;
+  zone: string;
+  blockId: number;
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  block: Block;
 }
 
 export interface Block {
-    id: number;
-    name: string;
-    address: string;
+  id: number;
+  name: string;
+  address: string;
 }
 
 export interface InvoiceInvoice {
-    id: number;
-    clientId: number;
-    dispatchDate: Date;
-    dueDate: Date;
-    controlNumber: string;
-    exchangeRate: null;
-    sellerId: null;
-    totalAmount: string;
-    remaining: string;
-    consignment: boolean;
-    status: InvoiceStatus;
-    createdAt: Date;
-    updatedAt: Date;
-    deleted: boolean;
-    invoiceItems: InvoiceItem[];
-    totalAmountBs: any;
+  id: number;
+  clientId: number;
+  dispatchDate: Date;
+  dueDate: Date;
+  controlNumber: string;
+  exchangeRate: null;
+  sellerId: null;
+  totalAmount: string;
+  remaining: string;
+  consignment: boolean;
+  status: InvoiceStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  deleted: boolean;
+  invoiceItems: InvoiceItem[];
+  totalAmountBs: any;
 }
 
 export interface InvoiceItem {
-    id: number;
-    invoiceId: number;
-    productId: number;
-    quantity: number;
-    unitPriceUSD: string;
-    unitPrice: string;
-    subtotal: string;
-    product: Product;
+  id: number;
+  invoiceId: number;
+  productId: number;
+  quantity: number;
+  unitPriceUSD: string;
+  unitPrice: string;
+  subtotal: string;
+  product: Product;
 }
-
-
 
 // Statistics Invoice Interface
 export interface InvoiceStatistics {
-    package:           number;
-    packagePaid:       number;
-    packagePending:    number;
-    packagePaidUSD:    number;
-    packagePaidBS:     number;
-    packagePendingUSD: number;
-    packagePendingBS:  number;
-    detPackage:        DetPackage[];
-    payments:          PaymentsStatistics;
-    summary:           Summary;
+  package: number;
+  packagePaid: number;
+  packagePending: number;
+  packagePaidUSD: number;
+  packagePaidBS: number;
+  packagePendingUSD: number;
+  packagePendingBS: number;
+  detPackage: DetPackage[];
+  detPackageLost: DetPackage[];
+  packageLostTotal: number;
+  payments: PaymentsStatistics;
+  summary: Summary;
 }
 
 export interface DetPackage {
-    productId:          number;
-    product:            string;
-    totalQuantity:      number;
-    paidQuantity:       number;
-    pendingQuantity:    number;
-    paidQuantityUSD:    number;
-    paidQuantityBS:     number;
-    pendingQuantityUSD: number;
-    pendingQuantityBS:  number;
+  productId: number;
+  product: string;
+  totalQuantity: number;
+  paidQuantity: number;
+  pendingQuantity: number;
+  paidQuantityUSD: number;
+  paidQuantityBS: number;
+  pendingQuantityUSD: number;
+  pendingQuantityBS: number;
 }
 
 export interface PaymentsStatistics {
-    total:        number;
-    totalPending: number;
-    totalPaid:    number;
-    debt:         number;
-    remaining:    number;
+  total: number;
+  totalPending: number;
+  totalPaid: number;
+  debt: number;
+  remaining: number;
 }
 
 export interface Summary {
-    invoiceCount:        number;
-    averageInvoiceValue: number;
-    paymentPercentage:   number;
+  invoiceCount: number;
+  averageInvoiceValue: number;
+  paymentPercentage: number;
 }

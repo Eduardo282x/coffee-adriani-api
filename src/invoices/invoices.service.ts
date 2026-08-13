@@ -1,7 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { badResponse, baseResponse, DashboardExcel, DTOBaseResponse, DTODateRangeFilter } from 'src/dto/base.dto';
+import {
+  badResponse,
+  baseResponse,
+  DashboardExcel,
+  DTOBaseResponse,
+  DTODateRangeFilter,
+} from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { DetProducts, DTOInvoice, IInvoiceWithDetails, InvoiceStatistics, OptionalFilterInvoices, ResponseInvoice } from './invoice.dto';
+import {
+  DetProducts,
+  DTOInvoice,
+  IInvoiceWithDetails,
+  InvoiceStatistics,
+  OptionalFilterInvoices,
+  ResponseInvoice,
+} from './invoice.dto';
 import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
@@ -14,1829 +27,2206 @@ import { N8nService } from 'src/n8n/n8n.service';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 interface FilterInvoice {
-    page?: number;
-    limit?: number;
-    type: string;
+  page?: number;
+  limit?: number;
+  type: string;
 
-    startDate?: string;
-    search?: string;
-    endDate?: string;
-    blockId?: string;
-    zone?: string;
-    status?: string;
-    filter?: OptionalFilterInvoices;
+  startDate?: string;
+  search?: string;
+  endDate?: string;
+  blockId?: string;
+  zone?: string;
+  status?: string;
+  filter?: OptionalFilterInvoices;
 }
 
 @Injectable()
 export class InvoicesService {
+  constructor(
+    private readonly prismaService: PrismaService,
+    private readonly productService: ProductsService,
+    private readonly inventoryService: InventoryService,
+    private readonly clientService: ClientsService,
+    private readonly n8nService: N8nService,
+  ) {}
 
-    constructor(
-        private readonly prismaService: PrismaService,
-        private readonly productService: ProductsService,
-        private readonly inventoryService: InventoryService,
-        private readonly clientService: ClientsService,
-        private readonly n8nService: N8nService,
-    ) {
-
+  private getStartOfDayUtc(date: string) {
+    if (date.length > 10) {
+      return new Date(date);
     }
+    return new Date(`${date}T00:00:00.000Z`);
+  }
 
-    private getStartOfDayUtc(date: string) {
-        if (date.length > 10) {
-            return new Date(date);
-        }
-        return new Date(`${date}T00:00:00.000Z`);
+  private getEndOfDayUtc(date: string) {
+    if (date.length > 10) {
+      return new Date(date);
     }
+    return new Date(`${date}T23:59:59.999Z`);
+  }
 
-    private getEndOfDayUtc(date: string) {
-        if (date.length > 10) {
-            return new Date(date);
-        }
-        return new Date(`${date}T23:59:59.999Z`);
+  async notifyInvoiceCreated(
+    invoiceId: number,
+    clientId: number,
+    controlNumber: string,
+    totalAmount: number,
+  ) {
+    try {
+      const client = await this.prismaService.client.findUnique({
+        where: { id: clientId },
+        select: {
+          name: true,
+          block: {
+            select: { name: true, id: true },
+          },
+        },
+      });
+
+      if (!client) return;
+
+      const invoiceItems = await this.prismaService.invoiceProduct.findMany({
+        where: { invoiceId },
+        select: {
+          quantity: true,
+          type: true,
+          product: {
+            select: { presentation: true, type: true },
+          },
+        },
+      });
+
+      const hasCafeProduct = invoiceItems.some(
+        (item) => item.product.type === 'Cafe',
+      );
+      if (!hasCafeProduct) return;
+
+      const itemsPending = invoiceItems
+        .filter((item) => item.type === 'SALE')
+        .reduce((sum, item) => {
+          const conversionFactor =
+            item.product.presentation === '1kilo' &&
+            item.product.type === 'Cafe'
+              ? 0.2
+              : 1;
+          return sum + Number(item.quantity) * conversionFactor;
+        }, 0);
+
+      await this.n8nService.sendInvoiceCreated({
+        client: client.name,
+        controlNumber,
+        itemsPending: Math.round(itemsPending * 100) / 100,
+        moneyPending: Math.round(totalAmount * 100) / 100,
+        block: client.block?.name || '',
+        blockId: client.block?.id || 0,
+      });
+    } catch (error: any) {
+      console.error('Error notifying n8n:', error.message);
     }
-
-    async notifyInvoiceCreated(invoiceId: number, clientId: number, controlNumber: string, totalAmount: number) {
-        try {
-            const client = await this.prismaService.client.findUnique({
-                where: { id: clientId },
-                select: {
-                    name: true,
-                    block: {
-                        select: { name: true, id: true }
-                    }
-                }
-            });
-
-            if (!client) return;
-
-            const invoiceItems = await this.prismaService.invoiceProduct.findMany({
-                where: { invoiceId },
-                select: {
-                    quantity: true,
-                    type: true,
-                    product: {
-                        select: { presentation: true, type: true }
-                    }
-                }
-            });
-
-            const hasCafeProduct = invoiceItems.some(item => item.product.type === 'Cafe');
-            if (!hasCafeProduct) return;
-
-            const itemsPending = invoiceItems
-                .filter(item => item.type === 'SALE')
-                .reduce((sum, item) => {
-                    const conversionFactor = item.product.presentation === '1kilo' && item.product.type === 'Cafe' ? 0.2 : 1;
-                    return sum + Number(item.quantity) * conversionFactor;
-                }, 0);
-
-            await this.n8nService.sendInvoiceCreated({
-                client: client.name,
-                controlNumber,
-                itemsPending: Math.round(itemsPending * 100) / 100,
-                moneyPending: Math.round(totalAmount * 100) / 100,
-                block: client.block?.name || '',
-                blockId: client.block?.id || 0
-            });
-        } catch (error: any) {
-            console.error('Error notifying n8n:', error.message);
-        }
-    }
-
-    async getInvoicesPaginated(filters: FilterInvoice) {
-        try {
-            const {
-                page = 1,
-                limit = 50,
-                type,
-                zone,
-                startDate,
-                endDate,
-                search,
-                blockId,
-                status,
-                filter,
-            } = filters;
-
-            const offset = (page - 1) * limit;
-            const where: any = {};
-
-            if (filter?.status || status) {
-                const setStatusFilter = filter ? filter.status : status;
-                if (status == 'Abonadas') {
-                    where.OR = [
-                        {
-                            status: {
-                                notIn: ['Cancelada', 'Pagado']
-                            }
-                        },
-                    ];
-                    where.AND = {
-                        InvoicePayment: {
-                            some: {}
-                        }
-                    };
-                } else {
-                    where.status = setStatusFilter as InvoiceStatus
-                }
-            }
-
-            if (search) {
-                where.OR = [
-                    {
-                        client: {
-                            name: {
-                                contains: search,
-                                mode: 'insensitive'
-                            }
-                        }
-                    },
-                    {
-                        controlNumber: {
-                            contains: search,
-                            mode: 'insensitive'
-                        }
-                    }
-                ]
-            }
-            if (zone) {
-                where.client = {
-                    ...where.client,
-                    zone: {
-                        contains: zone,
-                        mode: 'insensitive'
-                    }
-                }
-            }
-            if (blockId) {
-                where.client = {
-                    ...where.client,
-                    blockId: Number(blockId)
-                };
-            }
-
-            if (type) {
-                // Filtrar por el campo `product.type` (string) en lugar del enum `InvoiceTypeProduct`
-                where.invoiceItems = {
-                    some: {
-                        product: {
-                            type: type
-                        }
-                    }
-                }
-            }
-
-            if (startDate && endDate) {
-                where.dispatchDate = {
-                    gte: this.getStartOfDayUtc(startDate),
-                    lte: this.getEndOfDayUtc(endDate)
-                }
-            }
-
-            // Consulta optimizada con menos includes iniciales
-            const [invoices, totalCount, allMatchingInvoices] = await Promise.all([
-                this.prismaService.invoice.findMany({
-                    select: {
-                        id: true,
-                        controlNumber: true,
-                        consignment: true,
-                        status: true,
-                        dispatchDate: true,
-                        dueDate: true,
-                        totalAmount: true,
-                        clientId: true,
-                        InvoicePayment: {
-                            select: {
-                                amount: true
-                            }
-                        },
-                        invoiceItems: {
-                            select: {
-                                quantity: true,
-                                type: true,
-                                product: { select: { presentation: true } }
-                            }
-                        },
-                        client: {
-                            select: {
-                                id: true,
-                                name: true,
-                                rif: true,
-                                zone: true,
-                                blockId: true,
-                                block: {
-                                    select: {
-                                        id: true,
-                                        name: true
-                                    }
-                                }
-                            },
-                        },
-                    },
-                    orderBy: {
-                        dispatchDate: 'desc'
-                    },
-                    where,
-                    skip: offset,
-                    take: limit,
-                }),
-                this.prismaService.invoice.count({ where }),
-                this.prismaService.invoice.findMany({
-                    select: {
-                        totalAmount: true,
-                        InvoicePayment: { select: { amount: true } },
-                        invoiceItems: {
-                            select: {
-                                quantity: true,
-                                type: true,
-                                product: { select: { presentation: true } }
-                            }
-                        }
-                    },
-                    where
-                })
-            ]);
-
-            // Formatear datos
-            const formattedInvoices = invoices.map(invoice => {
-                const totalItems = this.calculateInvoiceItems(invoice.invoiceItems);
-                const remaining = Number(calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment));
-                const totalAmount = Number(invoice.totalAmount);
-                return {
-                    ...invoice,
-                    totalAmount: totalAmount.toFixed(2),
-                    remaining: remaining.toFixed(2),
-                    totalItems: Number(totalItems.toFixed(4)),
-                    pendingItems: totalAmount > 0 ? Number((totalItems * (remaining / totalAmount)).toFixed(4)) : 0,
-                };
-            });
-
-            const summaryTotalItems = allMatchingInvoices.reduce(
-                (sum, inv) => sum + this.calculateInvoiceItems(inv.invoiceItems), 0
-            );
-            const summaryPendingItems = allMatchingInvoices.reduce((sum, inv) => {
-                const totalItems = this.calculateInvoiceItems(inv.invoiceItems);
-                const remaining = Number(calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment));
-                const totalAmount = Number(inv.totalAmount);
-                return sum + (totalAmount > 0 ? totalItems * (remaining / totalAmount) : 0);
-            }, 0);
-
-            // Agrupar por cliente
-            const groupedByClient = formattedInvoices.reduce((acc, invoice) => {
-                const clientId = invoice.client.id;
-
-                if (!acc[clientId]) {
-                    acc[clientId] = {
-                        client: invoice.client,
-                        invoices: [],
-                    };
-                }
-
-                const invoiceWithoutClient = { ...invoice };
-                delete invoiceWithoutClient.client;
-                acc[clientId].invoices.push(invoiceWithoutClient);
-                return acc;
-            }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
-
-            return {
-                invoices: Object.values(groupedByClient),
-                pagination: {
-                    page,
-                    limit,
-                    totalCount,
-                    totalPages: Math.ceil(totalCount / limit),
-                    hasNext: page < Math.ceil(totalCount / limit),
-                    hasPrev: page > 1,
-                    totalItems: Number(summaryTotalItems.toFixed(4)),
-                    pendingItems: Number(summaryPendingItems.toFixed(4)),
-                }
-            };
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            });
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    // 2. Endpoint separado para estadísticas (solo cuando se necesite)
-    async getInvoiceStatistics(filters: FilterInvoice): Promise<InvoiceStatistics | DTOBaseResponse> {
-        try {
-            const {
-                type,
-                zone,
-                startDate,
-                endDate,
-                search,
-                blockId,
-                status,
-            } = filters;
-
-            const where: any = {};
-            if (status) {
-                if (status == 'Abonadas') {
-                    where.OR = [
-                        {
-                            status: {
-                                notIn: ['Cancelada', 'Pagado']
-                            }
-                        },
-                    ];
-                    where.AND = {
-                        InvoicePayment: {
-                            some: {}
-                        }
-                    };
-                } else {
-                    where.status = status as InvoiceStatus
-                }
-            }
-
-            if (search) {
-                where.OR = [
-                    {
-                        client: {
-                            name: {
-                                contains: search,
-                                mode: 'insensitive'
-                            }
-                        }
-                    },
-                    {
-                        controlNumber: {
-                            contains: search,
-                            mode: 'insensitive'
-                        }
-                    }
-                ]
-            }
-            if (zone) {
-                where.client = {
-                    ...where.client,
-                    zone: {
-                        contains: zone,
-                        mode: 'insensitive'
-                    }
-                }
-            }
-            if (blockId) {
-                where.client = {
-                    ...where.client,
-                    blockId: Number(blockId)
-                };
-            }
-
-            if (type) {
-                // Filtrar por el campo `product.type` (string) para evitar el enum InvoiceTypeProduct
-                where.invoiceItems = {
-                    some: {
-                        product: {
-                            type: type
-                        }
-                    }
-                }
-            }
-
-            if (startDate && endDate) {
-                where.dispatchDate = {
-                    gte: this.getStartOfDayUtc(startDate),
-                    lte: this.getEndOfDayUtc(endDate)
-                }
-            }
-
-
-            // Obtener productos y tasa de cambio actual
-            const [products, currentDolar] = await Promise.all([
-                this.prismaService.product.findMany(),
-                this.productService.getDolar() // Asumiendo que tienes este método
-            ]);
-
-            // Consulta completa de facturas con todos los datos necesarios
-            const invoicesWithDetails = await this.prismaService.invoice.findMany({
-                where,
-                select: {
-                    id: true,
-                    totalAmount: true,
-                    status: true,
-                    exchangeRate: true, // Para saber si fue pagada en USD
-                    invoiceItems: {
-                        select: {
-                            productId: true,
-                            quantity: true,
-                            unitPrice: true,    // Precio en BS
-                            unitPriceUSD: true, // Precio en USD
-                            subtotal: true,
-                            type: true
-                        }
-                    },
-                    InvoicePayment: {
-                        select: {
-                            amount: true,
-                            payment: {
-                                select: {
-                                    amount: true,
-                                    dolar: {
-                                        select: {
-                                            dolar: true
-                                        }
-                                    },
-                                    account: {
-                                        select: {
-                                            method: {
-                                                select: {
-                                                    currency: true
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Calcular estadísticas por producto con separación de monedas
-            const productStatsMap = new Map<number, {
-                productId: number;
-                product: string;
-                totalQuantity: number;
-                paidQuantity: number;
-                pendingQuantity: number;
-                paidQuantityUSD: number;    // NUEVO: Cantidad pagada en USD
-                paidQuantityBS: number;     // NUEVO: Cantidad pagada en BS
-                pendingQuantityUSD: number; // NUEVO: Cantidad pendiente en USD
-                pendingQuantityBS: number;  // NUEVO: Cantidad pendiente en BS
-            }>();
-
-            let totalCash = 0;
-            let totalPending = 0;
-            let totalPackages = 0;
-
-            // Variables para totales por moneda
-            let totalPaidPackagesUSD = 0;
-            let totalPaidPackagesBS = 0;
-            let totalPendingPackagesUSD = 0;
-            let totalPendingPackagesBS = 0;
-
-            // Procesar cada factura
-            for (const invoice of invoicesWithDetails) {
-                const invoiceTotal = Number(invoice.totalAmount);
-                const invoiceRemaining = invoice.status == 'Pagado'
-                    ? 0
-                    : calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment);
-                const invoicePaid = invoiceTotal - invoiceRemaining;
-
-                totalCash += invoiceTotal;
-                totalPending += invoiceRemaining;
-
-                // Determinar si la factura fue pagada en USD o BS
-                const wasInvoiceInUSD = invoice.exchangeRate && invoice.exchangeRate > 0;
-                const exchangeRateUsed = currentDolar;
-                // Obtener información detallada de los pagos por moneda
-                const paymentsByCurrency = this.analyzeInvoicePaymentsByCurrency(invoice.InvoicePayment);
-                // Procesar cada producto de la factura
-                for (const item of invoice.invoiceItems) {
-                    // Solo contar productos de venta, no regalos
-                    // if (item.type === 'GIFT') continue;
-
-                    const product = products.find(p => p.id === item.productId);
-                    if (!product) continue;
-
-                    const productKey = item.productId;
-                    const productName = `${product.name} ${product.presentation}`;
-
-                    // Factor de conversión: si la presentación es '1kilo', cada unidad equivale a 0.2
-                    const conversionFactor = product.presentation == '1kilo' ? 0.2 : 1;
-                    // Cantidad efectiva (ajustada por presentación)
-                    const effectiveQuantity = Number(item.quantity) * conversionFactor;
-
-                    // Determinar el precio unitario correcto según la moneda de pago
-                    let unitPriceToUse: number;
-                    let unitPriceUSD: number;
-                    let unitPriceBS: number;
-
-                    if (wasInvoiceInUSD) {
-                        // Si la factura fue en USD, usar precio USD
-                        unitPriceToUse = Number(item.unitPriceUSD) || Number(item.unitPrice) / Number(exchangeRateUsed);
-                        unitPriceUSD = unitPriceToUse;
-                        unitPriceBS = unitPriceToUse * Number(exchangeRateUsed);
-                    } else {
-                        // Si la factura fue en BS, usar precio BS
-                        unitPriceToUse = Number(item.unitPrice);
-                        unitPriceBS = unitPriceToUse;
-                        unitPriceUSD = unitPriceToUse / Number(exchangeRateUsed);
-                    }
-
-                    // Calcular cuánto se ha pagado de este producto específico (monto)
-                    const itemSubtotal = Number(item.subtotal);
-                    const proportionPaid = invoiceTotal > 0 ? invoicePaid / invoiceTotal : 0;
-                    const itemPaidAmount = itemSubtotal * proportionPaid;
-
-                    // Calcular cantidad pagada en unidades (con decimales) y ajustarla por el factor de conversión
-                    const paidQuantityRaw = unitPriceToUse > 0 ? itemPaidAmount / unitPriceToUse : 0;
-                    const paidQuantity = paidQuantityRaw * conversionFactor;
-                    const pendingQuantity = Math.max(0, effectiveQuantity - paidQuantity);
-
-                    // NUEVO: Calcular cantidades pagadas y pendientes por moneda
-                    let paidQuantityUSD = 0;
-                    let paidQuantityBS = 0;
-                    let pendingQuantityUSD = 0;
-                    let pendingQuantityBS = 0;
-
-                    // Distribuir las cantidades pagadas según los pagos recibidos por moneda
-                    if (paymentsByCurrency.totalPaidUSD > 0 && paymentsByCurrency.totalPaidBS > 0) {
-                        // Factura pagada con ambas monedas - distribuir proporcionalmente
-                        const totalPaidInvoice = paymentsByCurrency.totalPaidUSD + paymentsByCurrency.totalPaidBS;
-                        const proportionUSD = paymentsByCurrency.totalPaidUSD / totalPaidInvoice;
-                        const proportionBS = paymentsByCurrency.totalPaidBS / totalPaidInvoice;
-
-                        paidQuantityUSD = paidQuantity * proportionUSD;
-                        paidQuantityBS = paidQuantity * proportionBS;
-                    } else if (paymentsByCurrency.totalPaidUSD > 0) {
-                        // Solo pagos en USD
-                        paidQuantityUSD = paidQuantity;
-                        paidQuantityBS = 0;
-                    } else {
-                        // Solo pagos en BS (o sin pagos)
-                        paidQuantityUSD = 0;
-                        paidQuantityBS = paidQuantity;
-                    }
-
-                    // Para cantidades pendientes, usar la moneda original de la factura
-                    if (wasInvoiceInUSD) {
-                        pendingQuantityUSD = pendingQuantity;
-                        pendingQuantityBS = 0;
-                    } else {
-                        pendingQuantityUSD = 0;
-                        pendingQuantityBS = pendingQuantity;
-                    }
-
-                    // Actualizar totales generales por moneda
-                    totalPaidPackagesUSD += paidQuantityUSD;
-                    totalPaidPackagesBS += paidQuantityBS;
-                    totalPendingPackagesUSD += pendingQuantityUSD;
-                    totalPendingPackagesBS += pendingQuantityBS;
-
-                    // Actualizar o crear estadísticas del producto
-                    const existing = productStatsMap.get(productKey);
-                    if (existing) {
-                        existing.totalQuantity += effectiveQuantity;
-                        existing.paidQuantity += paidQuantity;
-                        existing.pendingQuantity += pendingQuantity;
-                        existing.paidQuantityUSD += paidQuantityUSD;
-                        existing.paidQuantityBS += paidQuantityBS;
-                        existing.pendingQuantityUSD += pendingQuantityUSD;
-                        existing.pendingQuantityBS += pendingQuantityBS;
-                    } else {
-                        productStatsMap.set(productKey, {
-                            productId: item.productId,
-                            totalQuantity: effectiveQuantity,
-                            paidQuantity: paidQuantity,
-                            pendingQuantity: pendingQuantity,
-                            paidQuantityUSD: paidQuantityUSD,
-                            paidQuantityBS: paidQuantityBS,
-                            pendingQuantityUSD: pendingQuantityUSD,
-                            pendingQuantityBS: pendingQuantityBS,
-                            product: productName,
-                        });
-                    }
-
-                    totalPackages += effectiveQuantity;
-                }
-            }
-
-            // Convertir Map a Array y formatear decimales
-            const detPackage = Array.from(productStatsMap.values()).map(stats => ({
-                productId: stats.productId,
-                product: stats.product,
-                totalQuantity: stats.totalQuantity,
-                paidQuantity: stats.paidQuantity,
-                pendingQuantity: stats.pendingQuantity,
-                // NUEVOS CAMPOS: Separación por moneda
-                paidQuantityUSD: stats.paidQuantityUSD,
-                paidQuantityBS: stats.paidQuantityBS,
-                pendingQuantityUSD: stats.pendingQuantityUSD,
-                pendingQuantityBS: stats.pendingQuantityBS,
-            }));
-
-            // Calcular totales de paquetes pagados y pendientes
-            const totalPaidPackages = detPackage.reduce((sum, item) => sum + item.paidQuantity, 0);
-            const totalPendingPackages = detPackage.reduce((sum, item) => sum + item.pendingQuantity, 0);
-
-            return {
-                package: totalPackages,
-                packagePaid: totalPaidPackages,
-                packagePending: totalPendingPackages,
-                // NUEVOS TOTALES POR MONEDA
-                packagePaidUSD: totalPaidPackagesUSD,
-                packagePaidBS: totalPaidPackagesBS,
-                packagePendingUSD: totalPendingPackagesUSD,
-                packagePendingBS: totalPendingPackagesBS,
-                detPackage: detPackage.sort((a, b) => b.totalQuantity - a.totalQuantity),
-                payments: {
-                    debt: 0,
-                    remaining: (totalCash - totalPending),
-                    total: totalCash,
-                    totalPaid: (totalCash - totalPending),
-                    totalPending: totalPending,
-                },
-                summary: {
-                    invoiceCount: invoicesWithDetails.length,
-                    averageInvoiceValue: invoicesWithDetails.length > 0 ?
-                        Math.round((totalCash / invoicesWithDetails.length) * 100) / 100 : 0,
-                    paymentPercentage: totalCash > 0 ?
-                        Math.round(((totalCash - totalPending) / totalCash) * 10000) / 100 : 0
-                }
-            };
-
-        } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-
-            await this.prismaService.errorMessages.create({
-                data: {
-                    message: errMsg,
-                    from: 'InvoiceService',
-                }
-            });
-
-            badResponse.message = errMsg || 'Error calculating invoice statistics';
-            return badResponse;
-        }
-    }
-
-    // NUEVO MÉTODO AUXILIAR: Analizar pagos por moneda
-    private analyzeInvoicePaymentsByCurrency(invoicePayments: any[]): {
-        totalPaidUSD: number;
-        totalPaidBS: number;
-        paymentsUSD: number;
-        paymentsBS: number;
-    } {
-        let totalPaidUSD = 0;
-        let totalPaidBS = 0;
-        let paymentsUSD = 0;
-        let paymentsBS = 0;
-
-        for (const invPayment of invoicePayments) {
-            const paymentAmount = Number(invPayment.amount);
-            const paymentCurrency = invPayment.payment?.account?.method?.currency;
-
-            if (paymentCurrency === 'USD') {
-                totalPaidUSD += paymentAmount;
-                paymentsUSD++;
-            } else {
-                // BS o cualquier otra moneda se considera BS
-                totalPaidBS += paymentAmount;
-                paymentsBS++;
-            }
-        }
-
-        return {
-            totalPaidUSD: Math.round(totalPaidUSD * 100) / 100,
-            totalPaidBS: Math.round(totalPaidBS * 100) / 100,
-            paymentsUSD,
-            paymentsBS
-        };
-    }
-
-    // 3. Endpoint para obtener detalles de factura individual (lazy loading)
-    async getInvoiceDetails(invoiceId: number) {
-        try {
-            const invoice = await this.prismaService.invoice.findUnique({
-                where: { id: invoiceId },
-                include: {
-                    client: {
-                        select: {
-                            name: true,
-                            rif: true
-                        }
-                    },
-                    invoiceItems: {
-                        include: {
-                            product: true
-                        }
-                    },
-                    InvoicePayment: {
-                        include: {
-                            payment: {
-                                include: {
-                                    account: true
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            if (!invoice) {
-                return { ...badResponse, message: 'Invoice not found' };
-            }
-
-            return {
-                ...invoice,
-                totalAmount: invoice.totalAmount.toFixed(2),
-                remaining: calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment).toFixed(2)
-            };
-        } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            await this.prismaService.errorMessages.create({
-                data: { message: errMsg, from: 'InvoiceService' }
-            });
-            badResponse.message = errMsg;
-            return badResponse;
-        }
-    }
-
-    async getInvoices(filter?: OptionalFilterInvoices): Promise<ResponseInvoice | DTOBaseResponse> {
-        try {
-            const where: any = {};
-            if (filter && filter.status) {
-                where.status = filter.status as InvoiceStatus;
-            }
-
-            const [dolar, rawInvoices] = await Promise.all([
-                this.productService.getDolar(),
-                this.prismaService.invoice.findMany({
-                    include: {
-                        client: { include: { block: true } },
-                        invoiceItems: { include: { product: true } },
-                        InvoicePayment: { include: { payment: { include: { account: true } } } }
-                    },
-                    orderBy: { dispatchDate: 'desc' },
-                    where
-                })
-            ]);
-
-            const invoices = rawInvoices.map(data => ({
-                ...data,
-                totalAmount: data.totalAmount.toFixed(2),
-                remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment).toFixed(2)
-            }));
-
-            const groupedByClient = invoices.reduce((acc, invoice) => {
-                const clientId = invoice.client.id;
-
-                if (!acc[clientId]) {
-                    acc[clientId] = {
-                        client: invoice.client,
-                        invoices: [],
-                    };
-                }
-
-                const invoiceWithoutClient = { ...invoice };
-                delete invoiceWithoutClient.client;
-                acc[clientId].invoices.push(invoiceWithoutClient);
-                return acc;
-            }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
-
-            const result = Object.values(groupedByClient);
-            const totalPackageDetCount = this.groupProductCountInvoices(invoices);
-
-            const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
-            const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-
-            const realPending = totalCashInvoices - totalCashInvoicesPending;
-
-            return {
-                invoices: result,
-                package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
-                detPackage: totalPackageDetCount,
-                payments: {
-                    total: totalCashInvoices,
-                    totalPending: totalCashInvoicesPending,
-                    debt: 0,
-                    remaining: realPending,
-                },
-            };
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            })
-            return { message: err instanceof Error ? err.message : String(err), success: false };
-        }
-    }
-
-    async getInvoicesFilter(invoice: DTODateRangeFilter): Promise<ResponseInvoice | DTOBaseResponse> {
-        try {
-            const invoices = await this.prismaService.invoice.findMany({
-                include: {
-                    client: {
-                        include: { block: true }
-                    },
-                    invoiceItems: {
-                        include: {
-                            product: true
-                        }
-                    },
-                    InvoicePayment: {
-                        include: { payment: { include: { account: true } } }
-                    }
-                },
-                orderBy: {
-                    dispatchDate: 'desc'
-                },
-                where: {
-                    dispatchDate: {
-                        gte: invoice.startDate,
-                        lte: invoice.endDate
-                    }
-                }
-            }).then(inv =>
-                inv.map(data => {
-                    return {
-                        ...data,
-                        totalAmount: data.totalAmount.toFixed(2),
-                        remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment).toFixed(2)
-                    }
-                })
-            )
-
-            const groupedByClient = invoices.reduce((acc, invoice) => {
-                const clientId = invoice.client.id;
-
-                if (!acc[clientId]) {
-                    acc[clientId] = {
-                        client: invoice.client,
-                        invoices: [],
-                    };
-                }
-
-                const invoiceWithoutClient = { ...invoice };
-                delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
-                acc[clientId].invoices.push(invoiceWithoutClient);
-
-                return acc;
-            }, {} as Record<number, { client: typeof invoices[number]['client'], invoices: any[] }>);
-
-            const result = Object.values(groupedByClient);
-            const totalPackageDetCount = this.groupProductCountInvoices(invoices);
-
-            const totalCashInvoices = invoices.reduce((acc, item) => acc + Number(item.totalAmount), 0)
-            const totalCashInvoicesPending = invoices.filter(data => data.status == 'Creada' || data.status == 'Pendiente' || data.status == 'Vencida').reduce((acc, item) => acc + Number(item.remaining), 0)
-            const realPending = totalCashInvoices - totalCashInvoicesPending;
-
-            return {
-                invoices: result,
-                package: totalPackageDetCount.reduce((acc, item: any) => acc + item.totalQuantity, 0),
-                detPackage: totalPackageDetCount,
-                payments: {
-                    total: totalCashInvoices,
-                    totalPending: totalCashInvoicesPending,
-                    debt: 0,
-                    remaining: realPending,
-                },
-            };
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    async getInvoicesExpired(): Promise<ResponseInvoice | DTOBaseResponse> {
-        try {
-            return await this.getInvoices({ status: 'Vencida' }) as ResponseInvoice
-        } catch (err) {
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    async getInvoiceWithDetails() {
-        try {
-            const invoice = await this.prismaService.invoice.findMany({
-                select: {
-                    id: true,
-                    controlNumber: true,
-                    totalAmount: true,
-                    clientId: true,
-                    InvoicePayment: {
-                        select: {
-                            amount: true
-                        }
-                    },
-                    client: {
-                        select: {
-                            id: true,
-                            name: true,
-                            block: true
-                        }
-                    },
-                    invoiceItems: {
-                        select: {
-                            id: true,
-                            type: true,
-                            unitPriceUSD: true,
-                            quantity: true,
-                        }
-                    }
-                    // invoiceItems: {
-                    //     select: {
-                    //         product: true
-                    //     }
-                    // }
-                },
-                where: {
-                    status: {
-                        notIn: ['Cancelada', 'Pagado']
-                    }
-                }
-            }).then(item => item.map(data => {
-                return {
-                    ...data,
-                    specialPrice: data.invoiceItems.filter(item => item.type == 'SALE').reduce((acc, det) => acc + (Number(det.unitPriceUSD) * Number(det.quantity)), 0),
-                    remaining: calculateInvoiceRemainingUsd(data.totalAmount, data.InvoicePayment)
-                }
-            }))
-
-            if (!invoice) {
-                badResponse.message = 'No se han encontrado facturas.'
-                return badResponse;
-            }
-
-            return invoice;
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            })
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    async checkInvoice() {
-        try {
-            const invoices = await this.prismaService.invoice.findMany({
-                include: {
-                    client: true,
-                    invoiceItems: true
-                },
-                where: {
-                    status: {
-                        not: {
-                            in: ['Pagado', 'Cancelada']
-                        }
-                    }
-                }
-            });
-
-            const clientReminderList = await this.prismaService.clientReminder.findMany();
-            const existingReminderClientIds = new Set(clientReminderList.map(cr => cr.clientId));
-
-            const toPending = invoices.filter(inv =>
-                this.isDateExpired(inv.dispatchDate) && inv.status === 'Creada'
-            );
-
-            const toExpired = invoices.filter(inv =>
-                this.isDateExpired(inv.dueDate) &&
-                (inv.status === 'Pendiente' || inv.status === 'Creada' || inv.status === 'Vencida')
-            );
-
-            const needReminder = toExpired.filter(inv =>
-                !existingReminderClientIds.has(inv.clientId)
-            );
-
-            await this.prismaService.$transaction(async (tx) => {
-                if (toPending.length > 0) {
-                    await tx.invoice.updateMany({
-                        where: { id: { in: toPending.map(i => i.id) } },
-                        data: { status: 'Pendiente' }
-                    });
-                }
-
-                if (toExpired.length > 0) {
-                    await tx.invoice.updateMany({
-                        where: { id: { in: toExpired.map(i => i.id) } },
-                        data: { status: 'Vencida' }
-                    });
-                }
-
-                if (needReminder.length > 0) {
-                    await tx.clientReminder.createMany({
-                        data: needReminder.map(inv => ({
-                            clientId: inv.clientId,
-                            messageId: 1,
-                            send: true,
-                        }))
-                    });
-                }
-            });
-
-            await this.generateInactivityNotifications();
-            return { message: 'Facturas verificadas y agregadas a cobranza.', success: true };
-        } catch (err) {
-            return { message: err instanceof Error ? err.message : String(err), success: false };
-        }
-    }
-
-    async generateInactivityNotifications() {
-        try {
-            const clients = await this.prismaService.client.findMany({
-                include: {
-                    invoices: {
-                        orderBy: { dueDate: 'desc' },
-                        take: 1,
-                    },
-                },
-            });
-
-            const now = new Date();
-            const staleClientIds: number[] = [];
-            const notificationsToCreate: { clientId: number; type: string; message: string; seen: boolean }[] = [];
-
-            for (const client of clients) {
-                const lastInvoice = client.invoices && client.invoices[0];
-                if (!lastInvoice) continue;
-
-                const threshold = addDays(new Date(lastInvoice.dueDate), 7);
-                if (threshold > now) continue;
-
-                staleClientIds.push(client.id);
-                notificationsToCreate.push({
-                    clientId: client.id,
-                    type: 'inactivity',
-                    message: `El Cliente ${client.name} no tiene pedidos desde ${format(new Date(lastInvoice.dueDate), 'dd/MM/yyyy')}`,
-                    seen: false,
-                });
-            }
-
-            if (staleClientIds.length > 0) {
-                await this.prismaService.$transaction(async (tx) => {
-                    await tx.notification.deleteMany({
-                        where: { clientId: { in: staleClientIds }, type: 'inactivity' }
-                    });
-                    await tx.notification.createMany({ data: notificationsToCreate });
-                });
-            }
-        } catch (error) {
-            await this.prismaService.errorMessages.create({
-                data: { message: (error instanceof Error ? error.message : String(error)), from: 'ClientService - InactivityNotifications' }
-            });
-        }
-    }
-
-    async checkInvoicePayments(invoiceId: number) {
-        try {
-            const findInvoice = await this.prismaService.invoice.findFirst({
-                where: { id: invoiceId }
-            });
-
-            if (!findInvoice) {
-                badResponse.message = 'No se encontró la factura';
-                return badResponse;
-            }
-
-            const findPaymentInvoice = await this.prismaService.invoicePayment.findMany({
-                where: { invoiceId: invoiceId }
-            });
-
-            const calculateRemaining = findPaymentInvoice.reduce((acc, item) => acc + Number(item.amount), 0);
-            const newRemaining = Number(findInvoice.totalAmount) - calculateRemaining;
-            await this.prismaService.invoice.update({
-                data: {
-                    status: newRemaining < 2 ? 'Pagado' : findInvoice.status
-                }, where: {
-                    id: invoiceId
-                }
-            });
-
-            const findInvoicesClient = await this.prismaService.invoice.findMany({
-                where: {
-                    clientId: findInvoice.clientId,
-                    status: 'Vencida'
-                }
-            });
-
-            if (!findInvoicesClient) {
-                const findClientReminder = await this.prismaService.clientReminder.findFirst({
-                    where: { clientId: findInvoice.clientId }
-                });
-
-                if (findClientReminder) {
-                    await this.prismaService.clientReminder.delete({
-                        where: { id: findClientReminder.id }
-                    })
-                }
-            }
-
-        } catch (err) {
-            badResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse;
-        }
-    }
-
-    // groupProductInvoices(invoicesFilter) {
-    //     return invoicesFilter.reduce((acc, invoice) => {
-    //         invoice.invoiceItems.forEach(item => {
-    //             const productId = item.product.id;
-
-    //             if (!acc[productId]) {
-    //                 acc[productId] = {
-    //                     productId: item.product.id,
-    //                     product: item.product,
-    //                     totalQuantity: 0,
-    //                 };
-    //             }
-
-    //             acc[productId].totalQuantity += Number(item.quantity);
-    //         })
-    //         return acc;
-    //     }, {} as Record<number, { product: typeof invoicesFilter[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
-    // }
-
-    groupProductCountInvoices(invoicesFilter) {
-        const calculateProducts = invoicesFilter.reduce((acc, invoice) => {
-            const parseRemaining = invoice.status == 'Pagado'
-                ? 0
-                : calculateInvoiceRemainingUsd(invoice.totalAmount, invoice.InvoicePayment || []);
-            let paidRemaining = Number(invoice.totalAmount) - parseRemaining;
-
-            invoice.invoiceItems.forEach(item => {
-                const productId = item.product.id;
-                const unitPrice = Number(item.unitPrice);
-                let quantity = Number(item.quantity);
-                let quantityPaid = 0;
-
-                // Calcular cuántas unidades se han pagado por este producto
-                while (quantity > 0 && paidRemaining >= unitPrice) {
-                    quantityPaid += 1;
-                    paidRemaining -= unitPrice;
-                    quantity -= 1;
-                }
-
-                // Si queda un pago parcial para una unidad (ej. 0.5 producto)
-                if (quantity > 0 && paidRemaining > 0) {
-                    const partialFraction = paidRemaining / unitPrice;
-                    quantityPaid += partialFraction;
-                    paidRemaining -= unitPrice * partialFraction;
-                    quantity -= partialFraction;
-                }
-
-                // Agregar al acumulador
-                if (!acc[productId]) {
-                    acc[productId] = {
-                        productId: item.product.id,
-                        product: item.product,
-                        totalQuantity: 0,
-                        paidQuantity: 0,
-                        total: 0,
-                    };
-                }
-
-                acc[productId].totalQuantity += Number(item.quantity);
-                acc[productId].paidQuantity += quantityPaid;
-                acc[productId].total = acc[productId].totalQuantity - quantityPaid;
-            });
-
-            return acc;
-        }, {} as Record<number, {
-            product: typeof invoicesFilter[number]['invoiceItems'][number]['product'],
-            totalQuantity: number,
-            paidQuantity: number
-        }>);
-        const parseProducts: DetProducts[] = Object.values(calculateProducts);
-
-        const calculateFinalTotal = parseProducts.map((data: DetProducts) => {
-            return {
-                ...data,
-                total: data.totalQuantity - data.paidQuantity
-            }
-        })
-        return calculateFinalTotal;
-    }
-
-    private calculateInvoiceItems(invoiceItems: any[]): number {
-        return invoiceItems
-            .filter(item => item.type === 'SALE')
-            .reduce((sum, item) => sum + (
-                item.product.presentation === '1kilo'
-                    ? Number(item.quantity) * 0.2
-                    : Number(item.quantity)
-            ), 0);
-    }
-
-    isDateExpired(dueDate: Date): boolean {
-        const today = new Date();
-        const cleanDueDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-        const cleanToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        return cleanDueDate < cleanToday;
-    }
-
-    async findInvoiceWithoutDetails() {
-        const invoices = await this.prismaService.invoice.findMany({
-            where: {
-                invoiceItems: {
-                    none: {}
-                }
+  }
+
+  async getInvoicesPaginated(filters: FilterInvoice) {
+    try {
+      const {
+        page = 1,
+        limit = 50,
+        type,
+        zone,
+        startDate,
+        endDate,
+        search,
+        blockId,
+        status,
+        filter,
+      } = filters;
+
+      const offset = (page - 1) * limit;
+      const where: any = {};
+
+      if (filter?.status || status) {
+        const setStatusFilter = filter ? filter.status : status;
+        if (status == 'Abonadas') {
+          where.OR = [
+            {
+              status: {
+                notIn: ['Cancelada', 'Pagado'],
+              },
             },
-            include: {
-                client: true,
-                invoiceItems: true
-            }
-        })
-
-        return invoices;
-    }
-
-    async InvoiceValidateTotal() {
-        const invoices = await this.prismaService.invoice.findMany({
-            include: {
-                client: true,
-                invoiceItems: true
-            }
-        })
-
-        const invoicesFailed = invoices.map(inv => {
-            const total = inv.invoiceItems.reduce((acc, item) => acc + Number(item.subtotal), 0);
-
-            if (total.toFixed(2) !== inv.totalAmount.toFixed(2)) {
-                return {
-                    ...inv,
-                    totalAmount: total
-                }
-            }
-        })
-
-        return invoicesFailed.filter(inv => inv != null);
-    }
-
-    async createInvoice(newInvoice: DTOInvoice) {
-        try {
-            const [findDuplicateControlNumber, inventory] = await Promise.all([
-                this.prismaService.invoice.findFirst({
-                    where: { controlNumber: newInvoice.controlNumber },
-                    include: { client: true }
-                }),
-                this.inventoryService.getInventory()
-            ]);
-
-            if (findDuplicateControlNumber) {
-                return { message: `Ya existe una factura con ese numero de control del cliente ${findDuplicateControlNumber.client.name}`, success: false };
-            }
-
-            const productInvalid = newInvoice.details.map(det => {
-                const findProduct = inventory.find(prod => prod.productId === det.productId);
-
-                if (!findProduct || det.quantity > findProduct.quantity) {
-                    return {
-                        product: findProduct?.product?.name || 'Desconocido',
-                        quantity: findProduct?.quantity || 0,
-                        amount: det.quantity
-                    }
-                } else {
-                    return null
-                }
-            })
-
-            if (productInvalid.filter(pro => pro !== null).length > 0) {
-                return { message: 'Estos productos exceden la cantidad que existe en inventario.', success: false };
-            }
-
-            const calculateTotalInvoice = newInvoice.details
-                .filter(item => (item.type || 'SALE') === 'SALE')
-                .reduce((acc, det) => acc + Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity), 0);
-
-            const saveInvoice = await this.prismaService.$transaction(async (tx) => {
-                const savedInvoice = await tx.invoice.create({
-                    data: {
-                        clientId: newInvoice.clientId,
-                        controlNumber: newInvoice.controlNumber,
-                        status: calculateTotalInvoice === 0 ? 'Pagado' : 'Creada',
-                        dispatchDate: newInvoice.dispatchDate,
-                        dueDate: newInvoice.dueDate,
-                        consignment: newInvoice.consignment,
-                        totalAmount: calculateTotalInvoice
-                    }
-                })
-
-                const dataDetailsInvoice = newInvoice.details.map(det => ({
-                    invoiceId: savedInvoice.id,
-                    productId: det.productId,
-                    quantity: det.quantity,
-                    type: det.type || 'SALE',
-                    unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
-                    unitPriceUSD: Number(det.priceUSD),
-                    subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
-                }));
-
-                await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
-
-                const inventoryResult = await this.inventoryService.updateInventoryInvoice({
-                    controlNumber: savedInvoice.controlNumber,
-                    description: `Salida de producto por factura ${savedInvoice.controlNumber}`,
-                    date: savedInvoice.dispatchDate,
-                    details: newInvoice.details.map(det => ({
-                        productId: det.productId,
-                        quantity: det.quantity,
-                    }))
-                }, tx);
-
-                if (!inventoryResult.success) {
-                    throw new Error(inventoryResult.message);
-                }
-
-                await tx.notification.deleteMany({
-                    where: {
-                        clientId: newInvoice.clientId,
-                        type: 'inactivity',
-                    },
-                });
-
-                return savedInvoice;
-            });
-
-            this.notifyInvoiceCreated(saveInvoice.id, newInvoice.clientId, newInvoice.controlNumber, calculateTotalInvoice);
-
-            return { message: 'Factura creada correctamente', success: true };
-
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            })
-            return { message: err instanceof Error ? err.message : String(err), success: false };
+          ];
+          where.AND = {
+            InvoicePayment: {
+              some: {},
+            },
+          };
+        } else {
+          where.status = setStatusFilter as InvoiceStatus;
         }
+      }
+
+      if (search) {
+        where.OR = [
+          {
+            client: {
+              name: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+          {
+            controlNumber: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        ];
+      }
+      if (zone) {
+        where.client = {
+          ...where.client,
+          zone: {
+            contains: zone,
+            mode: 'insensitive',
+          },
+        };
+      }
+      if (blockId) {
+        where.client = {
+          ...where.client,
+          blockId: Number(blockId),
+        };
+      }
+
+      if (type) {
+        // Filtrar por el campo `product.type` (string) en lugar del enum `InvoiceTypeProduct`
+        where.invoiceItems = {
+          some: {
+            product: {
+              type: type,
+            },
+          },
+        };
+      }
+
+      if (startDate && endDate) {
+        where.dispatchDate = {
+          gte: this.getStartOfDayUtc(startDate),
+          lte: this.getEndOfDayUtc(endDate),
+        };
+      }
+
+      // Consulta optimizada con menos includes iniciales
+      const [invoices, totalCount, allMatchingInvoices] = await Promise.all([
+        this.prismaService.invoice.findMany({
+          select: {
+            id: true,
+            controlNumber: true,
+            consignment: true,
+            status: true,
+            dispatchDate: true,
+            dueDate: true,
+            totalAmount: true,
+            clientId: true,
+            InvoicePayment: {
+              select: {
+                amount: true,
+              },
+            },
+            invoiceItems: {
+              select: {
+                quantity: true,
+                type: true,
+                product: { select: { presentation: true } },
+              },
+            },
+            client: {
+              select: {
+                id: true,
+                name: true,
+                rif: true,
+                zone: true,
+                blockId: true,
+                block: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: {
+            dispatchDate: 'desc',
+          },
+          where,
+          skip: offset,
+          take: limit,
+        }),
+        this.prismaService.invoice.count({ where }),
+        this.prismaService.invoice.findMany({
+          select: {
+            totalAmount: true,
+            InvoicePayment: { select: { amount: true } },
+            invoiceItems: {
+              select: {
+                quantity: true,
+                type: true,
+                product: { select: { presentation: true } },
+              },
+            },
+          },
+          where,
+        }),
+      ]);
+
+      // Formatear datos
+      const formattedInvoices = invoices.map((invoice) => {
+        const totalItems = this.calculateInvoiceItems(invoice.invoiceItems);
+        const remaining = Number(
+          calculateInvoiceRemainingUsd(
+            invoice.totalAmount,
+            invoice.InvoicePayment,
+          ),
+        );
+        const totalAmount = Number(invoice.totalAmount);
+        return {
+          ...invoice,
+          totalAmount: totalAmount.toFixed(2),
+          remaining: remaining.toFixed(2),
+          totalItems: Number(totalItems.toFixed(4)),
+          pendingItems:
+            totalAmount > 0
+              ? Number((totalItems * (remaining / totalAmount)).toFixed(4))
+              : 0,
+        };
+      });
+
+      const summaryTotalItems = allMatchingInvoices.reduce(
+        (sum, inv) => sum + this.calculateInvoiceItems(inv.invoiceItems),
+        0,
+      );
+      const summaryPendingItems = allMatchingInvoices.reduce((sum, inv) => {
+        const totalItems = this.calculateInvoiceItems(inv.invoiceItems);
+        const remaining = Number(
+          calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment),
+        );
+        const totalAmount = Number(inv.totalAmount);
+        return (
+          sum + (totalAmount > 0 ? totalItems * (remaining / totalAmount) : 0)
+        );
+      }, 0);
+
+      // Agrupar por cliente
+      const groupedByClient = formattedInvoices.reduce(
+        (acc, invoice) => {
+          const clientId = invoice.client.id;
+
+          if (!acc[clientId]) {
+            acc[clientId] = {
+              client: invoice.client,
+              invoices: [],
+            };
+          }
+
+          const invoiceWithoutClient = { ...invoice };
+          delete invoiceWithoutClient.client;
+          acc[clientId].invoices.push(invoiceWithoutClient);
+          return acc;
+        },
+        {} as Record<
+          number,
+          { client: (typeof invoices)[number]['client']; invoices: any[] }
+        >,
+      );
+
+      return {
+        invoices: Object.values(groupedByClient),
+        pagination: {
+          page,
+          limit,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limit),
+          hasNext: page < Math.ceil(totalCount / limit),
+          hasPrev: page > 1,
+          totalItems: Number(summaryTotalItems.toFixed(4)),
+          pendingItems: Number(summaryPendingItems.toFixed(4)),
+        },
+      };
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      badResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
     }
+  }
 
-    async updateInvoice(id: number, newInvoice: DTOInvoice) {
-        try {
-            const invoice = await this.prismaService.invoice.findUnique({
-                where: { id },
-                include: {
-                    invoiceItems: true
-                }
+  // 2. Endpoint separado para estadísticas (solo cuando se necesite)
+  async getInvoiceStatistics(
+    filters: FilterInvoice,
+  ): Promise<InvoiceStatistics | DTOBaseResponse> {
+    try {
+      const { type, zone, startDate, endDate, search, blockId, status } =
+        filters;
+
+      const where: any = {};
+      if (status) {
+        if (status == 'Abonadas') {
+          where.OR = [
+            {
+              status: {
+                notIn: ['Cancelada', 'Pagado'],
+              },
+            },
+          ];
+          where.AND = {
+            InvoicePayment: {
+              some: {},
+            },
+          };
+        } else {
+          where.status = status as InvoiceStatus;
+        }
+      }
+
+      if (search) {
+        where.OR = [
+          {
+            client: {
+              name: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+          {
+            controlNumber: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        ];
+      }
+      if (zone) {
+        where.client = {
+          ...where.client,
+          zone: {
+            contains: zone,
+            mode: 'insensitive',
+          },
+        };
+      }
+      if (blockId) {
+        where.client = {
+          ...where.client,
+          blockId: Number(blockId),
+        };
+      }
+
+      if (type) {
+        // Filtrar por el campo `product.type` (string) para evitar el enum InvoiceTypeProduct
+        where.invoiceItems = {
+          some: {
+            product: {
+              type: type,
+            },
+          },
+        };
+      }
+
+      if (startDate && endDate) {
+        where.dispatchDate = {
+          gte: this.getStartOfDayUtc(startDate),
+          lte: this.getEndOfDayUtc(endDate),
+        };
+      }
+
+      // Obtener productos y tasa de cambio actual
+      const [products, currentDolar] = await Promise.all([
+        this.prismaService.product.findMany(),
+        this.productService.getDolar(), // Asumiendo que tienes este método
+      ]);
+
+      // Consulta completa de facturas con todos los datos necesarios
+      const invoicesWithDetails = await this.prismaService.invoice.findMany({
+        where,
+        select: {
+          id: true,
+          totalAmount: true,
+          status: true,
+          exchangeRate: true, // Para saber si fue pagada en USD
+          invoiceItems: {
+            select: {
+              productId: true,
+              quantity: true,
+              unitPrice: true, // Precio en BS
+              unitPriceUSD: true, // Precio en USD
+              subtotal: true,
+              type: true,
+            },
+          },
+          InvoicePayment: {
+            select: {
+              amount: true,
+              payment: {
+                select: {
+                  amount: true,
+                  dolar: {
+                    select: {
+                      dolar: true,
+                    },
+                  },
+                  account: {
+                    select: {
+                      method: {
+                        select: {
+                          currency: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Calcular estadísticas por producto con separación de monedas
+      const productStatsMap = new Map<
+        number,
+        {
+          productId: number;
+          product: string;
+          totalQuantity: number;
+          paidQuantity: number;
+          pendingQuantity: number;
+          paidQuantityUSD: number; // NUEVO: Cantidad pagada en USD
+          paidQuantityBS: number; // NUEVO: Cantidad pagada en BS
+          pendingQuantityUSD: number; // NUEVO: Cantidad pendiente en USD
+          pendingQuantityBS: number; // NUEVO: Cantidad pendiente en BS
+        }
+      >();
+
+      let totalCash = 0;
+      let totalPending = 0;
+      let totalPackages = 0;
+
+      // Variables para totales por moneda
+      let totalPaidPackagesUSD = 0;
+      let totalPaidPackagesBS = 0;
+      let totalPendingPackagesUSD = 0;
+      let totalPendingPackagesBS = 0;
+
+      // Variables para estadísticas de facturas perdidas
+      let totalLostPackages = 0;
+      const lostProductStatsMap = new Map<
+        number,
+        {
+          productId: number;
+          product: string;
+          totalQuantity: number;
+          paidQuantity: number;
+          pendingQuantity: number;
+          paidQuantityUSD: number;
+          paidQuantityBS: number;
+          pendingQuantityUSD: number;
+          pendingQuantityBS: number;
+        }
+      >();
+
+      // Procesar cada factura
+      for (const invoice of invoicesWithDetails) {
+        const invoiceTotal = Number(invoice.totalAmount);
+        const invoiceRemaining =
+          invoice.status == 'Pagado'
+            ? 0
+            : calculateInvoiceRemainingUsd(
+                invoice.totalAmount,
+                invoice.InvoicePayment,
+              );
+        const invoicePaid = invoiceTotal - invoiceRemaining;
+
+        totalCash += invoiceTotal;
+        totalPending += invoiceRemaining;
+
+        // Determinar si la factura fue pagada en USD o BS
+        const wasInvoiceInUSD =
+          invoice.exchangeRate && invoice.exchangeRate > 0;
+        const exchangeRateUsed = currentDolar;
+        // Obtener información detallada de los pagos por moneda
+        const paymentsByCurrency = this.analyzeInvoicePaymentsByCurrency(
+          invoice.InvoicePayment,
+        );
+        // Determinar si la factura está marcada como perdida
+        const isLostInvoice = invoice.status === 'Perdidas';
+
+        // Procesar cada producto de la factura
+        for (const item of invoice.invoiceItems) {
+          // Solo contar productos de venta, no regalos
+          // if (item.type === 'GIFT') continue;
+
+          const product = products.find((p) => p.id === item.productId);
+          if (!product) continue;
+
+          const productKey = item.productId;
+          const productName = `${product.name} ${product.presentation}`;
+
+          const itemStats = this.computeItemStatistics(
+            item,
+            product,
+            exchangeRateUsed,
+            invoiceTotal,
+            invoicePaid,
+            wasInvoiceInUSD,
+            paymentsByCurrency,
+          );
+
+          const effectiveQuantity = itemStats.effectiveQuantity;
+          const paidQuantity = itemStats.paidQuantity;
+          const pendingQuantity = itemStats.pendingQuantity;
+          const paidQuantityUSD = itemStats.paidQuantityUSD;
+          const paidQuantityBS = itemStats.paidQuantityBS;
+          const pendingQuantityUSD = itemStats.pendingQuantityUSD;
+          const pendingQuantityBS = itemStats.pendingQuantityBS;
+
+          // Actualizar totales generales por moneda
+          totalPaidPackagesUSD += paidQuantityUSD;
+          totalPaidPackagesBS += paidQuantityBS;
+          totalPendingPackagesUSD += pendingQuantityUSD;
+          totalPendingPackagesBS += pendingQuantityBS;
+
+          // Actualizar o crear estadísticas del producto
+          const existing = productStatsMap.get(productKey);
+          if (existing) {
+            existing.totalQuantity += effectiveQuantity;
+            existing.paidQuantity += paidQuantity;
+            existing.pendingQuantity += pendingQuantity;
+            existing.paidQuantityUSD += paidQuantityUSD;
+            existing.paidQuantityBS += paidQuantityBS;
+            existing.pendingQuantityUSD += pendingQuantityUSD;
+            existing.pendingQuantityBS += pendingQuantityBS;
+          } else {
+            productStatsMap.set(productKey, {
+              productId: item.productId,
+              totalQuantity: effectiveQuantity,
+              paidQuantity: paidQuantity,
+              pendingQuantity: pendingQuantity,
+              paidQuantityUSD: paidQuantityUSD,
+              paidQuantityBS: paidQuantityBS,
+              pendingQuantityUSD: pendingQuantityUSD,
+              pendingQuantityBS: pendingQuantityBS,
+              product: productName,
             });
+          }
 
-            if (!invoice) {
-                return { message: 'Factura no encontrada', success: false };
+          totalPackages += effectiveQuantity;
+
+          // Acumular también en las estadísticas de facturas perdidas
+          if (isLostInvoice) {
+            const lostExisting = lostProductStatsMap.get(productKey);
+            if (lostExisting) {
+              lostExisting.totalQuantity += effectiveQuantity;
+              lostExisting.paidQuantity += paidQuantity;
+              lostExisting.pendingQuantity += pendingQuantity;
+              lostExisting.paidQuantityUSD += paidQuantityUSD;
+              lostExisting.paidQuantityBS += paidQuantityBS;
+              lostExisting.pendingQuantityUSD += pendingQuantityUSD;
+              lostExisting.pendingQuantityBS += pendingQuantityBS;
+            } else {
+              lostProductStatsMap.set(productKey, {
+                productId: item.productId,
+                totalQuantity: effectiveQuantity,
+                paidQuantity: paidQuantity,
+                pendingQuantity: pendingQuantity,
+                paidQuantityUSD: paidQuantityUSD,
+                paidQuantityBS: paidQuantityBS,
+                pendingQuantityUSD: pendingQuantityUSD,
+                pendingQuantityBS: pendingQuantityBS,
+                product: productName,
+              });
             }
 
-            const dataDetailsInvoice = newInvoice.details.map(det => ({
-                invoiceId: id,
+            totalLostPackages += effectiveQuantity;
+          }
+        }
+      }
+
+      // Convertir Map a Array y formatear decimales
+      const detPackage = Array.from(productStatsMap.values()).map((stats) => ({
+        productId: stats.productId,
+        product: stats.product,
+        totalQuantity: stats.totalQuantity,
+        paidQuantity: stats.paidQuantity,
+        pendingQuantity: stats.pendingQuantity,
+        // NUEVOS CAMPOS: Separación por moneda
+        paidQuantityUSD: stats.paidQuantityUSD,
+        paidQuantityBS: stats.paidQuantityBS,
+        pendingQuantityUSD: stats.pendingQuantityUSD,
+        pendingQuantityBS: stats.pendingQuantityBS,
+      }));
+
+      // Convertir Map de facturas perdidas a Array y formatear decimales
+      const detPackageLost = Array.from(lostProductStatsMap.values()).map(
+        (stats) => ({
+          productId: stats.productId,
+          product: stats.product,
+          totalQuantity: stats.totalQuantity,
+          paidQuantity: stats.paidQuantity,
+          pendingQuantity: stats.pendingQuantity,
+          paidQuantityUSD: stats.paidQuantityUSD,
+          paidQuantityBS: stats.paidQuantityBS,
+          pendingQuantityUSD: stats.pendingQuantityUSD,
+          pendingQuantityBS: stats.pendingQuantityBS,
+        }),
+      );
+
+      // Calcular totales de paquetes pagados y pendientes
+      const totalPaidPackages = detPackage.reduce(
+        (sum, item) => sum + item.paidQuantity,
+        0,
+      );
+      const totalPendingPackages = detPackage.reduce(
+        (sum, item) => sum + item.pendingQuantity,
+        0,
+      );
+
+      // Total de paquetes perdidos: sumatoria de todos los elementos
+      const packageLostTotal = detPackageLost.reduce(
+        (sum, item) => sum + item.totalQuantity,
+        0,
+      );
+
+      return {
+        package: totalPackages,
+        packagePaid: totalPaidPackages,
+        packagePending: totalPendingPackages,
+        // NUEVOS TOTALES POR MONEDA
+        packagePaidUSD: totalPaidPackagesUSD,
+        packagePaidBS: totalPaidPackagesBS,
+        packagePendingUSD: totalPendingPackagesUSD,
+        packagePendingBS: totalPendingPackagesBS,
+        detPackage: detPackage.sort(
+          (a, b) => b.totalQuantity - a.totalQuantity,
+        ),
+        detPackageLost: detPackageLost.sort(
+          (a, b) => b.totalQuantity - a.totalQuantity,
+        ),
+        packageLostTotal,
+        payments: {
+          debt: 0,
+          remaining: totalCash - totalPending,
+          total: totalCash,
+          totalPaid: totalCash - totalPending,
+          totalPending: totalPending,
+        },
+        summary: {
+          invoiceCount: invoicesWithDetails.length,
+          averageInvoiceValue:
+            invoicesWithDetails.length > 0
+              ? Math.round((totalCash / invoicesWithDetails.length) * 100) / 100
+              : 0,
+          paymentPercentage:
+            totalCash > 0
+              ? Math.round(((totalCash - totalPending) / totalCash) * 10000) /
+                100
+              : 0,
+        },
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: errMsg,
+          from: 'InvoiceService',
+        },
+      });
+
+      badResponse.message = errMsg || 'Error calculating invoice statistics';
+      return badResponse;
+    }
+  }
+
+  // NUEVO MÉTODO AUXILIAR: Analizar pagos por moneda
+  private analyzeInvoicePaymentsByCurrency(invoicePayments: any[]): {
+    totalPaidUSD: number;
+    totalPaidBS: number;
+    paymentsUSD: number;
+    paymentsBS: number;
+  } {
+    let totalPaidUSD = 0;
+    let totalPaidBS = 0;
+    let paymentsUSD = 0;
+    let paymentsBS = 0;
+
+    for (const invPayment of invoicePayments) {
+      const paymentAmount = Number(invPayment.amount);
+      const paymentCurrency = invPayment.payment?.account?.method?.currency;
+
+      if (paymentCurrency === 'USD') {
+        totalPaidUSD += paymentAmount;
+        paymentsUSD++;
+      } else {
+        // BS o cualquier otra moneda se considera BS
+        totalPaidBS += paymentAmount;
+        paymentsBS++;
+      }
+    }
+
+    return {
+      totalPaidUSD: Math.round(totalPaidUSD * 100) / 100,
+      totalPaidBS: Math.round(totalPaidBS * 100) / 100,
+      paymentsUSD,
+      paymentsBS,
+    };
+  }
+
+  // NUEVO MÉTODO AUXILIAR: Calcular estadísticas de un item de factura
+  private computeItemStatistics(
+    item: any,
+    product: any,
+    exchangeRateUsed: any,
+    invoiceTotal: number,
+    invoicePaid: number,
+    wasInvoiceInUSD: boolean,
+    paymentsByCurrency: {
+      totalPaidUSD: number;
+      totalPaidBS: number;
+      paymentsUSD: number;
+      paymentsBS: number;
+    },
+  ): {
+    effectiveQuantity: number;
+    paidQuantity: number;
+    pendingQuantity: number;
+    paidQuantityUSD: number;
+    paidQuantityBS: number;
+    pendingQuantityUSD: number;
+    pendingQuantityBS: number;
+  } {
+    // Factor de conversión: si la presentación es '1kilo', cada unidad equivale a 0.2
+    const conversionFactor = product.presentation == '1kilo' ? 0.2 : 1;
+    // Cantidad efectiva (ajustada por presentación)
+    const effectiveQuantity = Number(item.quantity) * conversionFactor;
+
+    // Determinar el precio unitario correcto según la moneda de pago
+    let unitPriceToUse: number;
+
+    if (wasInvoiceInUSD) {
+      // Si la factura fue en USD, usar precio USD
+      unitPriceToUse =
+        Number(item.unitPriceUSD) ||
+        Number(item.unitPrice) / Number(exchangeRateUsed);
+    } else {
+      // Si la factura fue en BS, usar precio BS
+      unitPriceToUse = Number(item.unitPrice);
+    }
+
+    // Calcular cuánto se ha pagado de este producto específico (monto)
+    const itemSubtotal = Number(item.subtotal);
+    const proportionPaid = invoiceTotal > 0 ? invoicePaid / invoiceTotal : 0;
+    const itemPaidAmount = itemSubtotal * proportionPaid;
+
+    // Calcular cantidad pagada en unidades (con decimales) y ajustarla por el factor de conversión
+    const paidQuantityRaw =
+      unitPriceToUse > 0 ? itemPaidAmount / unitPriceToUse : 0;
+    const paidQuantity = paidQuantityRaw * conversionFactor;
+    const pendingQuantity = Math.max(0, effectiveQuantity - paidQuantity);
+
+    // Calcular cantidades pagadas y pendientes por moneda
+    let paidQuantityUSD = 0;
+    let paidQuantityBS = 0;
+    let pendingQuantityUSD = 0;
+    let pendingQuantityBS = 0;
+
+    // Distribuir las cantidades pagadas según los pagos recibidos por moneda
+    if (
+      paymentsByCurrency.totalPaidUSD > 0 &&
+      paymentsByCurrency.totalPaidBS > 0
+    ) {
+      // Factura pagada con ambas monedas - distribuir proporcionalmente
+      const totalPaidInvoice =
+        paymentsByCurrency.totalPaidUSD + paymentsByCurrency.totalPaidBS;
+      const proportionUSD = paymentsByCurrency.totalPaidUSD / totalPaidInvoice;
+      const proportionBS = paymentsByCurrency.totalPaidBS / totalPaidInvoice;
+
+      paidQuantityUSD = paidQuantity * proportionUSD;
+      paidQuantityBS = paidQuantity * proportionBS;
+    } else if (paymentsByCurrency.totalPaidUSD > 0) {
+      // Solo pagos en USD
+      paidQuantityUSD = paidQuantity;
+      paidQuantityBS = 0;
+    } else {
+      // Solo pagos en BS (o sin pagos)
+      paidQuantityUSD = 0;
+      paidQuantityBS = paidQuantity;
+    }
+
+    // Para cantidades pendientes, usar la moneda original de la factura
+    if (wasInvoiceInUSD) {
+      pendingQuantityUSD = pendingQuantity;
+      pendingQuantityBS = 0;
+    } else {
+      pendingQuantityUSD = 0;
+      pendingQuantityBS = pendingQuantity;
+    }
+
+    return {
+      effectiveQuantity,
+      paidQuantity,
+      pendingQuantity,
+      paidQuantityUSD,
+      paidQuantityBS,
+      pendingQuantityUSD,
+      pendingQuantityBS,
+    };
+  }
+
+  // 3. Endpoint para obtener detalles de factura individual (lazy loading)
+  async getInvoiceDetails(invoiceId: number) {
+    try {
+      const invoice = await this.prismaService.invoice.findUnique({
+        where: { id: invoiceId },
+        include: {
+          client: {
+            select: {
+              name: true,
+              rif: true,
+            },
+          },
+          invoiceItems: {
+            include: {
+              product: true,
+            },
+          },
+          InvoicePayment: {
+            include: {
+              payment: {
+                include: {
+                  account: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!invoice) {
+        return { ...badResponse, message: 'Invoice not found' };
+      }
+
+      return {
+        ...invoice,
+        totalAmount: invoice.totalAmount.toFixed(2),
+        remaining: calculateInvoiceRemainingUsd(
+          invoice.totalAmount,
+          invoice.InvoicePayment,
+        ).toFixed(2),
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      await this.prismaService.errorMessages.create({
+        data: { message: errMsg, from: 'InvoiceService' },
+      });
+      badResponse.message = errMsg;
+      return badResponse;
+    }
+  }
+
+  async getInvoices(
+    filter?: OptionalFilterInvoices,
+  ): Promise<ResponseInvoice | DTOBaseResponse> {
+    try {
+      const where: any = {};
+      if (filter && filter.status) {
+        where.status = filter.status as InvoiceStatus;
+      }
+
+      const [dolar, rawInvoices] = await Promise.all([
+        this.productService.getDolar(),
+        this.prismaService.invoice.findMany({
+          include: {
+            client: { include: { block: true } },
+            invoiceItems: { include: { product: true } },
+            InvoicePayment: {
+              include: { payment: { include: { account: true } } },
+            },
+          },
+          orderBy: { dispatchDate: 'desc' },
+          where,
+        }),
+      ]);
+
+      const invoices = rawInvoices.map((data) => ({
+        ...data,
+        totalAmount: data.totalAmount.toFixed(2),
+        remaining: calculateInvoiceRemainingUsd(
+          data.totalAmount,
+          data.InvoicePayment,
+        ).toFixed(2),
+      }));
+
+      const groupedByClient = invoices.reduce(
+        (acc, invoice) => {
+          const clientId = invoice.client.id;
+
+          if (!acc[clientId]) {
+            acc[clientId] = {
+              client: invoice.client,
+              invoices: [],
+            };
+          }
+
+          const invoiceWithoutClient = { ...invoice };
+          delete invoiceWithoutClient.client;
+          acc[clientId].invoices.push(invoiceWithoutClient);
+          return acc;
+        },
+        {} as Record<
+          number,
+          { client: (typeof invoices)[number]['client']; invoices: any[] }
+        >,
+      );
+
+      const result = Object.values(groupedByClient);
+      const totalPackageDetCount = this.groupProductCountInvoices(invoices);
+
+      const totalCashInvoices = invoices.reduce(
+        (acc, item) => acc + Number(item.totalAmount),
+        0,
+      );
+      const totalCashInvoicesPending = invoices
+        .filter(
+          (data) =>
+            data.status == 'Creada' ||
+            data.status == 'Pendiente' ||
+            data.status == 'Vencida',
+        )
+        .reduce((acc, item) => acc + Number(item.remaining), 0);
+
+      const realPending = totalCashInvoices - totalCashInvoicesPending;
+
+      return {
+        invoices: result,
+        package: totalPackageDetCount.reduce(
+          (acc, item: any) => acc + item.totalQuantity,
+          0,
+        ),
+        detPackage: totalPackageDetCount,
+        payments: {
+          total: totalCashInvoices,
+          totalPending: totalCashInvoicesPending,
+          debt: 0,
+          remaining: realPending,
+        },
+      };
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      return {
+        message: err instanceof Error ? err.message : String(err),
+        success: false,
+      };
+    }
+  }
+
+  async getInvoicesFilter(
+    invoice: DTODateRangeFilter,
+  ): Promise<ResponseInvoice | DTOBaseResponse> {
+    try {
+      const invoices = await this.prismaService.invoice
+        .findMany({
+          include: {
+            client: {
+              include: { block: true },
+            },
+            invoiceItems: {
+              include: {
+                product: true,
+              },
+            },
+            InvoicePayment: {
+              include: { payment: { include: { account: true } } },
+            },
+          },
+          orderBy: {
+            dispatchDate: 'desc',
+          },
+          where: {
+            dispatchDate: {
+              gte: invoice.startDate,
+              lte: invoice.endDate,
+            },
+          },
+        })
+        .then((inv) =>
+          inv.map((data) => {
+            return {
+              ...data,
+              totalAmount: data.totalAmount.toFixed(2),
+              remaining: calculateInvoiceRemainingUsd(
+                data.totalAmount,
+                data.InvoicePayment,
+              ).toFixed(2),
+            };
+          }),
+        );
+
+      const groupedByClient = invoices.reduce(
+        (acc, invoice) => {
+          const clientId = invoice.client.id;
+
+          if (!acc[clientId]) {
+            acc[clientId] = {
+              client: invoice.client,
+              invoices: [],
+            };
+          }
+
+          const invoiceWithoutClient = { ...invoice };
+          delete invoiceWithoutClient.client; // Eliminar la propiedad client del objeto invoice
+          acc[clientId].invoices.push(invoiceWithoutClient);
+
+          return acc;
+        },
+        {} as Record<
+          number,
+          { client: (typeof invoices)[number]['client']; invoices: any[] }
+        >,
+      );
+
+      const result = Object.values(groupedByClient);
+      const totalPackageDetCount = this.groupProductCountInvoices(invoices);
+
+      const totalCashInvoices = invoices.reduce(
+        (acc, item) => acc + Number(item.totalAmount),
+        0,
+      );
+      const totalCashInvoicesPending = invoices
+        .filter(
+          (data) =>
+            data.status == 'Creada' ||
+            data.status == 'Pendiente' ||
+            data.status == 'Vencida',
+        )
+        .reduce((acc, item) => acc + Number(item.remaining), 0);
+      const realPending = totalCashInvoices - totalCashInvoicesPending;
+
+      return {
+        invoices: result,
+        package: totalPackageDetCount.reduce(
+          (acc, item: any) => acc + item.totalQuantity,
+          0,
+        ),
+        detPackage: totalPackageDetCount,
+        payments: {
+          total: totalCashInvoices,
+          totalPending: totalCashInvoicesPending,
+          debt: 0,
+          remaining: realPending,
+        },
+      };
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      badResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  async getInvoicesExpired(): Promise<ResponseInvoice | DTOBaseResponse> {
+    try {
+      return (await this.getInvoices({ status: 'Vencida' })) as ResponseInvoice;
+    } catch (err) {
+      badResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  async getInvoiceWithDetails() {
+    try {
+      const invoice = await this.prismaService.invoice
+        .findMany({
+          select: {
+            id: true,
+            controlNumber: true,
+            totalAmount: true,
+            clientId: true,
+            InvoicePayment: {
+              select: {
+                amount: true,
+              },
+            },
+            client: {
+              select: {
+                id: true,
+                name: true,
+                block: true,
+              },
+            },
+            invoiceItems: {
+              select: {
+                id: true,
+                type: true,
+                unitPriceUSD: true,
+                quantity: true,
+              },
+            },
+            // invoiceItems: {
+            //     select: {
+            //         product: true
+            //     }
+            // }
+          },
+          where: {
+            status: {
+              notIn: ['Cancelada', 'Pagado'],
+            },
+          },
+        })
+        .then((item) =>
+          item.map((data) => {
+            return {
+              ...data,
+              specialPrice: data.invoiceItems
+                .filter((item) => item.type == 'SALE')
+                .reduce(
+                  (acc, det) =>
+                    acc + Number(det.unitPriceUSD) * Number(det.quantity),
+                  0,
+                ),
+              remaining: calculateInvoiceRemainingUsd(
+                data.totalAmount,
+                data.InvoicePayment,
+              ),
+            };
+          }),
+        );
+
+      if (!invoice) {
+        badResponse.message = 'No se han encontrado facturas.';
+        return badResponse;
+      }
+
+      return invoice;
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      badResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  async generateInactivityNotifications() {
+    try {
+      const clients = await this.prismaService.client.findMany({
+        include: {
+          invoices: {
+            orderBy: { dueDate: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      const now = new Date();
+      const staleClientIds: number[] = [];
+      const notificationsToCreate: {
+        clientId: number;
+        type: string;
+        message: string;
+        seen: boolean;
+      }[] = [];
+
+      for (const client of clients) {
+        const lastInvoice = client.invoices && client.invoices[0];
+        if (!lastInvoice) continue;
+
+        const threshold = addDays(new Date(lastInvoice.dueDate), 7);
+        if (threshold > now) continue;
+
+        staleClientIds.push(client.id);
+        notificationsToCreate.push({
+          clientId: client.id,
+          type: 'inactivity',
+          message: `El Cliente ${client.name} no tiene pedidos desde ${format(new Date(lastInvoice.dueDate), 'dd/MM/yyyy')}`,
+          seen: false,
+        });
+      }
+
+      if (staleClientIds.length > 0) {
+        await this.prismaService.$transaction(async (tx) => {
+          await tx.notification.deleteMany({
+            where: { clientId: { in: staleClientIds }, type: 'inactivity' },
+          });
+          await tx.notification.createMany({ data: notificationsToCreate });
+        });
+      }
+    } catch (error) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: error instanceof Error ? error.message : String(error),
+          from: 'ClientService - InactivityNotifications',
+        },
+      });
+    }
+  }
+
+  async checkInvoicePayments(invoiceId: number) {
+    try {
+      const findInvoice = await this.prismaService.invoice.findFirst({
+        where: { id: invoiceId },
+      });
+
+      if (!findInvoice) {
+        badResponse.message = 'No se encontró la factura';
+        return badResponse;
+      }
+
+      const findPaymentInvoice =
+        await this.prismaService.invoicePayment.findMany({
+          where: { invoiceId: invoiceId },
+        });
+
+      const calculateRemaining = findPaymentInvoice.reduce(
+        (acc, item) => acc + Number(item.amount),
+        0,
+      );
+      const newRemaining = Number(findInvoice.totalAmount) - calculateRemaining;
+      await this.prismaService.invoice.update({
+        data: {
+          status: newRemaining < 2 ? 'Pagado' : findInvoice.status,
+        },
+        where: {
+          id: invoiceId,
+        },
+      });
+
+      const findInvoicesClient = await this.prismaService.invoice.findMany({
+        where: {
+          clientId: findInvoice.clientId,
+          status: 'Vencida',
+        },
+      });
+
+      if (!findInvoicesClient) {
+        const findClientReminder =
+          await this.prismaService.clientReminder.findFirst({
+            where: { clientId: findInvoice.clientId },
+          });
+
+        if (findClientReminder) {
+          await this.prismaService.clientReminder.delete({
+            where: { id: findClientReminder.id },
+          });
+        }
+      }
+    } catch (err) {
+      badResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  // groupProductInvoices(invoicesFilter) {
+  //     return invoicesFilter.reduce((acc, invoice) => {
+  //         invoice.invoiceItems.forEach(item => {
+  //             const productId = item.product.id;
+
+  //             if (!acc[productId]) {
+  //                 acc[productId] = {
+  //                     productId: item.product.id,
+  //                     product: item.product,
+  //                     totalQuantity: 0,
+  //                 };
+  //             }
+
+  //             acc[productId].totalQuantity += Number(item.quantity);
+  //         })
+  //         return acc;
+  //     }, {} as Record<number, { product: typeof invoicesFilter[number]['invoiceItems'][number]['product'], totalQuantity: number }>);
+  // }
+
+  groupProductCountInvoices(invoicesFilter) {
+    const calculateProducts = invoicesFilter.reduce(
+      (acc, invoice) => {
+        const parseRemaining =
+          invoice.status == 'Pagado'
+            ? 0
+            : calculateInvoiceRemainingUsd(
+                invoice.totalAmount,
+                invoice.InvoicePayment || [],
+              );
+        let paidRemaining = Number(invoice.totalAmount) - parseRemaining;
+
+        invoice.invoiceItems.forEach((item) => {
+          const productId = item.product.id;
+          const unitPrice = Number(item.unitPrice);
+          let quantity = Number(item.quantity);
+          let quantityPaid = 0;
+
+          // Calcular cuántas unidades se han pagado por este producto
+          while (quantity > 0 && paidRemaining >= unitPrice) {
+            quantityPaid += 1;
+            paidRemaining -= unitPrice;
+            quantity -= 1;
+          }
+
+          // Si queda un pago parcial para una unidad (ej. 0.5 producto)
+          if (quantity > 0 && paidRemaining > 0) {
+            const partialFraction = paidRemaining / unitPrice;
+            quantityPaid += partialFraction;
+            paidRemaining -= unitPrice * partialFraction;
+            quantity -= partialFraction;
+          }
+
+          // Agregar al acumulador
+          if (!acc[productId]) {
+            acc[productId] = {
+              productId: item.product.id,
+              product: item.product,
+              totalQuantity: 0,
+              paidQuantity: 0,
+              total: 0,
+            };
+          }
+
+          acc[productId].totalQuantity += Number(item.quantity);
+          acc[productId].paidQuantity += quantityPaid;
+          acc[productId].total = acc[productId].totalQuantity - quantityPaid;
+        });
+
+        return acc;
+      },
+      {} as Record<
+        number,
+        {
+          product: (typeof invoicesFilter)[number]['invoiceItems'][number]['product'];
+          totalQuantity: number;
+          paidQuantity: number;
+        }
+      >,
+    );
+    const parseProducts: DetProducts[] = Object.values(calculateProducts);
+
+    const calculateFinalTotal = parseProducts.map((data: DetProducts) => {
+      return {
+        ...data,
+        total: data.totalQuantity - data.paidQuantity,
+      };
+    });
+    return calculateFinalTotal;
+  }
+
+  private calculateInvoiceItems(invoiceItems: any[]): number {
+    return invoiceItems
+      .filter((item) => item.type === 'SALE')
+      .reduce(
+        (sum, item) =>
+          sum +
+          (item.product.presentation === '1kilo'
+            ? Number(item.quantity) * 0.2
+            : Number(item.quantity)),
+        0,
+      );
+  }
+
+  isDateExpired(dueDate: Date): boolean {
+    const today = new Date();
+    const cleanDueDate = new Date(
+      dueDate.getFullYear(),
+      dueDate.getMonth(),
+      dueDate.getDate(),
+    );
+    const cleanToday = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+    );
+    return cleanDueDate < cleanToday;
+  }
+
+  async findInvoiceWithoutDetails() {
+    const invoices = await this.prismaService.invoice.findMany({
+      where: {
+        invoiceItems: {
+          none: {},
+        },
+      },
+      include: {
+        client: true,
+        invoiceItems: true,
+      },
+    });
+
+    return invoices;
+  }
+
+  async InvoiceValidateTotal() {
+    const invoices = await this.prismaService.invoice.findMany({
+      include: {
+        client: true,
+        invoiceItems: true,
+      },
+    });
+
+    const invoicesFailed = invoices.map((inv) => {
+      const total = inv.invoiceItems.reduce(
+        (acc, item) => acc + Number(item.subtotal),
+        0,
+      );
+
+      if (total.toFixed(2) !== inv.totalAmount.toFixed(2)) {
+        return {
+          ...inv,
+          totalAmount: total,
+        };
+      }
+    });
+
+    return invoicesFailed.filter((inv) => inv != null);
+  }
+
+  async createInvoice(newInvoice: DTOInvoice) {
+    try {
+      const [findDuplicateControlNumber, inventory] = await Promise.all([
+        this.prismaService.invoice.findFirst({
+          where: { controlNumber: newInvoice.controlNumber },
+          include: { client: true },
+        }),
+        this.inventoryService.getInventory(),
+      ]);
+
+      if (findDuplicateControlNumber) {
+        return {
+          message: `Ya existe una factura con ese numero de control del cliente ${findDuplicateControlNumber.client.name}`,
+          success: false,
+        };
+      }
+
+      const productInvalid = newInvoice.details.map((det) => {
+        const findProduct = inventory.find(
+          (prod) => prod.productId === det.productId,
+        );
+
+        if (!findProduct || det.quantity > findProduct.quantity) {
+          return {
+            product: findProduct?.product?.name || 'Desconocido',
+            quantity: findProduct?.quantity || 0,
+            amount: det.quantity,
+          };
+        } else {
+          return null;
+        }
+      });
+
+      if (productInvalid.filter((pro) => pro !== null).length > 0) {
+        return {
+          message:
+            'Estos productos exceden la cantidad que existe en inventario.',
+          success: false,
+        };
+      }
+
+      const calculateTotalInvoice = newInvoice.details
+        .filter((item) => (item.type || 'SALE') === 'SALE')
+        .reduce(
+          (acc, det) =>
+            acc +
+            Number(
+              newInvoice.priceUSD
+                ? det.priceUSD
+                : Number(det.price) * det.quantity,
+            ),
+          0,
+        );
+
+      const saveInvoice = await this.prismaService.$transaction(async (tx) => {
+        const savedInvoice = await tx.invoice.create({
+          data: {
+            clientId: newInvoice.clientId,
+            controlNumber: newInvoice.controlNumber,
+            status: calculateTotalInvoice === 0 ? 'Pagado' : 'Creada',
+            dispatchDate: newInvoice.dispatchDate,
+            dueDate: newInvoice.dueDate,
+            consignment: newInvoice.consignment,
+            totalAmount: calculateTotalInvoice,
+          },
+        });
+
+        const dataDetailsInvoice = newInvoice.details.map((det) => ({
+          invoiceId: savedInvoice.id,
+          productId: det.productId,
+          quantity: det.quantity,
+          type: det.type || 'SALE',
+          unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+          unitPriceUSD: Number(det.priceUSD),
+          subtotal: Number(
+            newInvoice.priceUSD
+              ? det.priceUSD
+              : Number(det.price) * det.quantity,
+          ),
+        }));
+
+        await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
+
+        const inventoryResult =
+          await this.inventoryService.updateInventoryInvoice(
+            {
+              controlNumber: savedInvoice.controlNumber,
+              description: `Salida de producto por factura ${savedInvoice.controlNumber}`,
+              date: savedInvoice.dispatchDate,
+              details: newInvoice.details.map((det) => ({
                 productId: det.productId,
                 quantity: det.quantity,
-                type: det.type || 'SALE',
-                unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
-                unitPriceUSD: Number(det.priceUSD),
-                subtotal: Number(newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity),
-            }));
-
-            const totalAmount = dataDetailsInvoice.filter(item => item.type === 'SALE').reduce((acc, item) => acc + Number(item.subtotal), 0);
-
-            // Verificar que el controlNumber no esté en uso por otra factura
-            if (newInvoice.controlNumber !== invoice.controlNumber) {
-                const duplicate = await this.prismaService.invoice.findFirst({
-                    where: {
-                        controlNumber: newInvoice.controlNumber,
-                        id: { not: id }
-                    },
-                    include: { client: true }
-                });
-                if (duplicate) {
-                    return { message: `Ya existe una factura con ese número de control del cliente ${duplicate.client.name}`, success: false };
-                }
-            }
-
-            await this.prismaService.$transaction(async (tx) => {
-                await tx.invoice.update({
-                    where: { id },
-                    data: {
-                        clientId: newInvoice.clientId,
-                        controlNumber: newInvoice.controlNumber,
-                        dispatchDate: newInvoice.dispatchDate,
-                        dueDate: newInvoice.dueDate,
-                        consignment: newInvoice.consignment,
-                        totalAmount,
-                    }
-                });
-
-                await tx.invoiceProduct.deleteMany({ where: { invoiceId: id } });
-
-                await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
-            });
-
-            return { message: 'Factura actualizada correctamente', success: true };
-
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            })
-            return { message: err instanceof Error ? err.message : String(err), success: false };
-        }
-    }
-
-    async updateInvoiceDet() {
-        try {
-            const [getDetailsInvoice, historyProduct] = await Promise.all([
-                this.prismaService.invoiceProduct.findMany(),
-                this.prismaService.historyProduct.findMany()
-            ]);
-
-            const toUpdate: { id: number; unitPriceUSD: number }[] = [];
-            let notFound = 0;
-
-            for (const item of getDetailsInvoice) {
-                const findProductHistory = historyProduct.find(data =>
-                    Number(data.price).toFixed(2) === Number(item.unitPrice).toFixed(2)
-                );
-
-                if (!findProductHistory || !findProductHistory.priceUSD) {
-                    notFound += 1;
-                } else {
-                    toUpdate.push({ id: item.id, unitPriceUSD: Number(findProductHistory.priceUSD) });
-                }
-            }
-
-            if (toUpdate.length > 0) {
-                await this.prismaService.$transaction(
-                    toUpdate.map(u =>
-                        this.prismaService.invoiceProduct.update({
-                            data: { unitPriceUSD: u.unitPriceUSD },
-                            where: { id: u.id }
-                        })
-                    )
-                );
-            }
-
-            return { message: `Detalles actualizados. ${toUpdate.length} actualizados, ${notFound} sin coincidencia.`, success: true };
-
-        } catch (err) {
-            return { message: err instanceof Error ? err.message : String(err), success: false };
-        }
-    }
-
-    async markPayed(id: number) {
-        try {
-            await this.prismaService.invoice.update({
-                where: { id },
-                data: { status: 'Pagado' }
-            })
-            baseResponse.message = 'Factura marcada como pagada.'
-            return baseResponse;
-        } catch (err) {
-            baseResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse
-        }
-    }
-    async markPending(id: number) {
-        try {
-            await this.prismaService.invoice.update({
-                where: { id },
-                data: { status: 'Pendiente' }
-            })
-            baseResponse.message = 'Factura marcada como pendiente.'
-            return baseResponse;
-        } catch (err) {
-            baseResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse
-        }
-    }
-    async markClean(id: number) {
-        try {
-            await this.prismaService.invoice.update({
-                where: { id },
-                data: { status: 'Pagado' }
-            })
-            baseResponse.message = 'Factura Limpiada.'
-            return baseResponse;
-        } catch (err) {
-            baseResponse.message = err instanceof Error ? err.message : String(err);
-            return badResponse
-        }
-    }
-
-    async deleteInvoice(id: number) {
-        try {
-            const invoice = await this.prismaService.invoice.findFirst({
-                where: { id }
-            });
-
-            if (!invoice) {
-                return { message: 'Factura no encontrada', success: false };
-            }
-
-            const findInvoicePayment = await this.prismaService.invoicePayment.findFirst({
-                where: { invoiceId: id }
-            })
-
-            if (findInvoicePayment) {
-                return { message: 'Esta factura ya se encuentra paga.', success: false };
-            }
-
-            const detInvoice = await this.prismaService.invoiceProduct.findMany({
-                where: { invoiceId: id }
-            });
-
-            await this.prismaService.$transaction(async (tx) => {
-                const productAggregated = new Map<number, { quantity: number; unitPrice: number; unitPriceUSD: number }>();
-
-                for (const det of detInvoice) {
-                    const existing = productAggregated.get(det.productId);
-                    if (existing) {
-                        existing.quantity += Number(det.quantity);
-                    } else {
-                        productAggregated.set(det.productId, {
-                            quantity: Number(det.quantity),
-                            unitPrice: Number(det.unitPrice),
-                            unitPriceUSD: Number(det.unitPriceUSD),
-                        });
-                    }
-                }
-
-                const totalAmount = Array.from(productAggregated.values()).reduce(
-                    (sum, item) => sum + (item.unitPrice * item.quantity), 0
-                );
-
-                const uniqueControlNumber = async (base: string) => {
-                    let candidate = base;
-                    let suffix = 1;
-                    while (await tx.inventoryEntry.findUnique({ where: { controlNumber: candidate } })) {
-                        candidate = `${base}-${suffix++}`;
-                    }
-                    return candidate;
-                };
-
-                const outEntry = await tx.inventoryEntry.findFirst({
-                    where: { controlNumber: invoice.controlNumber }
-                });
-
-                if (outEntry) {
-                    const cancelledControlNumber = await uniqueControlNumber(`ANULADO-${invoice.controlNumber}`);
-                    await tx.inventoryEntry.update({
-                        where: { id: outEntry.id },
-                        data: { controlNumber: cancelledControlNumber }
-                    });
-                }
-
-                const returnControlNumber = await uniqueControlNumber(`RETORNO-${invoice.controlNumber}`);
-
-                const entry = await tx.inventoryEntry.create({
-                    data: {
-                        controlNumber: returnControlNumber,
-                        movementType: 'ADJUSTMENT',
-                        totalAmount,
-                        status: 'CREADA',
-                        title: `Devolución por cancelación de factura ${invoice.controlNumber}`,
-                        description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
-                        date: new Date(),
-                        supplierId: null,
-                    }
-                });
-
-                for (const [productId, item] of productAggregated) {
-                    await tx.inventoryEntryDetail.create({
-                        data: {
-                            inventoryEntryId: entry.id,
-                            productId,
-                            quantity: item.quantity,
-                            unitPrice: item.unitPrice,
-                            unitPriceUSD: item.unitPriceUSD,
-                            subtotal: item.unitPrice * item.quantity,
-                        }
-                    });
-
-                    const findInventory = await tx.inventory.findFirst({
-                        where: { productId }
-                    });
-
-                    if (findInventory) {
-                        await tx.inventory.update({
-                            where: { id: findInventory.id },
-                            data: { quantity: Number(findInventory.quantity) + item.quantity }
-                        })
-                    }
-                }
-
-                await tx.invoiceProduct.deleteMany({
-                    where: { invoiceId: invoice.id }
-                })
-
-                await tx.invoice.delete({
-                    where: { id: invoice.id }
-                })
-            });
-
-            return { message: 'Factura eliminada correctamente', success: true };
-
-        } catch (err) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err instanceof Error ? err.message : String(err), from: 'InvoiceService' }
-            })
-            return { message: err instanceof Error ? err.message : String(err), success: false };
-        }
-    }
-
-    // ----------------------------------------------------------------
-
-    async exportInvoicesToExcelWithExcelJS(dateRange: DashboardExcel): Promise<Buffer> {
-        const where: any = {};
-        if (dateRange.startDate && dateRange.endDate) {
-            where.dispatchDate = {
-                gte: this.getStartOfDayUtc(dateRange.startDate.toString()),
-                lte: this.getEndOfDayUtc(dateRange.endDate.toString())
-            };
-            where.invoiceItems = {
-                some: {
-                    product: {
-                        type: dateRange.type
-                    }
-                }
-            }
-        }
-
-        const invoices = await this.prismaService.invoice.findMany({
-            where,
-            include: {
-                client: { include: { block: true } },
-                invoiceItems: { include: { product: true } },
-                InvoicePayment: {
-                    include: {
-                        payment: {
-                            include: {
-                                account: { include: { method: true } },
-                                dolar: true
-                            },
-                        },
-                    },
-                },
+              })),
             },
-            orderBy: { dispatchDate: 'desc' },
+            tx,
+          );
+
+        if (!inventoryResult.success) {
+          throw new Error(inventoryResult.message);
+        }
+
+        await tx.notification.deleteMany({
+          where: {
+            clientId: newInvoice.clientId,
+            type: 'inactivity',
+          },
         });
 
-        const productsMap: Map<string, { total: number; price: number }> = new Map();
-        invoices.forEach((inv) => {
-            inv.invoiceItems.forEach(({ product, quantity, unitPrice }) => {
-                const conversionFactor = product.presentation === '1kilo' ? 0.2 : 1;
-                const effectiveQuantity = Number(quantity) * conversionFactor;
-                const key = product.name;
-                const current = productsMap.get(key);
-                if (!current) {
-                    productsMap.set(key, { total: effectiveQuantity, price: Number(unitPrice) });
-                } else {
-                    current.total += effectiveQuantity;
-                    productsMap.set(key, current);
-                }
+        return savedInvoice;
+      });
+
+      this.notifyInvoiceCreated(
+        saveInvoice.id,
+        newInvoice.clientId,
+        newInvoice.controlNumber,
+        calculateTotalInvoice,
+      );
+
+      return { message: 'Factura creada correctamente', success: true };
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      return {
+        message: err instanceof Error ? err.message : String(err),
+        success: false,
+      };
+    }
+  }
+
+  async updateInvoice(id: number, newInvoice: DTOInvoice) {
+    try {
+      const invoice = await this.prismaService.invoice.findUnique({
+        where: { id },
+        include: {
+          invoiceItems: true,
+        },
+      });
+
+      if (!invoice) {
+        return { message: 'Factura no encontrada', success: false };
+      }
+
+      const dataDetailsInvoice = newInvoice.details.map((det) => ({
+        invoiceId: id,
+        productId: det.productId,
+        quantity: det.quantity,
+        type: det.type || 'SALE',
+        unitPrice: Number(newInvoice.priceUSD ? det.priceUSD : det.price),
+        unitPriceUSD: Number(det.priceUSD),
+        subtotal: Number(
+          newInvoice.priceUSD ? det.priceUSD : Number(det.price) * det.quantity,
+        ),
+      }));
+
+      const totalAmount = dataDetailsInvoice
+        .filter((item) => item.type === 'SALE')
+        .reduce((acc, item) => acc + Number(item.subtotal), 0);
+
+      // Verificar que el controlNumber no esté en uso por otra factura
+      if (newInvoice.controlNumber !== invoice.controlNumber) {
+        const duplicate = await this.prismaService.invoice.findFirst({
+          where: {
+            controlNumber: newInvoice.controlNumber,
+            id: { not: id },
+          },
+          include: { client: true },
+        });
+        if (duplicate) {
+          return {
+            message: `Ya existe una factura con ese número de control del cliente ${duplicate.client.name}`,
+            success: false,
+          };
+        }
+      }
+
+      await this.prismaService.$transaction(async (tx) => {
+        await tx.invoice.update({
+          where: { id },
+          data: {
+            clientId: newInvoice.clientId,
+            controlNumber: newInvoice.controlNumber,
+            dispatchDate: newInvoice.dispatchDate,
+            dueDate: newInvoice.dueDate,
+            consignment: newInvoice.consignment,
+            totalAmount,
+          },
+        });
+
+        await tx.invoiceProduct.deleteMany({ where: { invoiceId: id } });
+
+        await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
+      });
+
+      return { message: 'Factura actualizada correctamente', success: true };
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      return {
+        message: err instanceof Error ? err.message : String(err),
+        success: false,
+      };
+    }
+  }
+
+  async updateInvoiceDet() {
+    try {
+      const [getDetailsInvoice, historyProduct] = await Promise.all([
+        this.prismaService.invoiceProduct.findMany(),
+        this.prismaService.historyProduct.findMany(),
+      ]);
+
+      const toUpdate: { id: number; unitPriceUSD: number }[] = [];
+      let notFound = 0;
+
+      for (const item of getDetailsInvoice) {
+        const findProductHistory = historyProduct.find(
+          (data) =>
+            Number(data.price).toFixed(2) === Number(item.unitPrice).toFixed(2),
+        );
+
+        if (!findProductHistory || !findProductHistory.priceUSD) {
+          notFound += 1;
+        } else {
+          toUpdate.push({
+            id: item.id,
+            unitPriceUSD: Number(findProductHistory.priceUSD),
+          });
+        }
+      }
+
+      if (toUpdate.length > 0) {
+        await this.prismaService.$transaction(
+          toUpdate.map((u) =>
+            this.prismaService.invoiceProduct.update({
+              data: { unitPriceUSD: u.unitPriceUSD },
+              where: { id: u.id },
+            }),
+          ),
+        );
+      }
+
+      return {
+        message: `Detalles actualizados. ${toUpdate.length} actualizados, ${notFound} sin coincidencia.`,
+        success: true,
+      };
+    } catch (err) {
+      return {
+        message: err instanceof Error ? err.message : String(err),
+        success: false,
+      };
+    }
+  }
+
+  async markPayed(id: number) {
+    try {
+      await this.prismaService.invoice.update({
+        where: { id },
+        data: { status: 'Pagado' },
+      });
+      baseResponse.message = 'Factura marcada como pagada.';
+      return baseResponse;
+    } catch (err) {
+      baseResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+  async markPending(id: number) {
+    try {
+      await this.prismaService.invoice.update({
+        where: { id },
+        data: { status: 'Pendiente' },
+      });
+      baseResponse.message = 'Factura marcada como pendiente.';
+      return baseResponse;
+    } catch (err) {
+      baseResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+  async markClean(id: number) {
+    try {
+      await this.prismaService.invoice.update({
+        where: { id },
+        data: { status: 'Pagado' },
+      });
+      baseResponse.message = 'Factura Limpiada.';
+      return baseResponse;
+    } catch (err) {
+      baseResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  async markLost(id: number) {
+    try {
+      const findInvoice = await this.prismaService.invoice.findFirst({
+        where: { id },
+      });
+
+      if (!findInvoice) {
+        badResponse.message = 'Factura no encontrada';
+        return badResponse;
+      }
+
+      await this.prismaService.invoice.update({
+        where: { id },
+        data: { status: 'Perdidas' },
+      });
+      baseResponse.message = 'Factura Marcada como perdida.';
+      return baseResponse;
+    } catch (err) {
+      baseResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  async deleteInvoice(id: number) {
+    try {
+      const invoice = await this.prismaService.invoice.findFirst({
+        where: { id },
+      });
+
+      if (!invoice) {
+        return { message: 'Factura no encontrada', success: false };
+      }
+
+      const findInvoicePayment =
+        await this.prismaService.invoicePayment.findFirst({
+          where: { invoiceId: id },
+        });
+
+      if (findInvoicePayment) {
+        return {
+          message: 'Esta factura ya se encuentra paga.',
+          success: false,
+        };
+      }
+
+      const detInvoice = await this.prismaService.invoiceProduct.findMany({
+        where: { invoiceId: id },
+      });
+
+      await this.prismaService.$transaction(async (tx) => {
+        const productAggregated = new Map<
+          number,
+          { quantity: number; unitPrice: number; unitPriceUSD: number }
+        >();
+
+        for (const det of detInvoice) {
+          const existing = productAggregated.get(det.productId);
+          if (existing) {
+            existing.quantity += Number(det.quantity);
+          } else {
+            productAggregated.set(det.productId, {
+              quantity: Number(det.quantity),
+              unitPrice: Number(det.unitPrice),
+              unitPriceUSD: Number(det.unitPriceUSD),
             });
+          }
+        }
+
+        const totalAmount = Array.from(productAggregated.values()).reduce(
+          (sum, item) => sum + item.unitPrice * item.quantity,
+          0,
+        );
+
+        const uniqueControlNumber = async (base: string) => {
+          let candidate = base;
+          let suffix = 1;
+          while (
+            await tx.inventoryEntry.findUnique({
+              where: { controlNumber: candidate },
+            })
+          ) {
+            candidate = `${base}-${suffix++}`;
+          }
+          return candidate;
+        };
+
+        const outEntry = await tx.inventoryEntry.findFirst({
+          where: { controlNumber: invoice.controlNumber },
         });
 
-        const productNames = Array.from(productsMap.keys());
+        if (outEntry) {
+          const cancelledControlNumber = await uniqueControlNumber(
+            `ANULADO-${invoice.controlNumber}`,
+          );
+          await tx.inventoryEntry.update({
+            where: { id: outEntry.id },
+            data: { controlNumber: cancelledControlNumber },
+          });
+        }
 
-        const workbook = new ExcelJS.Workbook();
+        const returnControlNumber = await uniqueControlNumber(
+          `RETORNO-${invoice.controlNumber}`,
+        );
 
-        // Hoja 1 - Facturas
-        const ws1 = workbook.addWorksheet('Facturas');
-
-        const baseHeaders = [
-            'N° Control', 'Cliente', 'Teléfono', 'Bloque', 'Dirección', 'Zona', 'Fecha', 'Vence', 'Total', 'Debe', 'Estado'
-        ];
-
-        const productHeaders = productNames.flatMap(name => [`${name}`, `Precio`]);
-        const finalHeaders = [...baseHeaders, ...productHeaders, 'Total de bultos', 'Bultos pendientes', 'Monto', 'Abono'];
-
-        ws1.addRow(finalHeaders);
-        ws1.getRow(1).font = { bold: true };
-
-        invoices.forEach(inv => {
-            const invoiceRemaining = calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment);
-            const totalBultos = inv.invoiceItems.reduce((sum, i) => {
-                const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
-                return sum + Number(i.quantity) * conv;
-            }, 0);
-            let bultosPendientes = 0;
-            const abono = Number(inv.totalAmount) - invoiceRemaining;
-
-            // Calcular bultos pendientes: usar el precio promedio por bulto
-            if (totalBultos > 0) {
-                const avgPricePerBulto = Number(inv.totalAmount) / totalBultos;
-                if (inv.status === 'Pagado') {
-                    bultosPendientes = 0;
-                } else {
-                    if (avgPricePerBulto > 0) {
-                        bultosPendientes = Math.round((invoiceRemaining / avgPricePerBulto) * 100) / 100; // 2 decimales
-                    }
-                }
-            }
-
-            const rowData: (string | number | Date)[] = [
-                inv.controlNumber,
-                inv.client.name,
-                inv.client.phone,
-                inv.client.block.name,
-                inv.client.address,
-                inv.client.zone,
-                inv.dispatchDate,
-                inv.dueDate,
-                Number(inv.totalAmount),
-                invoiceRemaining,
-                inv.status,
-            ];
-
-            // Agregar los productos por nombre (cantidad efectiva y precio)
-            for (const productName of productNames) {
-                const found = inv.invoiceItems.find(item => item.product.name === productName);
-                if (found) {
-                    const conv = found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
-                    const effective = Math.round(Number(found.quantity) * conv * 100) / 100;
-                    rowData.push(effective);
-                    rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
-                } else {
-                    rowData.push('');
-                    rowData.push(0);
-                }
-            }
-
-            rowData.push(totalBultos);
-            rowData.push(bultosPendientes);
-            rowData.push(''); // Monto vacío
-            rowData.push(abono);
-
-            const row = ws1.addRow(rowData);
-
-            // Formato de fecha
-            row.getCell(6).numFmt = 'dd/mm/yyyy';
-            row.getCell(7).numFmt = 'dd/mm/yyyy';
-
-            // Color por estado
-            const colorMap = {
-                Creada: 'dbeafe',
-                Pendiente: 'ffedd4',
-                Vencida: 'ffe2e2',
-                Pagado: 'dbfce7',
-                Cancelada: 'ffe2e2',
-            };
-            const fillColor = colorMap[inv.status as keyof typeof colorMap];
-            if (fillColor) {
-                row.fill = {
-                    type: 'pattern',
-                    pattern: 'solid',
-                    fgColor: { argb: fillColor },
-                };
-            }
+        const entry = await tx.inventoryEntry.create({
+          data: {
+            controlNumber: returnControlNumber,
+            movementType: 'ADJUSTMENT',
+            totalAmount,
+            status: 'CREADA',
+            title: `Devolución por cancelación de factura ${invoice.controlNumber}`,
+            description: `Devolución de producto por cancelación de factura ${invoice.controlNumber}`,
+            date: new Date(),
+            supplierId: null,
+          },
         });
 
-        // Hoja 2 - Pagos
-        const ws2 = workbook.addWorksheet('Pagos');
-        const pagosHeaders = [
-            'Cuenta', 'Factura', 'Cantidad', 'Cantidad USD', 'Cantidad Bs', 'Tasa Dolar', 'Referencia',
-            ...productNames.flatMap(name => [`${name}`, 'Precio']),
-            'Total de bultos',
-        ];
+        for (const [productId, item] of productAggregated) {
+          await tx.inventoryEntryDetail.create({
+            data: {
+              inventoryEntryId: entry.id,
+              productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              unitPriceUSD: item.unitPriceUSD,
+              subtotal: item.unitPrice * item.quantity,
+            },
+          });
 
-        ws2.addRow(pagosHeaders);
-        ws2.getRow(1).font = { bold: true };
+          const findInventory = await tx.inventory.findFirst({
+            where: { productId },
+          });
 
-        invoices.forEach(inv => {
-            inv.InvoicePayment.forEach(({ payment }) => {
-                const currency = payment.account.method.currency;
-                const usdAmount = currency === 'USD' ? Number(payment.amount) : Number(payment.amount) / Number(payment.dolar.dolar);
-                const bsAmount = currency === 'BS' ? Number(payment.amount) : Number(payment.amount) * Number(payment.dolar.dolar);
-
-                const rowData: (string | number)[] = [
-                    payment.account.name,
-                    inv.controlNumber,
-                    `${Number(payment.amount).toFixed(2)} ${currency === 'USD' ? '$' : 'Bs'}`,
-                    usdAmount,
-                    bsAmount,
-                    Number(payment.dolar.dolar),
-                    payment.reference,
-                ];
-
-                for (const productName of productNames) {
-                    const found = inv.invoiceItems.find(item => item.product.name === productName);
-                    if (found) {
-                        const conv = found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
-                        const effective = Math.round(Number(found.quantity) * conv * 100) / 100;
-                        rowData.push(effective);
-                        rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
-                    } else {
-                        rowData.push('');
-                        rowData.push(0);
-                    }
-                }
-
-                const totalBultos = inv.invoiceItems.reduce((sum, i) => {
-                    const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
-                    return sum + Number(i.quantity) * conv;
-                }, 0);
-                rowData.push(totalBultos);
-
-                const row = ws2.addRow(rowData);
-                if (currency === 'USD') {
-                    row.eachCell(cell => {
-                        cell.fill = {
-                            type: 'pattern',
-                            pattern: 'solid',
-                            fgColor: { argb: 'dbeafe' },
-                        };
-                    });
-                }
+          if (findInventory) {
+            await tx.inventory.update({
+              where: { id: findInventory.id },
+              data: {
+                quantity: Number(findInventory.quantity) + item.quantity,
+              },
             });
+          }
+        }
+
+        await tx.invoiceProduct.deleteMany({
+          where: { invoiceId: invoice.id },
         });
 
-        const arrayBuffer = await workbook.xlsx.writeBuffer();
-        const buffer = Buffer.from(arrayBuffer); // <-- Conversión correcta
-        return buffer;
+        await tx.invoice.delete({
+          where: { id: invoice.id },
+        });
+      });
+
+      return { message: 'Factura eliminada correctamente', success: true };
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'InvoiceService',
+        },
+      });
+      return {
+        message: err instanceof Error ? err.message : String(err),
+        success: false,
+      };
+    }
+  }
+
+  // ----------------------------------------------------------------
+
+  async exportInvoicesToExcelWithExcelJS(
+    dateRange: DashboardExcel,
+  ): Promise<Buffer> {
+    const where: any = {};
+    if (dateRange.startDate && dateRange.endDate) {
+      where.dispatchDate = {
+        gte: this.getStartOfDayUtc(dateRange.startDate.toString()),
+        lte: this.getEndOfDayUtc(dateRange.endDate.toString()),
+      };
+      where.invoiceItems = {
+        some: {
+          product: {
+            type: dateRange.type,
+          },
+        },
+      };
     }
 
+    const invoices = await this.prismaService.invoice.findMany({
+      where,
+      include: {
+        client: { include: { block: true } },
+        invoiceItems: { include: { product: true } },
+        InvoicePayment: {
+          include: {
+            payment: {
+              include: {
+                account: { include: { method: true } },
+                dolar: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { dispatchDate: 'desc' },
+    });
+
+    const productsMap: Map<string, { total: number; price: number }> =
+      new Map();
+    invoices.forEach((inv) => {
+      inv.invoiceItems.forEach(({ product, quantity, unitPrice }) => {
+        const conversionFactor = product.presentation === '1kilo' ? 0.2 : 1;
+        const effectiveQuantity = Number(quantity) * conversionFactor;
+        const key = product.name;
+        const current = productsMap.get(key);
+        if (!current) {
+          productsMap.set(key, {
+            total: effectiveQuantity,
+            price: Number(unitPrice),
+          });
+        } else {
+          current.total += effectiveQuantity;
+          productsMap.set(key, current);
+        }
+      });
+    });
+
+    const productNames = Array.from(productsMap.keys());
+
+    const workbook = new ExcelJS.Workbook();
+
+    // Hoja 1 - Facturas
+    const ws1 = workbook.addWorksheet('Facturas');
+
+    const baseHeaders = [
+      'N° Control',
+      'Cliente',
+      'Teléfono',
+      'Bloque',
+      'Dirección',
+      'Zona',
+      'Fecha',
+      'Vence',
+      'Total',
+      'Debe',
+      'Estado',
+    ];
+
+    const productHeaders = productNames.flatMap((name) => [
+      `${name}`,
+      `Precio`,
+    ]);
+    const finalHeaders = [
+      ...baseHeaders,
+      ...productHeaders,
+      'Total de bultos',
+      'Bultos pendientes',
+      'Monto',
+      'Abono',
+    ];
+
+    ws1.addRow(finalHeaders);
+    ws1.getRow(1).font = { bold: true };
+
+    invoices.forEach((inv) => {
+      const invoiceRemaining = calculateInvoiceRemainingUsd(
+        inv.totalAmount,
+        inv.InvoicePayment,
+      );
+      const totalBultos = inv.invoiceItems.reduce((sum, i) => {
+        const conv = i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
+        return sum + Number(i.quantity) * conv;
+      }, 0);
+      let bultosPendientes = 0;
+      const abono = Number(inv.totalAmount) - invoiceRemaining;
+
+      // Calcular bultos pendientes: usar el precio promedio por bulto
+      if (totalBultos > 0) {
+        const avgPricePerBulto = Number(inv.totalAmount) / totalBultos;
+        if (inv.status === 'Pagado') {
+          bultosPendientes = 0;
+        } else {
+          if (avgPricePerBulto > 0) {
+            bultosPendientes =
+              Math.round((invoiceRemaining / avgPricePerBulto) * 100) / 100; // 2 decimales
+          }
+        }
+      }
+
+      const rowData: (string | number | Date)[] = [
+        inv.controlNumber,
+        inv.client.name,
+        inv.client.phone,
+        inv.client.block.name,
+        inv.client.address,
+        inv.client.zone,
+        inv.dispatchDate,
+        inv.dueDate,
+        Number(inv.totalAmount),
+        invoiceRemaining,
+        inv.status,
+      ];
+
+      // Agregar los productos por nombre (cantidad efectiva y precio)
+      for (const productName of productNames) {
+        const found = inv.invoiceItems.find(
+          (item) => item.product.name === productName,
+        );
+        if (found) {
+          const conv =
+            found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
+          const effective =
+            Math.round(Number(found.quantity) * conv * 100) / 100;
+          rowData.push(effective);
+          rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
+        } else {
+          rowData.push('');
+          rowData.push(0);
+        }
+      }
+
+      rowData.push(totalBultos);
+      rowData.push(bultosPendientes);
+      rowData.push(''); // Monto vacío
+      rowData.push(abono);
+
+      const row = ws1.addRow(rowData);
+
+      // Formato de fecha
+      row.getCell(6).numFmt = 'dd/mm/yyyy';
+      row.getCell(7).numFmt = 'dd/mm/yyyy';
+
+      // Color por estado
+      const colorMap = {
+        Creada: 'dbeafe',
+        Pendiente: 'ffedd4',
+        Vencida: 'ffe2e2',
+        Pagado: 'dbfce7',
+        Cancelada: 'ffe2e2',
+      };
+      const fillColor = colorMap[inv.status as keyof typeof colorMap];
+      if (fillColor) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: fillColor },
+        };
+      }
+    });
+
+    // Hoja 2 - Pagos
+    const ws2 = workbook.addWorksheet('Pagos');
+    const pagosHeaders = [
+      'Cuenta',
+      'Factura',
+      'Cantidad',
+      'Cantidad USD',
+      'Cantidad Bs',
+      'Tasa Dolar',
+      'Referencia',
+      ...productNames.flatMap((name) => [`${name}`, 'Precio']),
+      'Total de bultos',
+    ];
+
+    ws2.addRow(pagosHeaders);
+    ws2.getRow(1).font = { bold: true };
+
+    invoices.forEach((inv) => {
+      inv.InvoicePayment.forEach(({ payment }) => {
+        const currency = payment.account.method.currency;
+        const usdAmount =
+          currency === 'USD'
+            ? Number(payment.amount)
+            : Number(payment.amount) / Number(payment.dolar.dolar);
+        const bsAmount =
+          currency === 'BS'
+            ? Number(payment.amount)
+            : Number(payment.amount) * Number(payment.dolar.dolar);
+
+        const rowData: (string | number)[] = [
+          payment.account.name,
+          inv.controlNumber,
+          `${Number(payment.amount).toFixed(2)} ${currency === 'USD' ? '$' : 'Bs'}`,
+          usdAmount,
+          bsAmount,
+          Number(payment.dolar.dolar),
+          payment.reference,
+        ];
+
+        for (const productName of productNames) {
+          const found = inv.invoiceItems.find(
+            (item) => item.product.name === productName,
+          );
+          if (found) {
+            const conv =
+              found.product && found.product.presentation === '1kilo' ? 0.2 : 1;
+            const effective =
+              Math.round(Number(found.quantity) * conv * 100) / 100;
+            rowData.push(effective);
+            rowData.push(found.unitPrice ? Number(found.unitPrice) : 0);
+          } else {
+            rowData.push('');
+            rowData.push(0);
+          }
+        }
+
+        const totalBultos = inv.invoiceItems.reduce((sum, i) => {
+          const conv =
+            i.product && i.product.presentation === '1kilo' ? 0.2 : 1;
+          return sum + Number(i.quantity) * conv;
+        }, 0);
+        rowData.push(totalBultos);
+
+        const row = ws2.addRow(rowData);
+        if (currency === 'USD') {
+          row.eachCell((cell) => {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'dbeafe' },
+            };
+          });
+        }
+      });
+    });
+
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
+    const buffer = Buffer.from(arrayBuffer); // <-- Conversión correcta
+    return buffer;
+  }
 }

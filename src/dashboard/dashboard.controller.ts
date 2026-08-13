@@ -5,7 +5,7 @@ import { FastifyReply } from 'fastify';
 
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) { }
+  constructor(private readonly dashboardService: DashboardService) {}
 
   @Post()
   async getDashboardData(@Body() dateRange: DashboardExcel) {
@@ -23,7 +23,11 @@ export class DashboardController {
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
   ) {
-    return await this.dashboardService.getClientsDemandReport({ startDate, endDate, type });
+    return await this.dashboardService.getClientsDemandReport({
+      startDate,
+      endDate,
+      type,
+    });
   }
 
   // @Post('/export')
@@ -35,10 +39,17 @@ export class DashboardController {
   // }
 
   @Post('/export/v2')
-  async downloadExcelV2(@Body() filter: DashboardExcel, @Res({ passthrough: true }) res: FastifyReply) {
-    const buffer = await this.dashboardService.generateInventoryAndInvoicesExcelV2(filter);
+  async downloadExcelV2(
+    @Body() filter: DashboardExcel,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    const buffer =
+      await this.dashboardService.generateInventoryAndInvoicesExcelV2(filter);
 
-    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
     res.header('Content-Disposition', 'attachment; filename=reporte.xlsx');
 
     // En Fastify con passthrough: true, simplemente retornamos el buffer

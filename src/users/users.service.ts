@@ -7,79 +7,76 @@ import { Role, Users } from 'src/generated/prisma/client';
 
 @Injectable()
 export class UsersService {
+  constructor(private readonly prismaService: PrismaService) {}
 
-    constructor(private readonly prismaService: PrismaService) {
+  async getUsers(): Promise<Users[]> {
+    return await this.prismaService.users.findMany({
+      include: { roles: true },
+    });
+  }
 
+  async getRoles(): Promise<Role[]> {
+    return await this.prismaService.role.findMany();
+  }
+
+  async createUsers(user: DTOUser): Promise<DTOBaseResponse> {
+    try {
+      const hashedPassword = await bcrypt.hash('1234', 12);
+      await this.prismaService.users.create({
+        data: {
+          username: user.username,
+          name: user.name,
+          lastName: user.lastName,
+          password: hashedPassword,
+          rolId: user.rolId,
+        },
+      });
+
+      baseResponse.message = 'Usuario creado exitosamente.';
+      return baseResponse;
+    } catch (err: Error | any) {
+      await this.prismaService.errorMessages.create({
+        data: { message: err.message, from: 'UserService' },
+      });
+      badResponse.message = err.message;
+      return badResponse;
     }
+  }
 
-    async getUsers(): Promise<Users[]> {
-        return await this.prismaService.users.findMany({
-            include: { roles: true }
-        })
+  async updateUsers(id: number, user: DTOUser): Promise<DTOBaseResponse> {
+    try {
+      await this.prismaService.users.update({
+        where: { id },
+        data: {
+          username: user.username,
+          name: user.name,
+          lastName: user.lastName,
+          rolId: user.rolId,
+        },
+      });
+
+      baseResponse.message = 'Usuario actualizado exitosamente.';
+      return baseResponse;
+    } catch (err: Error | any) {
+      await this.prismaService.errorMessages.create({
+        data: { message: err.message, from: 'UserService' },
+      });
+      badResponse.message = err.message;
+      return badResponse;
     }
+  }
 
-    async getRoles(): Promise<Role[]> {
-        return await this.prismaService.role.findMany()
+  async deleteUsers(id: number): Promise<DTOBaseResponse> {
+    try {
+      await this.prismaService.users.delete({ where: { id } });
+      baseResponse.message = ' Usuario eliminado';
+      return baseResponse;
+    } catch (err: Error | any) {
+      await this.prismaService.errorMessages.create({
+        data: { message: err.message, from: 'UserService' },
+      });
+      badResponse.message = err.message;
+      return badResponse;
     }
-
-    async createUsers(user: DTOUser): Promise<DTOBaseResponse> {
-        try {
-            const hashedPassword = await bcrypt.hash('1234', 12);
-            await this.prismaService.users.create({
-                data: {
-                    username: user.username,
-                    name: user.name,
-                    lastName: user.lastName,
-                    password: hashedPassword,
-                    rolId: user.rolId,
-                }
-            })
-
-            baseResponse.message = 'Usuario creado exitosamente.'
-            return baseResponse;
-        } catch (err: Error | any) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'UserService' }
-            })
-            badResponse.message = err.message;
-            return badResponse;
-        }
-    }
-
-    async updateUsers(id: number, user: DTOUser): Promise<DTOBaseResponse> {
-        try {
-            await this.prismaService.users.update({
-                where: { id },
-                data: {
-                    username: user.username,
-                    name: user.name,
-                    lastName: user.lastName,
-                    rolId: user.rolId,
-                }
-            })
-
-            baseResponse.message = 'Usuario actualizado exitosamente.'
-            return baseResponse;
-        } catch (err: Error | any) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'UserService' }
-            })
-            badResponse.message = err.message;
-            return badResponse;
-        }
-    }
-
-    async deleteUsers(id: number): Promise<DTOBaseResponse> {
-        try {
-            await this.prismaService.users.delete({ where: { id } })
-            baseResponse.message = ' Usuario eliminado'
-            return baseResponse;
-        } catch (err: Error | any) {
-            await this.prismaService.errorMessages.create({
-                data: { message: err.message, from: 'UserService' }
-            })
-            badResponse.message = err.message;
-            return badResponse;
-        }
-    }
+  }
 }

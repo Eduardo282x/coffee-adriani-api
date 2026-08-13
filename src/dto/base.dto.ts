@@ -1,35 +1,35 @@
-import { Transform } from "class-transformer";
-import { IsDate, IsOptional, IsString } from "class-validator";
+import { Transform } from 'class-transformer';
+import { IsDate, IsOptional, IsString } from 'class-validator';
 
 export class DTOBaseResponse {
-    message: string;
-    success: boolean;
-    data?: any;
+  message: string;
+  success: boolean;
+  data?: any;
 }
 
 export const baseResponse: DTOBaseResponse = {
-    message: '',
-    success: true,
-    data: null
-}
+  message: '',
+  success: true,
+  data: null,
+};
 
 export const badResponse: DTOBaseResponse = {
-    message: '',
-    success: false,
-}
+  message: '',
+  success: false,
+};
 
 export class DTODateRangeFilter {
-    @IsOptional()
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    startDate: Date | string;
-    @IsOptional()
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    endDate: Date | string;
+  @IsOptional()
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  startDate: Date | string;
+  @IsOptional()
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  endDate: Date | string;
 }
 
 export class DashboardExcel extends DTODateRangeFilter {
-    @IsString()
-    type: string;
+  @IsString()
+  type: string;
 }

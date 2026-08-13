@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { PrismaService } from './prisma/prisma.service';
+import { PrismaModule } from './prisma/prisma.module';
 import { ClientsModule } from './clients/clients.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { ProductsModule } from './products/products.module';
@@ -33,6 +33,7 @@ import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    PrismaModule,
     ClientsModule,
     InvoicesModule,
     ProductsModule,
@@ -61,8 +62,7 @@ import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
   ],
   controllers: [AppController],
   providers: [
-    AppService, 
-    PrismaService, 
+    AppService,
     JwtService,
     {
       provide: APP_GUARD,
@@ -74,5 +74,4 @@ import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
     },
   ],
 })
-
-export class AppModule { }
+export class AppModule {}

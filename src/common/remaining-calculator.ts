@@ -26,21 +26,28 @@ export function clampZero(value: number): number {
   return value;
 }
 
-export function calculateInvoicePaidUsd(invoicePayments: Array<{ amount: DecimalLike }>): number {
+export function calculateInvoicePaidUsd(
+  invoicePayments: Array<{ amount: DecimalLike }>,
+): number {
   return round2(
-    invoicePayments.reduce((acc, item) => acc + toNumber(item.amount), 0)
+    invoicePayments.reduce((acc, item) => acc + toNumber(item.amount), 0),
   );
 }
 
-export function calculateInvoiceRemainingUsd(totalAmountUsd: DecimalLike, invoicePayments: Array<{ amount: DecimalLike }>): number {
+export function calculateInvoiceRemainingUsd(
+  totalAmountUsd: DecimalLike,
+  invoicePayments: Array<{ amount: DecimalLike }>,
+): number {
   const total = toNumber(totalAmountUsd);
   const paid = calculateInvoicePaidUsd(invoicePayments);
   return round2(clampZero(total - paid));
 }
 
-export function calculatePaymentAllocatedUsd(invoicePayments: Array<{ amount: DecimalLike }>): number {
+export function calculatePaymentAllocatedUsd(
+  invoicePayments: Array<{ amount: DecimalLike }>,
+): number {
   return round2(
-    invoicePayments.reduce((acc, item) => acc + toNumber(item.amount), 0)
+    invoicePayments.reduce((acc, item) => acc + toNumber(item.amount), 0),
   );
 }
 
@@ -48,20 +55,22 @@ export function calculatePaymentRemaining(
   paymentAmount: DecimalLike,
   currency: Currency,
   dolarRate: DecimalLike,
-  invoicePayments: Array<{ amount: DecimalLike }>
+  invoicePayments: Array<{ amount: DecimalLike }>,
 ) {
   const totalAmount = toNumber(paymentAmount);
   const rate = toNumber(dolarRate);
   const allocatedUSD = calculatePaymentAllocatedUsd(invoicePayments);
 
-  const allocatedInOriginalCurrency = currency === 'USD'
-    ? allocatedUSD
-    : allocatedUSD * rate;
+  const allocatedInOriginalCurrency =
+    currency === 'USD' ? allocatedUSD : allocatedUSD * rate;
 
-  const remainingOriginal = round2(clampZero(totalAmount - allocatedInOriginalCurrency));
-  const remainingUSD = currency === 'USD'
-    ? remainingOriginal
-    : round2(rate > 0 ? remainingOriginal / rate : 0);
+  const remainingOriginal = round2(
+    clampZero(totalAmount - allocatedInOriginalCurrency),
+  );
+  const remainingUSD =
+    currency === 'USD'
+      ? remainingOriginal
+      : round2(rate > 0 ? remainingOriginal / rate : 0);
 
   return {
     allocatedUSD,

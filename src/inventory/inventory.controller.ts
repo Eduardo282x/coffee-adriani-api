@@ -1,113 +1,147 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import { DTOInventory, DTOInventorySimple, DTOUpdateInventoryEntry, CreateInventoryEntryDTO, InventoryEntryFilterDTO } from './inventory.dto';
+import {
+  DTOInventory,
+  DTOInventorySimple,
+  DTOUpdateInventoryEntry,
+  CreateInventoryEntryDTO,
+  InventoryEntryFilterDTO,
+} from './inventory.dto';
 
 @Controller('inventory')
 export class InventoryController {
+  constructor(private readonly inventoryService: InventoryService) {}
 
-    constructor(private readonly inventoryService: InventoryService) {
+  @Get()
+  async getInventory() {
+    return await this.inventoryService.getInventory();
+  }
 
-    }
+  @Get('/history')
+  async getInventoryMovements(
+    @Query('page', ParseIntPipe) page: number,
+    @Query('limit', ParseIntPipe) limit: number,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('typeMovement') typeMovement?: 'IN' | 'OUT' | 'EDIT' | '',
+    @Query('typeProduct') typeProduct?: string,
+    @Query('controlNumber') controlNumber?: string,
+  ) {
+    return await this.inventoryService.getInventoryMovements({
+      page,
+      limit,
+      startDate,
+      endDate,
+      typeMovement,
+      typeProduct,
+      controlNumber,
+    });
+  }
 
-    @Get()
-    async getInventory() {
-        return await this.inventoryService.getInventory();
-    }
+  @Post()
+  async saveInventory(@Body() inventory: DTOInventory) {
+    return await this.inventoryService.saveInventory(inventory);
+  }
 
-    @Get('/history')
-    async getInventoryMovements(
-        @Query('page', ParseIntPipe) page: number,
-        @Query('limit', ParseIntPipe) limit: number,
-        @Query('startDate') startDate?: string,
-        @Query('endDate') endDate?: string,
-        @Query('typeMovement') typeMovement?: 'IN' | 'OUT' | 'EDIT' | '',
-        @Query('typeProduct') typeProduct?: string,
-        @Query('controlNumber') controlNumber?: string,
-    ) {
-        return await this.inventoryService.getInventoryMovements({page, limit, startDate, endDate, typeMovement, typeProduct, controlNumber});
-    }
+  @Put('/:id')
+  async updateAmountInventory(
+    @Body() inventory: DTOInventorySimple,
+    @Param('id') id: string,
+  ) {
+    return await this.inventoryService.updateAmountInventory(
+      inventory,
+      Number(id),
+    );
+  }
 
-    @Post()
-    async saveInventory(@Body() inventory: DTOInventory) {
-        return await this.inventoryService.saveInventory(inventory);
-    }
+  @Put('/history')
+  async updateInventoryEntryControlNumber(
+    @Body() inventory: DTOUpdateInventoryEntry,
+  ) {
+    return await this.inventoryService.updateInventoryEntryControlNumber(
+      inventory,
+    );
+  }
 
-    @Put('/:id')
-    async updateAmountInventory(@Body() inventory: DTOInventorySimple, @Param('id') id: string) {
-        return await this.inventoryService.updateAmountInventory(inventory, Number(id));
-    }
+  @Get('/entries')
+  async getInventoryEntries(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('typeMovement') typeMovement?: string,
+    @Query('typeProduct') typeProduct?: string,
+    @Query('controlNumber') controlNumber?: string,
+    @Query('supplierId') supplierId?: string,
+  ) {
+    return await this.inventoryService.getInventoryEntries({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      startDate,
+      endDate,
+      typeMovement,
+      typeProduct,
+      controlNumber,
+      supplierId: supplierId ? parseInt(supplierId) : undefined,
+    });
+  }
 
-    @Put('/history')
-    async updateInventoryEntryControlNumber(@Body() inventory: DTOUpdateInventoryEntry) {
-        return await this.inventoryService.updateInventoryEntryControlNumber(inventory);
-    }
+  @Get('/entries/:id')
+  async getInventoryEntryById(@Param('id', ParseIntPipe) id: number) {
+    return await this.inventoryService.getInventoryEntryById(id);
+  }
 
-    @Get('/entries')
-    async getInventoryEntries(
-        @Query('page') page?: string,
-        @Query('limit') limit?: string,
-        @Query('startDate') startDate?: string,
-        @Query('endDate') endDate?: string,
-        @Query('typeMovement') typeMovement?: string,
-        @Query('typeProduct') typeProduct?: string,
-        @Query('controlNumber') controlNumber?: string,
-        @Query('supplierId') supplierId?: string,
-    ) {
-        return await this.inventoryService.getInventoryEntries({
-            page: page ? parseInt(page) : 1,
-            limit: limit ? parseInt(limit) : 50,
-            startDate,
-            endDate,
-            typeMovement,
-            typeProduct,
-            controlNumber,
-            supplierId: supplierId ? parseInt(supplierId) : undefined,
-        });
-    }
+  @Post('/entries')
+  async createInventoryEntry(@Body() data: CreateInventoryEntryDTO) {
+    return await this.inventoryService.createInventoryEntry(data);
+  }
 
-    @Get('/entries/:id')
-    async getInventoryEntryById(@Param('id', ParseIntPipe) id: number) {
-        return await this.inventoryService.getInventoryEntryById(id);
-    }
+  @Put('/entries/:id')
+  async updateInventoryEntry(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() data: CreateInventoryEntryDTO,
+  ) {
+    return await this.inventoryService.updateInventoryEntry(id, data);
+  }
 
-    @Post('/entries')
-    async createInventoryEntry(@Body() data: CreateInventoryEntryDTO) {
-        return await this.inventoryService.createInventoryEntry(data);
-    }
+  @Delete('/entries/:id')
+  async deleteInventoryEntry(@Param('id', ParseIntPipe) id: number) {
+    return await this.inventoryService.deleteInventoryEntry(id);
+  }
 
-    @Put('/entries/:id')
-    async updateInventoryEntry(@Param('id', ParseIntPipe) id: number, @Body() data: CreateInventoryEntryDTO) {
-        return await this.inventoryService.updateInventoryEntry(id, data);
-    }
+  @Get('/enterprise')
+  async getEnterpriseEntries(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('typeProduct') typeProduct?: string,
+    @Query('controlNumber') controlNumber?: string,
+    @Query('supplierId') supplierId?: string,
+  ) {
+    return await this.inventoryService.getEnterpriseEntries({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      startDate,
+      endDate,
+      typeProduct,
+      controlNumber,
+      supplierId: supplierId ? parseInt(supplierId) : undefined,
+    });
+  }
 
-    @Delete('/entries/:id')
-    async deleteInventoryEntry(@Param('id', ParseIntPipe) id: number) {
-        return await this.inventoryService.deleteInventoryEntry(id);
-    }
-
-    @Get('/enterprise')
-    async getEnterpriseEntries(
-        @Query('page') page?: string,
-        @Query('limit') limit?: string,
-        @Query('startDate') startDate?: string,
-        @Query('endDate') endDate?: string,
-        @Query('typeProduct') typeProduct?: string,
-        @Query('controlNumber') controlNumber?: string,
-        @Query('supplierId') supplierId?: string,
-    ) {
-        return await this.inventoryService.getEnterpriseEntries({
-            page: page ? parseInt(page) : 1,
-            limit: limit ? parseInt(limit) : 50,
-            startDate,
-            endDate,
-            typeProduct,
-            controlNumber,
-            supplierId: supplierId ? parseInt(supplierId) : undefined,
-        });
-    }
-
-    @Get('/enterprise/:id')
-    async getEnterpriseEntryById(@Param('id', ParseIntPipe) id: number) {
-        return await this.inventoryService.getEnterpriseEntryById(id);
-    }
+  @Get('/enterprise/:id')
+  async getEnterpriseEntryById(@Param('id', ParseIntPipe) id: number) {
+    return await this.inventoryService.getEnterpriseEntryById(id);
+  }
 }

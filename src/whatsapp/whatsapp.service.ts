@@ -5,73 +5,73 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 
 @Injectable()
 export class WhatsAppService {
+  private client: Client;
 
-    private client: Client;
+  async onModuleInit() {
+    // this.initializeWhatsAppAsync();
+  }
 
-    async onModuleInit() {
-        // this.initializeWhatsAppAsync();
+  private async initializeWhatsAppAsync() {
+    try {
+      console.log('Starting WhatsApp initialization...');
+
+      this.client = new Client({
+        authStrategy: new LocalAuth(),
+        puppeteer: {
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+          ],
+        },
+      });
+
+      this.client.on('qr', (qr) => {
+        console.log('Escanea el QR con tu WhatsApp:');
+        qrcode.generate(qr, { small: true });
+      });
+
+      this.client.on('ready', () => {
+        console.log('WhatsApp Client is ready!');
+      });
+
+      this.client.on('disconnected', (reason) => {
+        console.log('WhatsApp Client disconnected:', reason);
+      });
+
+      try {
+        await this.client.initialize();
+      } catch (initError) {
+        console.error(
+          'Error during WhatsApp client initialization:',
+          initError,
+        );
+      }
+
+      console.log('WhatsApp initialization completed successfully.');
+    } catch (error) {
+      console.error('WhatsApp initialization failed:', error);
+      // Continuar sin WhatsApp en lugar de crashear toda la app
     }
+  }
 
-    private async initializeWhatsAppAsync() {
-        try {
-            console.log('Starting WhatsApp initialization...');
-
-            this.client = new Client({
-                authStrategy: new LocalAuth(),
-                puppeteer: {
-                    headless: true,
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--single-process',
-                        '--disable-gpu',
-                        '--disable-web-security',
-                        '--disable-features=VizDisplayCompositor'
-                    ]
-                }
-            });
-
-            this.client.on('qr', qr => {
-                console.log('Escanea el QR con tu WhatsApp:');
-                qrcode.generate(qr, { small: true });
-            });
-
-            this.client.on('ready', () => {
-                console.log('WhatsApp Client is ready!');
-            });
-
-            this.client.on('disconnected', (reason) => {
-                console.log('WhatsApp Client disconnected:', reason);
-            });
-
-            try {
-                await this.client.initialize();
-            } catch (initError) {
-                console.error('Error during WhatsApp client initialization:', initError);
-            }
-
-            console.log('WhatsApp initialization completed successfully.');
-
-
-        } catch (error) {
-            console.error('WhatsApp initialization failed:', error);
-            // Continuar sin WhatsApp en lugar de crashear toda la app
-        }
+  async sendMessage(phone: string, message: string): Promise<DTOBaseResponse> {
+    try {
+      const chatId = `${phone}@c.us`;
+      await this.client.sendMessage(chatId, message);
+      baseResponse.message = `Mensaje enviado a ${phone}`;
+      return baseResponse;
+    } catch (err) {
+      badResponse.message = `Ha ocurrido un error ${err}`;
+      return badResponse;
     }
-
-    async sendMessage(phone: string, message: string): Promise<DTOBaseResponse> {
-        try {
-            const chatId = `${phone}@c.us`;
-            await this.client.sendMessage(chatId, message);
-            baseResponse.message = `Mensaje enviado a ${phone}`;
-            return baseResponse;
-        } catch (err) {
-            badResponse.message = `Ha ocurrido un error ${err}`;
-            return badResponse;
-        }
-    }
+  }
 }

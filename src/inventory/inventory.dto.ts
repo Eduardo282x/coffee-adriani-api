@@ -1,128 +1,136 @@
-import { Transform, Type } from "class-transformer";
-import { IsArray, IsDate, IsNumber, IsOptional, IsPositive, IsString, ValidateNested } from "class-validator";
+import { Transform, Type } from 'class-transformer';
+import {
+  IsArray,
+  IsDate,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 
 export class DTOInventory {
-    @IsString()
-    controlNumber: string;
+  @IsString()
+  controlNumber: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => DTOInventoryDetail)
-    details: DTOInventoryDetail[];
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DTOInventoryDetail)
+  details: DTOInventoryDetail[];
 
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    date: Date;
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  date: Date;
 }
 
 export class DTOInventoryDetail {
-    @IsNumber()
-    @IsPositive()
-    productId: number;
+  @IsNumber()
+  @IsPositive()
+  productId: number;
 
-    @IsNumber()
-    @IsPositive()
-    quantity: number;
+  @IsNumber()
+  @IsPositive()
+  quantity: number;
 }
 
-export class DTOInventorySimple extends DTOInventoryDetail{
-    @IsString()
-    @IsOptional()
-    description?: string;
+export class DTOInventorySimple extends DTOInventoryDetail {
+  @IsString()
+  @IsOptional()
+  description?: string;
 }
 
 export class DTOUpdateInventoryEntry {
-    @IsString()
-    controlNumberOld: string;
-    @IsString()
-    controlNumber: string;
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    date: Date;
+  @IsString()
+  controlNumberOld: string;
+  @IsString()
+  controlNumber: string;
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  date: Date;
 }
 
 export class CreateInventoryEntryDTO {
-    @IsString()
-    controlNumber: string;
+  @IsString()
+  controlNumber: string;
 
-    @IsString()
-    @IsOptional()
-    title?: string;
+  @IsString()
+  @IsOptional()
+  title?: string;
 
-    @IsString()
-    @IsOptional()
-    description?: string;
+  @IsString()
+  @IsOptional()
+  description?: string;
 
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    date: Date;
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  date: Date;
 
-    @IsNumber()
-    @IsOptional()
-    supplierId?: number;
+  @IsNumber()
+  @IsOptional()
+  supplierId?: number;
 
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => InventoryEntryDetailDTO)
-    details: InventoryEntryDetailDTO[];
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InventoryEntryDetailDTO)
+  details: InventoryEntryDetailDTO[];
 }
 
 export class InventoryEntryDetailDTO {
-    @IsNumber()
-    @IsPositive()
-    productId: number;
+  @IsNumber()
+  @IsPositive()
+  productId: number;
 
-    @IsNumber()
-    @IsPositive()
-    quantity: number;
+  @IsNumber()
+  @IsPositive()
+  quantity: number;
 
-    @IsNumber()
-    unitPrice: number;
+  @IsNumber()
+  unitPrice: number;
 
-    @IsNumber()
-    @IsOptional()
-    unitPriceUSD?: number;
+  @IsNumber()
+  @IsOptional()
+  unitPriceUSD?: number;
 }
 
 export class InventoryEntryFilterDTO {
-    @IsNumber()
-    @IsOptional()
-    @Type(() => Number)
-    page?: number;
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  page?: number;
 
-    @IsNumber()
-    @IsOptional()
-    @Type(() => Number)
-    limit?: number;
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  limit?: number;
 
-    @IsOptional()
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    startDate?: Date | string;
+  @IsOptional()
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  startDate?: Date | string;
 
-    @IsOptional()
-    @IsDate()
-    @Transform(({ value }) => new Date(value))
-    endDate?: Date | string;
+  @IsOptional()
+  @IsDate()
+  @Transform(({ value }) => new Date(value))
+  endDate?: Date | string;
 
-    @IsString()
-    @IsOptional()
-    typeMovement?: string;
+  @IsString()
+  @IsOptional()
+  typeMovement?: string;
 
-    @IsString()
-    @IsOptional()
-    typeProduct?: string;
+  @IsString()
+  @IsOptional()
+  typeProduct?: string;
 
-    @IsString()
-    @IsOptional()
-    controlNumber?: string;
+  @IsString()
+  @IsOptional()
+  controlNumber?: string;
 
-    @IsNumber()
-    @IsOptional()
-    @Type(() => Number)
-    supplierId?: number;
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  supplierId?: number;
 }

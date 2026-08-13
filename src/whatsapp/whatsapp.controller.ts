@@ -4,13 +4,13 @@ import { WhatsAppDTO } from './whatsapp.dto';
 
 @Controller('whatsApp')
 export class WhatsAppController {
+  constructor(private readonly whatsAppService: WhatsAppService) {}
 
-    constructor(private readonly whatsAppService: WhatsAppService) {
-        
-    }
-
-    @Post('/send')
-    async sendMessageWhatsApp(@Body() message: WhatsAppDTO) {
-        return await this.whatsAppService.sendMessage(message.phone, message.message);
-    }
+  @Post('/send')
+  async sendMessageWhatsApp(@Body() message: WhatsAppDTO) {
+    return await this.whatsAppService.sendMessage(
+      message.phone,
+      message.message,
+    );
+  }
 }

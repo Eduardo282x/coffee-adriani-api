@@ -3,13 +3,10 @@ import { ExpensesService } from './expenses.service';
 import { ExpensesDTO } from './expenses.dto';
 @Controller('expenses')
 export class ExpensesController {
+  constructor(private readonly expenseService: ExpensesService) {}
 
-    constructor(private readonly expenseService: ExpensesService) {
-
-    }
-    
-    @Post()
-    async getExpensesFilter(@Body() expenseFilter: ExpensesDTO){
-        return await this.expenseService.getExpensesFilter(expenseFilter);
-    }
+  @Post()
+  async getExpensesFilter(@Body() expenseFilter: ExpensesDTO) {
+    return await this.expenseService.getExpensesFilter(expenseFilter);
+  }
 }
