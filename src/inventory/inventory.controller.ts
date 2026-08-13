@@ -15,7 +15,6 @@ import {
   DTOInventorySimple,
   DTOUpdateInventoryEntry,
   CreateInventoryEntryDTO,
-  InventoryEntryFilterDTO,
 } from './inventory.dto';
 
 @Controller('inventory')
@@ -87,6 +86,25 @@ export class InventoryController {
     return await this.inventoryService.getInventoryEntries({
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
+      startDate,
+      endDate,
+      typeMovement,
+      typeProduct,
+      controlNumber,
+      supplierId: supplierId ? parseInt(supplierId) : undefined,
+    });
+  }
+
+  @Get('/entries/statistics')
+  async getInventoryEntriesStatistics(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('typeMovement') typeMovement?: string,
+    @Query('typeProduct') typeProduct?: string,
+    @Query('controlNumber') controlNumber?: string,
+    @Query('supplierId') supplierId?: string,
+  ) {
+    return await this.inventoryService.getInventoryEntriesStatistics({
       startDate,
       endDate,
       typeMovement,

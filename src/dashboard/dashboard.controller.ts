@@ -1,6 +1,6 @@
 import { Controller, Post, Body, Res, Get, Query } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
-import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
+import { DashboardExcel } from 'src/dto/base.dto';
 import { FastifyReply } from 'fastify';
 
 @Controller('dashboard')

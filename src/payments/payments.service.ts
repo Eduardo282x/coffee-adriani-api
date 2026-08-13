@@ -18,39 +18,7 @@ import {
   calculatePaymentRemaining,
 } from 'src/common/remaining-calculator';
 import { InvoicesService } from 'src/invoices/invoices.service';
-import { InvoiceStatus, PaymentStatus } from 'src/generated/prisma/enums';
-
-interface PaymentInvoiceItem {
-  amount: number | string;
-}
-
-interface PaymentUpdatedInvoicePayment {
-  id: number;
-  invoiceId: number;
-  paymentId: number;
-  amount: number;
-  createdAt: Date;
-  invoice: {
-    id: number;
-    controlNumber: string;
-    totalAmount: number;
-    status: string;
-    clientId?: number;
-    InvoicePayment: PaymentInvoiceItem[];
-    client: {
-      id: number;
-      name: string;
-      block: {
-        id: number;
-        name: string;
-      } | null;
-    } | null;
-  } | null;
-}
-
-interface PaymentUpdatedData {
-  InvoicePayment: PaymentUpdatedInvoicePayment[];
-}
+import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 interface PaymentFilterPaginate extends PaymentFilter {
   page: number;
@@ -585,39 +553,12 @@ export class PaymentsService {
         } as any;
       });
 
-      const processedPaymentsNotType = payments.map((data) => {
-        const filteredInvoicePayments = type
-          ? data.InvoicePayment.filter(
-              (ip: any) =>
-                !!ip.invoice &&
-                Array.isArray(ip.invoice.invoiceItems) &&
-                ip.invoice.invoiceItems.some(
-                  (ii: any) => ii.product?.type !== type,
-                ),
-            )
-          : data.InvoicePayment;
-        return {
-          ...data,
-          InvoicePayment: filteredInvoicePayments,
-        } as any;
-      });
-
       // InvoicePayment original (sin filtrar por tipo) para calcular remaining real
       const originalInvoicePayments = new Map<number, any[]>();
       payments.forEach((p) =>
         originalInvoicePayments.set(p.id, p.InvoicePayment),
       );
 
-      const paymentInvoiceWithType = payments.filter((data) =>
-        data.InvoicePayment.some(
-          (ip: any) =>
-            !!ip.invoice &&
-            Array.isArray(ip.invoice.invoiceItems) &&
-            ip.invoice.invoiceItems.some(
-              (ii: any) => ii.product?.type === type,
-            ),
-        ),
-      );
       const paymentInvoiceWithoutType = payments.filter((data) =>
         data.InvoicePayment.some(
           (ip: any) =>
@@ -628,15 +569,7 @@ export class PaymentsService {
             ),
         ),
       );
-      const controlNumberInvoicesWihoutType = paymentInvoiceWithoutType
-        .map((item) =>
-          item.InvoicePayment.map((inv) => inv.invoice.controlNumber),
-        )
-        .flat();
-      const sumInvoiceWithoutType = paymentInvoiceWithoutType.reduce(
-        (acc, data) => acc + Number(data.amount),
-        0,
-      );
+
       // console.log(`Facturas de tipo seleccionado: ${paymentInvoiceWithType.length}`);
       // console.log(`Facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.length}`);
       // console.log(`Monto total de facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.reduce((acc, data) => acc + Number(data.amount), 0)}`);
@@ -779,91 +712,105 @@ export class PaymentsService {
         );
       }, 0);
 
-      const [paymentsByMethod, accountsDetails] = await Promise.all([
-        this.prismaService.payment.groupBy({
-          by: ['accountId'],
-          where,
-          _sum: { amount: true },
-          _count: { id: true },
-        }),
-        this.prismaService.accountsPayments.findMany({
-          include: { method: true },
-        }),
-      ]);
+      const buildTypeStats = (payments: any[]) => {
+        const totalBs = payments
+          .filter((item) => item.account.method.currency === 'BS')
+          .reduce((acc, data) => acc + Number(data.amount), 0);
 
-      const methodStatistics = paymentsByMethod.map((stat) => {
-        const account = accountsDetails.find(
-          (acc) => acc.id === stat.accountId,
-        );
+        const totalBsInUSD = payments
+          .filter((item) => item.account.method.currency === 'BS')
+          .reduce(
+            (acc, data) => acc + Number(data.amount) / Number(data.dolar.dolar),
+            0,
+          );
+
+        const totalUSD = payments
+          .filter((item) => item.account.method.currency === 'USD')
+          .reduce((acc, data) => acc + Number(data.amount), 0);
+
         return {
-          accountId: stat.accountId,
-          accountName: account
-            ? `${account.bank} - ${account.name}`
-            : 'Desconocido',
-          method: account?.method.name || 'Desconocido',
-          currency: account?.method.currency || 'Desconocido',
-          totalAmount: stat._sum.amount || 0,
-          count: stat._count.id,
+          totalBs,
+          totalUSD,
+          total: totalBsInUSD + totalUSD,
+          count: payments.length,
         };
-      });
-
-      // Totales separados de gastos (pagos EXPENSE sin relación con facturas)
-      const expenseWhere: any = {
-        type: { in: ['EXPENSE', 'PERSONAL_EXPENSES'] },
       };
 
-      if (startDate && endDate) {
-        expenseWhere.paymentDate = {
-          gte: this.getStartOfDayUtc(startDate),
-          lte: this.getEndOfDayUtc(endDate),
-        };
-      }
+      // Totales separados por tipo de pago (EXPENSE, PERSONAL_EXPENSES, SUPPLIER)
+      const expenseWhere: any = {
+        type: 'EXPENSE',
+      };
 
-      if (accountId) {
-        expenseWhere.accountId = accountId;
-      }
+      const personalExpensesWhere: any = {
+        type: 'PERSONAL_EXPENSES',
+      };
 
-      if (methodId) {
-        expenseWhere.account = {
-          methodId: methodId,
-        };
-      }
+      const supplierWhere: any = {
+        type: 'SUPPLIER',
+      };
 
-      if (accountType) {
-        expenseWhere.type = accountType;
-      }
+      const typePaymentFilters = (where: any) => {
+        if (startDate && endDate) {
+          where.paymentDate = {
+            gte: this.getStartOfDayUtc(startDate),
+            lte: this.getEndOfDayUtc(endDate),
+          };
+        }
 
-      const expensePayments = await this.prismaService.payment.findMany({
-        where: expenseWhere,
-        select: {
-          amount: true,
-          account: {
-            select: {
-              method: {
-                select: { currency: true },
-              },
+        if (accountId) {
+          where.accountId = accountId;
+        }
+
+        if (methodId) {
+          where.account = {
+            methodId: methodId,
+          };
+        }
+      };
+
+      typePaymentFilters(expenseWhere);
+      typePaymentFilters(personalExpensesWhere);
+      typePaymentFilters(supplierWhere);
+
+      const typePaymentSelect = {
+        amount: true,
+        account: {
+          select: {
+            method: {
+              select: { currency: true },
             },
           },
-          dolar: {
-            select: { dolar: true },
-          },
         },
-      });
+        dolar: {
+          select: { dolar: true },
+        },
+      };
 
-      const expensesTotalBs = expensePayments
-        .filter((item) => item.account.method.currency === 'BS')
-        .reduce((acc, data) => acc + Number(data.amount), 0);
+      const [expensePayments, personalExpensesPayments, supplierPayments] =
+        await Promise.all([
+          this.prismaService.payment.findMany({
+            where: expenseWhere,
+            select: typePaymentSelect,
+          }),
+          this.prismaService.payment.findMany({
+            where: personalExpensesWhere,
+            select: typePaymentSelect,
+          }),
+          this.prismaService.payment.findMany({
+            where: supplierWhere,
+            select: typePaymentSelect,
+          }),
+        ]);
 
-      const expensesTotalBsInUSD = expensePayments
-        .filter((item) => item.account.method.currency === 'BS')
-        .reduce(
-          (acc, data) => acc + Number(data.amount) / Number(data.dolar.dolar),
-          0,
-        );
-
-      const expensesTotalUSD = expensePayments
-        .filter((item) => item.account.method.currency === 'USD')
-        .reduce((acc, data) => acc + Number(data.amount), 0);
+      const expenses = buildTypeStats(expensePayments);
+      const personalExpenses = buildTypeStats(personalExpensesPayments);
+      const supplier = buildTypeStats(supplierPayments);
+      const expensesGroup = {
+        totalBs: expenses.totalBs + personalExpenses.totalBs,
+        totalUSD: expenses.totalUSD + personalExpenses.totalUSD,
+        total: expenses.total + personalExpenses.total,
+        count: expenses.count + personalExpenses.count,
+      };
 
       // Obtener facturas perdidas para totalLost (mismo rango de fechas y tipo)
       const lostInvoicesWhere: any = {
@@ -910,20 +857,16 @@ export class PaymentsService {
           totalRemainingUSD,
           unassociatedAmount,
         },
-        expenses: {
-          totalBs: expensesTotalBs,
-          totalUSD: expensesTotalUSD,
-          total: expensesTotalBsInUSD + expensesTotalUSD,
-          count: expensePayments.length,
-        },
+        expenses,
+        personalExpenses,
+        expensesGroup,
+        supplier,
         counts: {
           total: payments.length,
           associated: associatedPayments,
           unassociated: unassociatedPayments,
         },
-        byMethod: methodStatistics,
         valores: valores,
-        paymentInvoiceWithoutType: paymentInvoiceWithoutType,
       };
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -1571,7 +1514,7 @@ export class PaymentsService {
         );
       }
 
-      const invoiceAfter = await this.prismaService.$transaction(async (tx) => {
+      await this.prismaService.$transaction(async (tx) => {
         await tx.invoicePayment.delete({ where: { id: pay.id } });
 
         const invoice = await tx.invoice.findUnique({
@@ -1721,7 +1664,7 @@ export class PaymentsService {
         message: `Se actualizaron ${invoicesAffected} facturas.`,
         success: true,
       };
-    } catch (error) {
+    } catch {
       throw new Error('No se pudo completar la validación de facturas');
     }
   }

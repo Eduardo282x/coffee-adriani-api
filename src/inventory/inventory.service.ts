@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   DTOInventory,
-  DTOInventoryDetail,
   DTOInventorySimple,
   DTOUpdateInventoryEntry,
   CreateInventoryEntryDTO,
@@ -17,7 +16,7 @@ export class InventoryService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly productsService: ProductsService,
-  ) {}
+  ) { }
 
   private getStartOfDayUtc(date: string) {
     if (date.length > 10) {
@@ -594,6 +593,95 @@ export class InventoryService {
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new Error(`Error al obtener entradas: ${errMsg}`);
+    }
+  }
+
+  async getInventoryEntriesStatistics(filter: InventoryEntryFilterDTO) {
+    try {
+      const {
+        startDate,
+        endDate,
+        typeMovement,
+        typeProduct,
+        controlNumber,
+        supplierId,
+      } = filter;
+
+      const where: any = {};
+
+      if (startDate && endDate) {
+        where.date = {
+          gte: this.getStartOfDayUtc(startDate as string),
+          lte: this.getEndOfDayUtc(endDate as string),
+        };
+      }
+
+      if (controlNumber) {
+        where.controlNumber = {
+          contains: controlNumber,
+          mode: 'insensitive',
+        };
+      }
+
+      if (supplierId) {
+        where.supplierId = supplierId;
+      }
+
+      if (typeProduct) {
+        where.details = {
+          some: {
+            product: {
+              type: {
+                equals: typeProduct,
+                mode: 'insensitive',
+              },
+            },
+          },
+        };
+      }
+
+      const entries = await this.prismaService.inventoryEntry.findMany({
+        where,
+        select: {
+          totalAmount: true,
+          details: {
+            select: { quantity: true },
+          },
+          payments: {
+            select: { amount: true },
+          },
+        },
+      });
+
+      const totalInvoices = entries.length;
+      const totalBultos = entries.reduce(
+        (sum, entry) =>
+          sum +
+          entry.details.reduce((s, detail) => s + Number(detail.quantity), 0),0,);
+      const totalPaid = entries.reduce(
+        (sum, entry) =>
+          sum +
+          entry.payments.reduce((s, payment) => s + Number(payment.amount), 0),
+        0,
+      );
+      const totalAmount = entries.reduce(
+        (sum, entry) => sum + Number(entry.totalAmount),
+        0,
+      );
+      const totalPending = totalAmount - totalPaid;
+
+      return {
+        totals: {
+          totalInvoices,
+          totalBultos,
+          totalPaid: totalPaid.toFixed(2),
+          totalPending: totalPending.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
+        },
+      };
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Error al obtener estadísticas de entradas: ${errMsg}`);
     }
   }
 

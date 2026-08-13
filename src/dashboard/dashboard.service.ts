@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
+import { DashboardExcel } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 import * as ExcelJS from 'exceljs';
@@ -202,7 +202,7 @@ export class DashboardService {
           totalRemainingBs: r2(paymentStatistics.totals.totalRemainingBs),
           totalRemainingUSD: r2(paymentStatistics.totals.totalRemainingUSD),
           counts: paymentStatistics.counts,
-          byMethod: paymentStatistics.byMethod,
+          // byMethod: paymentStatistics.byMethod,
           expenses: {
             totalUSD: r2(paymentStatistics.expenses.totalUSD),
             totalBs: r2(paymentStatistics.expenses.totalBs),
@@ -236,7 +236,7 @@ export class DashboardService {
       facturasHastaCierre,
       pagosEnRango,
       paymentStatistics,
-      currentDolar,
+      // currentDolar,
       inventarioMovsAntes,
     ] = await Promise.all([
       // Productos con solo campos necesarios
@@ -477,10 +477,10 @@ export class DashboardService {
       }),
 
       // Dólar actual
-      this.prismaService.historyDolar.findFirst({
-        select: { dolar: true },
-        orderBy: { date: 'desc' },
-      }),
+      // this.prismaService.historyDolar.findFirst({
+      //   select: { dolar: true },
+      //   orderBy: { date: 'desc' },
+      // }),
 
       // Movimientos de inventario antes del rango (agrupados)
       this.prismaService.inventoryEntryDetail.findMany({
@@ -500,7 +500,7 @@ export class DashboardService {
       start: filter.startDate,
       end: filter.endDate,
     });
-    const exchangeRateUsed = currentDolar?.dolar || 1;
+    // const exchangeRateUsed = currentDolar?.dolar || 1;
 
     // Mapear movimientos de inventario por producto
     const inventarioInicialMap = new Map();
