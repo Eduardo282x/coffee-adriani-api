@@ -1,6 +1,9 @@
 allowBuilds:
   '@prisma/engines': true
   '@scarf/scarf': true
+  '@swc/core': true
   bcrypt: true
   prisma: true
   puppeteer: true
+overrides:
+  fastify: 5.11.0
