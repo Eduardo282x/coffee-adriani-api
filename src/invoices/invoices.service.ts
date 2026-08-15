@@ -10,7 +10,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import {
   DetProducts,
   DTOInvoice,
-  IInvoiceWithDetails,
   InvoiceStatistics,
   OptionalFilterInvoices,
   ResponseInvoice,
@@ -19,7 +18,6 @@ import { ProductsService } from 'src/products/products.service';
 import { InventoryService } from 'src/inventory/inventory.service';
 import { ClientsService } from 'src/clients/clients.service';
 // import * as XLSX from 'xlsx';
-import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
@@ -520,7 +518,7 @@ export class InvoicesService {
       let totalPendingPackagesBS = 0;
 
       // Variables para estadísticas de facturas perdidas
-      let totalLostPackages = 0;
+      // let totalLostPackages = 0;
       const lostProductStatsMap = new Map<
         number,
         {
@@ -648,7 +646,7 @@ export class InvoicesService {
               });
             }
 
-            totalLostPackages += effectiveQuantity;
+            // totalLostPackages += effectiveQuantity;
           }
         }
       }
@@ -944,8 +942,7 @@ export class InvoicesService {
         where.status = filter.status as InvoiceStatus;
       }
 
-      const [dolar, rawInvoices] = await Promise.all([
-        this.productService.getDolar(),
+      const [rawInvoices] = await Promise.all([
         this.prismaService.invoice.findMany({
           include: {
             client: { include: { block: true } },
@@ -1591,6 +1588,7 @@ export class InvoicesService {
               details: newInvoice.details.map((det) => ({
                 productId: det.productId,
                 quantity: det.quantity,
+                type: det.type || 'SALE',
               })),
             },
             tx,
@@ -2028,6 +2026,7 @@ export class InvoicesService {
 
     const productNames = Array.from(productsMap.keys());
 
+    const ExcelJS: any = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
 
     // Hoja 1 - Facturas

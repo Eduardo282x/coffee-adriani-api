@@ -9,14 +9,14 @@ import {
 } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
-import { Prisma } from 'src/generated/prisma/client';
+import { InvoiceTypeProduct, Prisma } from 'src/generated/prisma/client';
 
 @Injectable()
 export class InventoryService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly productsService: ProductsService,
-  ) { }
+  ) {}
 
   private getStartOfDayUtc(date: string) {
     if (date.length > 10) {
@@ -429,6 +429,7 @@ export class InventoryService {
         const unitPrice = Number(product?.price || 0);
         const unitPriceUSD = Number(product?.priceUSD || 0);
         const subtotal = unitPrice * detail.quantity;
+        const type = detail.type || 'SALE';
 
         await prisma.inventoryEntryDetail.create({
           data: {
@@ -438,6 +439,7 @@ export class InventoryService {
             unitPrice,
             unitPriceUSD,
             subtotal,
+            type: type as InvoiceTypeProduct,
           },
         });
 
@@ -601,7 +603,7 @@ export class InventoryService {
       const {
         startDate,
         endDate,
-        typeMovement,
+        // typeMovement,
         typeProduct,
         controlNumber,
         supplierId,
@@ -657,7 +659,9 @@ export class InventoryService {
       const totalBultos = entries.reduce(
         (sum, entry) =>
           sum +
-          entry.details.reduce((s, detail) => s + Number(detail.quantity), 0),0,);
+          entry.details.reduce((s, detail) => s + Number(detail.quantity), 0),
+        0,
+      );
       const totalPaid = entries.reduce(
         (sum, entry) =>
           sum +

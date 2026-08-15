@@ -35,6 +35,10 @@ export class DTOInventoryDetail {
   @IsNumber()
   @IsPositive()
   quantity: number;
+
+  @IsString()
+  @IsOptional()
+  type: string;
 }
 
 export class DTOInventorySimple extends DTOInventoryDetail {
