@@ -731,6 +731,7 @@ export class PaymentsService {
         return {
           totalBs,
           totalUSD,
+          totalBsInUSD,
           total: totalBsInUSD + totalUSD,
           count: payments.length,
         };
@@ -808,6 +809,7 @@ export class PaymentsService {
       const expensesGroup = {
         totalBs: expenses.totalBs + personalExpenses.totalBs,
         totalUSD: expenses.totalUSD + personalExpenses.totalUSD,
+        totalBsInUSD: expenses.totalBsInUSD + personalExpenses.totalBsInUSD,
         total: expenses.total + personalExpenses.total,
         count: expenses.count + personalExpenses.count,
       };
