@@ -559,33 +559,22 @@ export class PaymentsService {
         originalInvoicePayments.set(p.id, p.InvoicePayment),
       );
 
-      const paymentInvoiceWithoutType = payments.filter((data) =>
-        data.InvoicePayment.some(
-          (ip: any) =>
-            !!ip.invoice &&
-            Array.isArray(ip.invoice.invoiceItems) &&
-            ip.invoice.invoiceItems.every(
-              (ii: any) => ii.product?.type !== type,
-            ),
-        ),
-      );
+      // const paymentInvoiceWithoutType = payments.filter((data) =>
+      //   data.InvoicePayment.some(
+      //     (ip: any) =>
+      //       !!ip.invoice &&
+      //       Array.isArray(ip.invoice.invoiceItems) &&
+      //       ip.invoice.invoiceItems.every(
+      //         (ii: any) => ii.product?.type !== type,
+      //       ),
+      //   ),
+      // );
 
       // console.log(`Facturas de tipo seleccionado: ${paymentInvoiceWithType.length}`);
       // console.log(`Facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.length}`);
       // console.log(`Monto total de facturas sin tipo seleccionado: ${paymentInvoiceWithoutType.reduce((acc, data) => acc + Number(data.amount), 0)}`);
       // console.log(`Facturas sin tipo: ${[...new Set(controlNumberInvoicesWihoutType)].join(', ')}`);
       // console.log(`Suma de las facturas sin tipo: ${sumInvoiceWithoutType}`);
-
-      const totalAmountBsNot = paymentInvoiceWithoutType
-        .filter((item) => item.account.method.currency === 'BS')
-        .reduce((acc, data) => acc + Number(data.amount), 0);
-
-      const totalAmountBsInUSDNot = paymentInvoiceWithoutType
-        .filter((item) => item.account.method.currency === 'BS')
-        .reduce(
-          (acc, data) => acc + Number(data.amount) / Number(data.dolar.dolar),
-          0,
-        );
 
       // Calcular estadísticas
       const totalAmountBs = processedPayments
@@ -598,17 +587,6 @@ export class PaymentsService {
           (acc, data) => acc + Number(data.amount) / Number(data.dolar.dolar),
           0,
         );
-
-      const valores = {
-        originals: {
-          totalAmountBs,
-          totalAmountBsInUSD,
-        },
-        alter: {
-          totalAmountBs: totalAmountBsNot,
-          totalAmountBsInUSD: totalAmountBsInUSDNot,
-        },
-      };
 
       const totalAmountUSD = processedPayments
         .filter((item) => item.account.method.currency === 'USD')
@@ -852,6 +830,7 @@ export class PaymentsService {
         totalLost,
         totals: {
           totalBs: totalAmountBs,
+          totalBsInUSD: totalAmountBsInUSD,
           totalUSD: totalAmountUSD,
           total: totalNetUSD,
           remaining: totalRemainingBsInUSD + totalRemainingUSD,
@@ -868,7 +847,6 @@ export class PaymentsService {
           associated: associatedPayments,
           unassociated: unassociatedPayments,
         },
-        valores: valores,
       };
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
