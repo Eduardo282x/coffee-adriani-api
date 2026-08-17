@@ -5,7 +5,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 import { ResponseInvoice } from 'src/invoices/invoice.dto';
 import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
-import * as ExcelJS from 'exceljs';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
@@ -121,6 +120,7 @@ export class CollectionService {
       },
     });
 
+    const ExcelJS: any = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
 
     // Hoja 1 - Cobranza

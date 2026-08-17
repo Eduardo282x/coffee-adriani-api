@@ -1,11 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import * as qrcode from 'qrcode-terminal';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
-import { Client, LocalAuth } from 'whatsapp-web.js';
 
 @Injectable()
 export class WhatsAppService {
-  private client: Client;
+  private client: any;
 
   async onModuleInit() {
     // this.initializeWhatsAppAsync();
@@ -14,6 +12,9 @@ export class WhatsAppService {
   private async initializeWhatsAppAsync() {
     try {
       console.log('Starting WhatsApp initialization...');
+
+      const whatsapp: any = await import('whatsapp-web.js');
+      const { Client, LocalAuth } = whatsapp.default ?? whatsapp;
 
       this.client = new Client({
         authStrategy: new LocalAuth(),
@@ -36,7 +37,10 @@ export class WhatsAppService {
 
       this.client.on('qr', (qr) => {
         console.log('Escanea el QR con tu WhatsApp:');
-        qrcode.generate(qr, { small: true });
+        import('qrcode-terminal').then((qrcode: any) => {
+          const generate = qrcode.default?.generate ?? qrcode.generate;
+          generate(qr, { small: true });
+        });
       });
 
       this.client.on('ready', () => {

@@ -2,8 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
-import * as PDFDocument from 'pdfkit';
-import * as ExcelJS from 'exceljs';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
@@ -34,6 +32,7 @@ export class ClientsService {
       return a.address.localeCompare(b.address);
     });
 
+    const ExcelJS: any = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Clientes');
 
@@ -422,6 +421,7 @@ export class ClientsService {
         return a.address.localeCompare(b.address);
       });
 
+      const PDFDocument = (await import('pdfkit')).default;
       const filePDF = await new Promise<Buffer>((resolve, reject) => {
         const doc = new PDFDocument({ margin: 10, size: 'A4' });
         const buffer: Uint8Array[] = [];

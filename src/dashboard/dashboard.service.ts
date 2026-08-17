@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { DashboardExcel } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
-import * as ExcelJS from 'exceljs';
 import { format, eachDayOfInterval, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { InvoicesService } from 'src/invoices/invoices.service';
@@ -714,6 +713,7 @@ export class DashboardService {
     // bultosPorCobrar ya se obtuvo en el paso 4 (invoiceStatistics.packagePending)
 
     // ============== GENERACIÓN DEL EXCEL ==============
+    const ExcelJS: any = (await import('exceljs')).default;
     const workbook = new ExcelJS.Workbook();
 
     // HOJA 1: REPORTE SEMANAL
