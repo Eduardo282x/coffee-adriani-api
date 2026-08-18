@@ -1406,7 +1406,7 @@ export class InventoryService {
     }
   }
 
-  @Cron('30 7 * * 1')
+  @Cron('30 7 * * 1', { timeZone: 'America/Caracas' })
   async executeWeeklyCut() {
     const openResult = await this.runWeeklyOpenCut();
     if (!openResult.success) return openResult;
@@ -1466,12 +1466,12 @@ export class InventoryService {
     }
   }
 
-  @Cron('30 7 1 * *')
+  @Cron('30 7 1 * *', { timeZone: 'America/Caracas' })
   async executeMonthlyOpenCron() {
     return await this.runMonthlyOpenCut();
   }
 
-  @Cron('30 7 28-31 * *')
+  @Cron('30 7 28-31 * *', { timeZone: 'America/Caracas' })
   async executeMonthlyCloseCron() {
     return await this.runMonthlyCloseCut();
   }

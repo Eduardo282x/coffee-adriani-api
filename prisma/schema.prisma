@@ -392,3 +392,15 @@ model InventoryCutDetail {
   product        Product      @relation(fields: [productId], references: [id])
   amount         Decimal      @db.Decimal(10, 3)
 }
+
+model WeeklyReportSnapshot {
+  id        Int      @id @default(autoincrement())
+  type      String
+  weekStart DateTime
+  weekEnd   DateTime
+  fileName  String
+  file      Bytes    @db.ByteA
+  createdAt DateTime @default(now())
+
+  @@unique([type, weekStart])
+}

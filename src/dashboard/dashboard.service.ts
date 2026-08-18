@@ -1,13 +1,23 @@
 import { Injectable } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { DashboardExcel } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
-import { format, eachDayOfInterval, addDays } from 'date-fns';
+import {
+  format,
+  eachDayOfInterval,
+  addDays,
+  startOfDay,
+  endOfDay,
+  subDays,
+} from 'date-fns';
 import { es } from 'date-fns/locale';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatistics } from 'src/invoices/invoice.dto';
 import { PaymentsService } from 'src/payments/payments.service';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
+
+const SNAPSHOT_PRODUCT_TYPES = ['Cafe', 'Queso', 'Huevo', 'Guayaba'];
 
 @Injectable()
 export class DashboardService {
@@ -16,6 +26,97 @@ export class DashboardService {
     private readonly invoicesService: InvoicesService,
     private readonly paymentsService: PaymentsService,
   ) {}
+
+  private getPreviousWeekRange(): { startDate: Date; endDate: Date } {
+    const now = new Date();
+    const daysSinceMonday = (now.getDay() + 6) % 7;
+    const currentWeekMonday = startOfDay(subDays(now, daysSinceMonday));
+    const startDate = subDays(currentWeekMonday, 7);
+    const endDate = endOfDay(addDays(startDate, 6));
+    return { startDate, endDate };
+  }
+
+  @Cron('0 5 * * 1', { timeZone: 'America/Caracas' })
+  async generateWeeklySnapshots() {
+    const { startDate, endDate } = this.getPreviousWeekRange();
+    const dateSuffix = format(startDate, 'yyyy-MM-dd');
+
+    for (const type of SNAPSHOT_PRODUCT_TYPES) {
+      try {
+        const buffer = await this.generateInventoryAndInvoicesExcelV2({
+          type,
+          startDate,
+          endDate,
+        });
+        const fileData = new Uint8Array(buffer);
+        const fileName = `reporte-semanal-${type}-${dateSuffix}.xlsx`;
+
+        await this.prismaService.weeklyReportSnapshot.upsert({
+          where: {
+            type_weekStart: { type, weekStart: startDate },
+          },
+          update: {
+            weekEnd: endDate,
+            fileName,
+            file: fileData,
+          },
+          create: {
+            type,
+            weekStart: startDate,
+            weekEnd: endDate,
+            fileName,
+            file: fileData,
+          },
+        });
+      } catch (error) {
+        await this.prismaService.errorMessages.create({
+          data: {
+            message: error instanceof Error ? error.message : String(error),
+            from: 'DashboardService - WeeklySnapshot',
+          },
+        });
+      }
+    }
+  }
+
+  async getSnapshots(type?: string, startDate?: string, endDate?: string) {
+    return this.prismaService.weeklyReportSnapshot.findMany({
+      where: {
+        ...(type ? { type } : {}),
+        ...(startDate && endDate
+          ? {
+              weekStart: {
+                gte: this.getStartOfDayUtc(startDate),
+                lte: this.getEndOfDayUtc(endDate),
+              },
+            }
+          : {}),
+      },
+      orderBy: { weekStart: 'desc' },
+      select: {
+        id: true,
+        type: true,
+        weekStart: true,
+        weekEnd: true,
+        fileName: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  async getSnapshotById(id: number) {
+    return this.prismaService.weeklyReportSnapshot.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        type: true,
+        weekStart: true,
+        weekEnd: true,
+        fileName: true,
+        file: true,
+      },
+    });
+  }
 
   private getStartOfDayUtc(date: Date | string) {
     if (date instanceof Date) {
@@ -794,8 +895,10 @@ export class DashboardService {
     // Bultos del centro
     wsReporte.getCell('B20').value = 'Bultos del centro';
     wsReporte.getCell('B20').font = { bold: true };
-    wsReporte.getCell('D20').value = 'Bultos perdidos:';
+    wsReporte.getCell('D20').value = 'Facturas perdidas:';
     wsReporte.getCell('D20').font = { bold: true };
+    wsReporte.getCell('E20').value =
+      invoiceStatisticsWeek.packageLostTotal.toFixed(4);
     wsReporte.getCell('B21').value = 'Despachados:';
     wsReporte.getCell('B21').font = { bold: true };
     wsReporte.getCell('C21').value = bultosDespachadosCentro.toFixed(2);
@@ -805,6 +908,10 @@ export class DashboardService {
     wsReporte.getCell('B23').value = 'Pendientes:';
     wsReporte.getCell('B23').font = { bold: true };
     wsReporte.getCell('C23').value = bultosPendientesCentroTotal.toFixed(2);
+    wsReporte.getCell('B24').value = 'Gastos:';
+    wsReporte.getCell('B24').font = { bold: true };
+    wsReporte.getCell('C24').value =
+      paymentStatistics.expensesGroup.total.toFixed(2);
 
     // Detalle por producto (datos de getInvoiceStatistics)
     let detailRow = 25;

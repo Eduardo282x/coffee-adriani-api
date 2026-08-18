@@ -24,7 +24,7 @@ export class DolarService {
   private readonly logger = new Logger(DolarService.name);
   private readonly productService = new ProductsService(this.prismaService);
 
-  @Cron('0 8,13 * * *')
+  @Cron('0 8,13 * * *', { timeZone: 'America/Caracas' })
   async handleDollarRateCheck() {
     try {
       await this.productService.saveDolarAutomatic();
@@ -40,7 +40,7 @@ export class DolarService {
     }
   }
 
-  @Cron('0 6 * * *')
+  @Cron('0 6 * * *', { timeZone: 'America/Caracas' })
   async checkInvoice() {
     const invoices = await this.prismaService.invoice.findMany({
       include: {
@@ -106,6 +106,7 @@ export function parseCustomDate(dateStr: string): Date {
 
   const [day, month, year] = datePart.split('/').map(Number);
   const [time, meridian] = timePart.split(' ');
+  // eslint-disable-next-line prefer-const
   let [hours, minutes] = time.split(':').map(Number);
 
   if (meridian.toUpperCase() === 'PM' && hours < 12) {

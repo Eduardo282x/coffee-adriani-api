@@ -1,4 +1,13 @@
-import { Controller, Post, Body, Res, Get, Query } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Res,
+  Get,
+  Query,
+  Param,
+  NotFoundException,
+} from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { DashboardExcel } from 'src/dto/base.dto';
 import { FastifyReply } from 'fastify';
@@ -54,5 +63,42 @@ export class DashboardController {
 
     // En Fastify con passthrough: true, simplemente retornamos el buffer
     return buffer;
+  }
+
+  @Get('/snapshots')
+  async getSnapshots(
+    @Query('type') type?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.dashboardService.getSnapshots(type, startDate, endDate);
+  }
+
+  @Get('/snapshots/:id/download')
+  async downloadSnapshot(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    const snapshot = await this.dashboardService.getSnapshotById(Number(id));
+
+    if (!snapshot) {
+      throw new NotFoundException('Snapshot no encontrado');
+    }
+
+    res.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.header(
+      'Content-Disposition',
+      `attachment; filename="${snapshot.fileName}"`,
+    );
+
+    return Buffer.from(snapshot.file);
+  }
+
+  @Get('/snapshots/execute')
+  async generateWeeklySnapshots() {
+    return await this.dashboardService.generateWeeklySnapshots();
   }
 }
