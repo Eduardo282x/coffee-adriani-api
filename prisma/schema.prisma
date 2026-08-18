@@ -96,6 +96,7 @@ model Product {
   invoiceItems          InvoiceProduct[]
   HistoryInventory      HistoryInventory[]
   inventoryEntryDetails InventoryEntryDetail[]
+  inventoryCutDetails   InventoryCutDetail[]
   deleted               Boolean                @default(false)
 }
 
@@ -370,4 +371,24 @@ model InventoryEntryPayment {
   createdAt        DateTime       @default(now())
 
   @@unique([inventoryEntryId, paymentId])
+}
+
+model InventoryCut {
+  id        Int                  @id @default(autoincrement())
+  startDate String
+  endDate   String
+  type      String
+  period    String               @default("WEEK")
+  status    String               @default("OPEN")
+  createdAt DateTime             @default(now())
+  details   InventoryCutDetail[]
+}
+
+model InventoryCutDetail {
+  id             Int          @id @default(autoincrement())
+  inventoryCutId Int
+  inventoryCut   InventoryCut @relation(fields: [inventoryCutId], references: [id], onDelete: Cascade)
+  productId      Int
+  product        Product      @relation(fields: [productId], references: [id])
+  amount         Decimal      @db.Decimal(10, 3)
 }

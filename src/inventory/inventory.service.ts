@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   DTOInventory,
@@ -6,6 +7,8 @@ import {
   DTOUpdateInventoryEntry,
   CreateInventoryEntryDTO,
   InventoryEntryFilterDTO,
+  InventoryCutFilterDTO,
+  ExecuteInventoryCutDTO,
 } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
@@ -603,7 +606,7 @@ export class InventoryService {
       const {
         startDate,
         endDate,
-        // typeMovement,
+        typeMovement,
         typeProduct,
         controlNumber,
         supplierId,
@@ -640,6 +643,10 @@ export class InventoryService {
             },
           },
         };
+      }
+
+      if (typeMovement) {
+        where.movementType = typeMovement;
       }
 
       const entries = await this.prismaService.inventoryEntry.findMany({
@@ -1192,5 +1199,368 @@ export class InventoryService {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new Error(`Error al obtener entrada de empresa: ${errMsg}`);
     }
+  }
+
+  // ============ Cortes de inventario (semanal y mensual) ============
+
+  private formatDateMMDDYYYY(date: Date): string {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${month}/${day}/${date.getFullYear()}`;
+  }
+
+  private parseCutDate(dateStr: string): Date {
+    const [month, day, year] = dateStr.split('/').map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  private toComparable(dateStr: string): number {
+    const [month, day, year] = dateStr.split('/').map(Number);
+    return year * 10000 + month * 100 + day;
+  }
+
+  private toComparableFromFilter(dateStr: string): number {
+    const normalized = dateStr.includes('-')
+      ? dateStr.split('-').reverse().join('/')
+      : dateStr;
+    return this.toComparable(normalized);
+  }
+
+  private getMondayOfWeek(date: Date): Date {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    d.setDate(d.getDate() - diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  private getSaturdayOfWeek(monday: Date): Date {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + 5);
+    return d;
+  }
+
+  private getLastDayOfMonth(date: Date): Date {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  }
+
+  private async getInventorySnapshot() {
+    return await this.prismaService.inventory.findMany({
+      include: { product: true },
+      where: { product: { deleted: false } },
+    });
+  }
+
+  private async createCut(opts: {
+    startDate: Date;
+    endDate: Date;
+    type: string;
+    period: 'WEEK' | 'MONTH';
+    status: 'OPEN' | 'CLOSE';
+    snapshot: { productId: number; quantity: Prisma.Decimal }[];
+  }) {
+    const startDateStr = this.formatDateMMDDYYYY(opts.startDate);
+    const endDateStr = this.formatDateMMDDYYYY(opts.endDate);
+
+    const existing = await this.prismaService.inventoryCut.findFirst({
+      where: {
+        type: opts.type,
+        period: opts.period,
+        startDate: startDateStr,
+        status: opts.status,
+      },
+    });
+
+    if (existing) return existing;
+
+    return await this.prismaService.inventoryCut.create({
+      data: {
+        startDate: startDateStr,
+        endDate: endDateStr,
+        type: opts.type,
+        period: opts.period,
+        status: opts.status,
+        details: {
+          create: opts.snapshot.map((item) => ({
+            productId: item.productId,
+            amount: item.quantity,
+          })),
+        },
+      },
+      include: { details: true },
+    });
+  }
+
+  private async createCutsByType(opts: {
+    startDate: Date;
+    endDate: Date;
+    period: 'WEEK' | 'MONTH';
+    status: 'OPEN' | 'CLOSE';
+  }) {
+    const snapshot = await this.getInventorySnapshot();
+    const types = [...new Set(snapshot.map((item) => item.product.type))];
+
+    const cuts = [];
+    for (const type of types) {
+      const items = snapshot
+        .filter((item) => item.product.type === type)
+        .map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+        }));
+      const cut = await this.createCut({
+        ...opts,
+        type,
+        snapshot: items,
+      });
+      cuts.push(cut);
+    }
+    return cuts;
+  }
+
+  private handleCutError(err: unknown) {
+    this.prismaService.errorMessages.create({
+      data: {
+        message: err instanceof Error ? err.message : String(err),
+        from: 'inventoryService',
+      },
+    });
+    badResponse.message = err instanceof Error ? err.message : String(err);
+    return badResponse;
+  }
+
+  private buildCutResponse(open?: any, close?: any) {
+    const openDetails = open?.details ?? [];
+    const closeDetails = close?.details ?? [];
+    const mapDetail = (detail: any) => ({
+      productId: detail.productId,
+      name: detail.product.name,
+      presentation: detail.product.presentation,
+      type: detail.product.type,
+      amount: Number(detail.amount),
+    });
+    return {
+      id: close?.id ?? open?.id,
+      type: open?.type ?? close?.type,
+      period: open?.period ?? close?.period,
+      status: close ? 'CLOSE' : 'OPEN',
+      startDate: open?.startDate ?? close?.startDate,
+      endDate: open?.endDate ?? close?.endDate,
+      initialAmount: openDetails.reduce(
+        (sum, detail) => sum + Number(detail.amount),
+        0,
+      ),
+      closeAmount: closeDetails.reduce(
+        (sum, detail) => sum + Number(detail.amount),
+        0,
+      ),
+      initialDetail: openDetails.map(mapDetail),
+      closeDetail: closeDetails.map(mapDetail),
+    };
+  }
+
+  async runWeeklyOpenCut() {
+    try {
+      const now = new Date();
+      const monday = this.getMondayOfWeek(now);
+      const saturday = this.getSaturdayOfWeek(monday);
+      const cuts = await this.createCutsByType({
+        startDate: monday,
+        endDate: saturday,
+        period: 'WEEK',
+        status: 'OPEN',
+      });
+      baseResponse.message = 'Corte semanal de apertura ejecutado.';
+      baseResponse.data = { open: cuts.map((cut) => cut.id) };
+      return baseResponse;
+    } catch (err) {
+      return this.handleCutError(err);
+    }
+  }
+
+  async runWeeklyCloseCut() {
+    try {
+      const previousOpen = await this.prismaService.inventoryCut.findFirst({
+        where: { status: 'OPEN', period: 'WEEK' },
+        orderBy: { startDate: 'desc' },
+      });
+
+      if (!previousOpen) {
+        badResponse.message =
+          'No hay un corte de apertura semanal previo para cerrar.';
+        return badResponse;
+      }
+
+      const cuts = await this.createCutsByType({
+        startDate: this.parseCutDate(previousOpen.startDate),
+        endDate: this.parseCutDate(previousOpen.endDate),
+        period: 'WEEK',
+        status: 'CLOSE',
+      });
+      baseResponse.message = 'Corte semanal de cierre ejecutado.';
+      baseResponse.data = { close: cuts.map((cut) => cut.id) };
+      return baseResponse;
+    } catch (err) {
+      return this.handleCutError(err);
+    }
+  }
+
+  @Cron('30 7 * * 1')
+  async executeWeeklyCut() {
+    const openResult = await this.runWeeklyOpenCut();
+    if (!openResult.success) return openResult;
+    const closeResult = await this.runWeeklyCloseCut();
+    if (!closeResult.success) return closeResult;
+    baseResponse.message = 'Corte semanal de inventario ejecutado.';
+    baseResponse.data = {
+      open: openResult.data?.open ?? [],
+      close: closeResult.data?.close ?? [],
+    };
+    return baseResponse;
+  }
+
+  async runMonthlyOpenCut() {
+    try {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = this.getLastDayOfMonth(now);
+      const cuts = await this.createCutsByType({
+        startDate: firstDay,
+        endDate: lastDay,
+        period: 'MONTH',
+        status: 'OPEN',
+      });
+      baseResponse.message = 'Corte mensual de apertura ejecutado.';
+      baseResponse.data = { open: cuts.map((cut) => cut.id) };
+      return baseResponse;
+    } catch (err) {
+      return this.handleCutError(err);
+    }
+  }
+
+  async runMonthlyCloseCut() {
+    try {
+      const previousOpen = await this.prismaService.inventoryCut.findFirst({
+        where: { status: 'OPEN', period: 'MONTH' },
+        orderBy: { startDate: 'desc' },
+      });
+
+      if (!previousOpen) {
+        badResponse.message =
+          'No hay un corte de apertura mensual previo para cerrar.';
+        return badResponse;
+      }
+
+      const cuts = await this.createCutsByType({
+        startDate: this.parseCutDate(previousOpen.startDate),
+        endDate: this.parseCutDate(previousOpen.endDate),
+        period: 'MONTH',
+        status: 'CLOSE',
+      });
+      baseResponse.message = 'Corte mensual de cierre ejecutado.';
+      baseResponse.data = { close: cuts.map((cut) => cut.id) };
+      return baseResponse;
+    } catch (err) {
+      return this.handleCutError(err);
+    }
+  }
+
+  @Cron('30 7 1 * *')
+  async executeMonthlyOpenCron() {
+    return await this.runMonthlyOpenCut();
+  }
+
+  @Cron('30 7 28-31 * *')
+  async executeMonthlyCloseCron() {
+    return await this.runMonthlyCloseCut();
+  }
+
+  async executeCut(data: ExecuteInventoryCutDTO) {
+    if (data.period === 'week') {
+      if (data.action === 'open') return await this.runWeeklyOpenCut();
+      if (data.action === 'close') return await this.runWeeklyCloseCut();
+      return await this.executeWeeklyCut();
+    }
+    if (data.action === 'open') return await this.runMonthlyOpenCut();
+    if (data.action === 'close') return await this.runMonthlyCloseCut();
+    const openResult = await this.runMonthlyOpenCut();
+    if (!openResult.success) return openResult;
+    const closeResult = await this.runMonthlyCloseCut();
+    if (!closeResult.success) return closeResult;
+    baseResponse.message = 'Corte mensual de inventario ejecutado.';
+    baseResponse.data = {
+      open: openResult.data?.open ?? [],
+      close: closeResult.data?.close ?? [],
+    };
+    return baseResponse;
+  }
+
+  async getInventoryCuts(filter: InventoryCutFilterDTO) {
+    const { type, period, startDate, endDate, page = 1, limit = 50 } = filter;
+    const safePage = page > 0 ? page : 1;
+    const safeLimit = limit > 0 ? Math.min(limit, 100) : 50;
+
+    const cuts = await this.prismaService.inventoryCut.findMany({
+      include: {
+        details: { include: { product: true } },
+      },
+    });
+
+    const groups = new Map<string, { open?: any; close?: any }>();
+    for (const cut of cuts) {
+      const key = `${cut.startDate}|${cut.endDate}|${cut.type}|${cut.period}`;
+      const group: { open?: any; close?: any } = groups.get(key) ?? {};
+      if (cut.status === 'CLOSE') group.close = cut;
+      else group.open = cut;
+      groups.set(key, group);
+    }
+
+    let results = [...groups.entries()].map(([key, group]) => ({
+      key,
+      ...this.buildCutResponse(group.open, group.close),
+    }));
+
+    if (type) {
+      results = results.filter((result) => result.type === type);
+    }
+    if (period) {
+      results = results.filter((result) => result.period === period);
+    }
+    if (startDate) {
+      const comparableStart = this.toComparableFromFilter(startDate);
+      results = results.filter(
+        (result) => this.toComparable(result.endDate) >= comparableStart,
+      );
+    }
+    if (endDate) {
+      const comparableEnd = this.toComparableFromFilter(endDate);
+      results = results.filter(
+        (result) => this.toComparable(result.startDate) <= comparableEnd,
+      );
+    }
+
+    results.sort(
+      (a, b) => this.toComparable(b.startDate) - this.toComparable(a.startDate),
+    );
+
+    const totalCount = results.length;
+    const skip = (safePage - 1) * safeLimit;
+    const totalPages = Math.ceil(totalCount / safeLimit);
+
+    return {
+      cuts: results
+        .slice(skip, skip + safeLimit)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        .map(({ key, ...rest }) => rest),
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        totalCount,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPreviousPage: safePage > 1,
+      },
+    };
   }
 }

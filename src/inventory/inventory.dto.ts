@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsDate,
+  IsIn,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -137,4 +138,42 @@ export class InventoryEntryFilterDTO {
   @IsOptional()
   @Type(() => Number)
   supplierId?: number;
+}
+
+export class InventoryCutFilterDTO {
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsString()
+  @IsOptional()
+  period?: string;
+
+  @IsString()
+  @IsOptional()
+  startDate?: string;
+
+  @IsString()
+  @IsOptional()
+  endDate?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  page?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  limit?: number;
+}
+
+export class ExecuteInventoryCutDTO {
+  @IsString()
+  @IsIn(['week', 'month'])
+  period: 'week' | 'month';
+
+  @IsString()
+  @IsIn(['open', 'close', 'both'])
+  action: 'open' | 'close' | 'both';
 }

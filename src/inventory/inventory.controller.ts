@@ -15,6 +15,8 @@ import {
   DTOInventorySimple,
   DTOUpdateInventoryEntry,
   CreateInventoryEntryDTO,
+  InventoryCutFilterDTO,
+  ExecuteInventoryCutDTO,
 } from './inventory.dto';
 
 @Controller('inventory')
@@ -161,5 +163,15 @@ export class InventoryController {
   @Get('/enterprise/:id')
   async getEnterpriseEntryById(@Param('id', ParseIntPipe) id: number) {
     return await this.inventoryService.getEnterpriseEntryById(id);
+  }
+
+  @Get('/cuts')
+  async getInventoryCuts(@Query() filter: InventoryCutFilterDTO) {
+    return await this.inventoryService.getInventoryCuts(filter);
+  }
+
+  @Post('/cuts/execute')
+  async executeCut(@Body() data: ExecuteInventoryCutDTO) {
+    return await this.inventoryService.executeCut(data);
   }
 }
