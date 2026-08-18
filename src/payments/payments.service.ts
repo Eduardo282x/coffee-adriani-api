@@ -78,7 +78,7 @@ export class PaymentsService {
 
       // Construir where clause dinámicamente
       const where: any = {
-        type: { not: 'SUPPLIER' },
+        type: { notIn: ['SUPPLIER', 'PERSONAL_EXPENSES'] },
       };
 
       if (startDate && endDate) {
@@ -372,9 +372,7 @@ export class PaymentsService {
         methodId,
         associated,
         type,
-        accountType,
         typeDescription,
-        paymentType,
         credit,
         search,
       } = filters;
@@ -491,10 +489,6 @@ export class PaymentsService {
         };
       }
 
-      if (accountType) {
-        where.type = accountType;
-      }
-
       if (associated !== undefined) {
         if (associated) {
           where.InvoicePayment = {
@@ -507,10 +501,6 @@ export class PaymentsService {
           // Los pagos sin asociar a facturas se filtran por type INCOME
           where.type = 'INCOME';
         }
-      }
-
-      if (paymentType) {
-        where.type = paymentType;
       }
 
       const payments = await this.prismaService.payment.findMany({
@@ -935,7 +925,7 @@ export class PaymentsService {
           },
         },
         where: {
-          type: { not: 'SUPPLIER' },
+          type: { notIn: ['SUPPLIER', 'PERSONAL_EXPENSES'] },
         },
         orderBy: { paymentDate: 'desc' },
       })
@@ -1057,7 +1047,7 @@ export class PaymentsService {
             gte: filter.startDate,
             lte: filter.endDate,
           },
-          type: { not: 'SUPPLIER' },
+          type: { notIn: ['SUPPLIER', 'PERSONAL_EXPENSES'] },
         },
       })
       .then((pay) =>
@@ -1246,13 +1236,13 @@ export class PaymentsService {
 
       if (findPayment.type === 'SUPPLIER') {
         badResponse.message =
-          'No se puede asociar un pago a proveedor a una factura.';
+          'Este pago es de un Proveedor y no puede ser asociado a facturas.';
         return badResponse;
       }
 
       if (findPayment.type === 'PERSONAL_EXPENSES') {
         badResponse.message =
-          'No se puede asociar un gasto personal a una factura.';
+          'Este pago es de un Gastos personal y no puede ser asociado a facturas.';
         return badResponse;
       }
 

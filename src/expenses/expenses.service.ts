@@ -1,12 +1,17 @@
 import { Injectable } from '@nestjs/common';
+import { format } from 'date-fns';
 import { badResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ExpensesDTO } from './expenses.dto';
+import { PaymentsService } from 'src/payments/payments.service';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
 export class ExpensesService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(
+    private readonly prismaService: PrismaService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   private getNormalizedDateRange(expenseFilter: ExpensesDTO) {
     const startDate = new Date(expenseFilter.startDate);
@@ -66,11 +71,17 @@ export class ExpensesService {
         payments,
         paymentsNoAssociatedRaw,
         paymentsExpensesRaw,
+        statistics,
       ] = await Promise.all([
         this.getInvoicesWithMetrics(expenseFilter),
         this.getPayments(expenseFilter),
         this.getPaymentsNoAssociated(expenseFilter),
         this.getPaymentsExpenses(expenseFilter),
+        this.paymentsService.getPaymentsStatistics({
+          startDate: format(expenseFilter.startDate, 'yyyy-MM-dd'),
+          endDate: format(expenseFilter.endDate, 'yyyy-MM-dd'),
+          type: expenseFilter.type,
+        }),
       ]);
 
       const paymentsNoAssociated = paymentsNoAssociatedRaw as unknown as any[];
@@ -85,6 +96,12 @@ export class ExpensesService {
 
       const invoiceMetricsData = invoiceMetrics as any;
 
+      const entrance = Number(statistics.totals.total);
+      const expensesTotal = Number(statistics.expenses.total);
+      const personalExpensesTotal = Number(statistics.personalExpenses.total);
+      const supplierTotal = Number(statistics.supplier.total);
+      const outflow = expensesTotal + personalExpensesTotal + supplierTotal;
+
       return {
         invoices: invoiceMetricsData.invoices,
         summary: invoiceMetricsData.summary,
@@ -96,6 +113,16 @@ export class ExpensesService {
         paymentsExpenses: {
           payments: paymentsExpenses,
           total: calculateTotalExpenses,
+        },
+        statistics,
+        bank: {
+          entrance,
+          expenses: expensesTotal,
+          personalExpenses: personalExpensesTotal,
+          supplier: supplierTotal,
+          outflow,
+          balance: entrance - outflow,
+          unassociatedAmount: Number(statistics.totals.unassociatedAmount),
         },
       };
     } catch (err) {
@@ -128,9 +155,14 @@ export class ExpensesService {
           },
         },
         include: {
-          client: true,
+          client: { select: { id: true, name: true } },
           invoiceItems: { include: { product: true } },
-          InvoicePayment: { select: { amount: true } },
+          InvoicePayment: {
+            select: {
+              amount: true,
+              payment: { select: { type: true } },
+            },
+          },
         },
       });
 
@@ -142,7 +174,6 @@ export class ExpensesService {
       >();
 
       for (const invoice of invoices) {
-        const saleRefDate = invoice.dispatchDate || invoice.createdAt;
         for (const item of invoice.invoiceItems) {
           uniqueProductIds.add(item.productId);
           const pairKey = `${item.product.name}|${item.product.presentation}`;
@@ -237,6 +268,16 @@ export class ExpensesService {
         );
         const saleRefDate = invoice.dispatchDate || invoice.createdAt;
 
+        const expenseAssociatedAmount = (invoice.InvoicePayment || []).reduce(
+          (acc, ip: any) =>
+            ip?.payment?.type === 'EXPENSE'
+              ? acc + Number(ip.amount || 0)
+              : acc,
+          0,
+        );
+        const hasExpenseAssociated = expenseAssociatedAmount > 0;
+        const hasRateDifference = invoice.status === 'Pagado' && remaining > 0;
+
         // Calcular earn con history lookup
         // Determinar moneda del invoice: buscar la primera InvoicePayment关联ación con payment/account/method
         // Como no tenemos payment en el include, usamos el approach de inferir de los items
@@ -267,6 +308,8 @@ export class ExpensesService {
         }
 
         earn = Number(earn.toFixed(2));
+
+        const netEarn = Number((earn - expenseAssociatedAmount).toFixed(2));
 
         // Acumular métricas
         totalEarnRange += earn;
@@ -308,8 +351,12 @@ export class ExpensesService {
           totalAmount: Number(invoice.totalAmount),
           remaining,
           earn,
+          netEarn,
           totalItems: Number(totalItems.toFixed(4)),
           hasGiftItems,
+          hasRateDifference,
+          hasExpenseAssociated,
+          expenseAssociatedAmount,
           invoiceItems: invoice.invoiceItems.map((item) => ({
             id: item.id,
             productId: item.productId,
@@ -328,7 +375,11 @@ export class ExpensesService {
       });
 
       const filteredInvoices = result.filter(
-        (inv) => inv.remaining !== 0 || inv.hasGiftItems,
+        (inv) =>
+          inv.remaining !== 0 ||
+          inv.hasGiftItems ||
+          inv.hasRateDifference ||
+          inv.hasExpenseAssociated,
       );
 
       const productPercentages = Object.entries(productSales)
@@ -449,7 +500,7 @@ export class ExpensesService {
 
       const payments = await this.prismaService.payment.findMany({
         where: {
-          type: 'EXPENSE',
+          type: { in: ['EXPENSE', 'SUPPLIER', 'PERSONAL_EXPENSES'] },
           paymentDate: {
             gte: startDate,
             lte: endDate,
