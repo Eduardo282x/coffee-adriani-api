@@ -1348,7 +1348,12 @@ export class InventoryService {
       startDate: open?.startDate ?? close?.startDate,
       endDate: open?.endDate ?? close?.endDate,
       initialAmount: openDetails.reduce(
-        (sum, detail) => sum + Number(detail.amount),
+        (sum, detail) =>
+          sum +
+          (detail.product.type == 'Cafe' &&
+          detail.product.presentation.includes('1kilo')
+            ? Number(detail.amount * 0.2)
+            : Number(detail.amount)),
         0,
       ),
       closeAmount: closeDetails.reduce(
