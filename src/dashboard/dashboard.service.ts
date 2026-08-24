@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DashboardExcel } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -21,6 +21,8 @@ const SNAPSHOT_PRODUCT_TYPES = ['Cafe', 'Queso', 'Huevo', 'Guayaba'];
 
 @Injectable()
 export class DashboardService {
+  private readonly logger = new Logger(DashboardService.name);
+
   constructor(
     private readonly prismaService: PrismaService,
     private readonly invoicesService: InvoicesService,
@@ -38,44 +40,58 @@ export class DashboardService {
 
   @Cron('0 5 * * 1', { timeZone: 'America/Caracas' })
   async generateWeeklySnapshots() {
-    const { startDate, endDate } = this.getPreviousWeekRange();
-    const dateSuffix = format(startDate, 'yyyy-MM-dd');
+    this.logger.debug('📊 Iniciando generación de reportes semanales...');
+    try {
+      const { startDate, endDate } = this.getPreviousWeekRange();
+      const dateSuffix = format(startDate, 'yyyy-MM-dd');
 
-    for (const type of SNAPSHOT_PRODUCT_TYPES) {
-      try {
-        const buffer = await this.generateInventoryAndInvoicesExcelV2({
-          type,
-          startDate,
-          endDate,
-        });
-        const fileData = new Uint8Array(buffer);
-        const fileName = `reporte-semanal-${type}-${dateSuffix}.xlsx`;
-
-        await this.prismaService.weeklyReportSnapshot.upsert({
-          where: {
-            type_weekStart: { type, weekStart: startDate },
-          },
-          update: {
-            weekEnd: endDate,
-            fileName,
-            file: fileData,
-          },
-          create: {
+      for (const type of SNAPSHOT_PRODUCT_TYPES) {
+        try {
+          const buffer = await this.generateInventoryAndInvoicesExcelV2({
             type,
-            weekStart: startDate,
-            weekEnd: endDate,
-            fileName,
-            file: fileData,
-          },
-        });
-      } catch (error) {
-        await this.prismaService.errorMessages.create({
-          data: {
-            message: error instanceof Error ? error.message : String(error),
-            from: 'DashboardService - WeeklySnapshot',
-          },
-        });
+            startDate,
+            endDate,
+          });
+          const fileData = new Uint8Array(buffer);
+          const fileName = `reporte-semanal-${type}-${dateSuffix}.xlsx`;
+
+          await this.prismaService.weeklyReportSnapshot.upsert({
+            where: {
+              type_weekStart: { type, weekStart: startDate },
+            },
+            update: {
+              weekEnd: endDate,
+              fileName,
+              file: fileData,
+            },
+            create: {
+              type,
+              weekStart: startDate,
+              weekEnd: endDate,
+              fileName,
+              file: fileData,
+            },
+          });
+          this.logger.debug(`✅ Reporte semanal ${type} generado exitosamente`);
+        } catch (error) {
+          await this.prismaService.errorMessages.create({
+            data: {
+              message: error instanceof Error ? error.message : String(error),
+              from: 'DashboardService - WeeklySnapshot',
+            },
+          });
+          this.logger.debug(
+            `❌ Error al generar reporte semanal ${type}`,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       }
+      this.logger.debug('📊 Generación de reportes semanales completada');
+    } catch (error) {
+      this.logger.debug(
+        '❌ Error general en generación de reportes semanales',
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 

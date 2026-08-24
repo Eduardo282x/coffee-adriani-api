@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
@@ -16,6 +16,8 @@ import { InvoiceTypeProduct, Prisma } from 'src/generated/prisma/client';
 
 @Injectable()
 export class InventoryService {
+  private readonly logger = new Logger(InventoryService.name);
+
   constructor(
     private readonly prismaService: PrismaService,
     private readonly productsService: ProductsService,
@@ -1426,12 +1428,18 @@ export class InventoryService {
 
   @Cron('0 7 * * 1', { timeZone: 'America/Caracas' })
   async executeWeeklyOpenCron() {
-    return await this.runWeeklyOpenCut();
+    this.logger.debug('📅 Ejecutando corte semanal de apertura...');
+    const result = await this.runWeeklyOpenCut();
+    this.logger.debug('✅ Corte semanal de apertura completado');
+    return result;
   }
 
   @Cron('0 14 * * 6', { timeZone: 'America/Caracas' })
   async executeWeeklyCloseCron() {
-    return await this.runWeeklyCloseCut();
+    this.logger.debug('📅 Ejecutando corte semanal de cierre...');
+    const result = await this.runWeeklyCloseCut();
+    this.logger.debug('✅ Corte semanal de cierre completado');
+    return result;
   }
 
   async runMonthlyOpenCut() {
@@ -1482,12 +1490,18 @@ export class InventoryService {
 
   @Cron('0 7 1 * *', { timeZone: 'America/Caracas' })
   async executeMonthlyOpenCron() {
-    return await this.runMonthlyOpenCut();
+    this.logger.debug('📅 Ejecutando corte mensual de apertura...');
+    const result = await this.runMonthlyOpenCut();
+    this.logger.debug('✅ Corte mensual de apertura completado');
+    return result;
   }
 
   @Cron('0 7 28-31 * *', { timeZone: 'America/Caracas' })
   async executeMonthlyCloseCron() {
-    return await this.runMonthlyCloseCut();
+    this.logger.debug('📅 Ejecutando corte mensual de cierre...');
+    const result = await this.runMonthlyCloseCut();
+    this.logger.debug('✅ Corte mensual de cierre completado');
+    return result;
   }
 
   async executeCut(data: ExecuteInventoryCutDTO) {
