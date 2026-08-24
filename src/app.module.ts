@@ -29,6 +29,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { N8nModule } from './n8n/n8n.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
+import { TestCronModule } from './test-cron/test-cron.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
     N8nModule,
     SuppliersModule,
     EntryPaymentsModule,
+    TestCronModule,
   ],
   controllers: [AppController],
   providers: [
