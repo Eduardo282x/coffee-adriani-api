@@ -51,7 +51,6 @@ import { TestCronModule } from './test-cron/test-cron.module';
     MainloadModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env.local', '.env'], // primero busca en .env.local
     }),
     ExpensesModule,
     CollectionModule,

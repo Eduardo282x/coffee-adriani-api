@@ -8,7 +8,6 @@ import {
   IsPositive,
   IsString,
   ValidateNested,
-  IsBoolean,
   IsEnum,
 } from 'class-validator';
 import { AccountType } from 'src/generated/prisma/enums';
@@ -22,6 +21,9 @@ export class PaymentDTO {
   @IsNumber()
   @IsPositive()
   amount: number;
+  @IsNumber()
+  @IsOptional()
+  dolar: number;
   @IsNumber()
   accountId: number;
   @IsDate()

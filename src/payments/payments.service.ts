@@ -1120,6 +1120,24 @@ export class PaymentsService {
     return BankData;
   }
 
+  async findOrSaveDolar(dolar: number) {
+    const findDolar = await this.prismaService.historyDolar.findFirst({
+      where: { dolar },
+    });
+
+    if (!findDolar) {
+      const createDolar = await this.prismaService.historyDolar.create({
+        data: {
+          dolar: dolar,
+        },
+      });
+
+      return createDolar;
+    }
+
+    return findDolar;
+  }
+
   async registerPayment(payment: PaymentDTO) {
     try {
       const [accountZelle, getDolar] = await Promise.all([
@@ -1127,7 +1145,9 @@ export class PaymentsService {
           where: { id: payment.accountId },
           include: { method: true },
         }),
-        this.productService.getDolar(),
+        payment.dolar
+          ? this.findOrSaveDolar(payment.dolar)
+          : this.productService.getDolar(),
       ]);
 
       await this.prismaService.payment.create({
@@ -1164,7 +1184,9 @@ export class PaymentsService {
           where: { id: payment.accountId },
           include: { method: true },
         }),
-        this.productService.getDolar(),
+        payment.dolar
+          ? this.findOrSaveDolar(payment.dolar)
+          : this.productService.getDolar(),
       ]);
 
       await this.prismaService.payment.update({
