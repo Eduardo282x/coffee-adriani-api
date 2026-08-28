@@ -339,13 +339,13 @@ export class DashboardService {
     filter: DashboardExcel,
   ): Promise<Buffer> {
     const endDatePlusOne = addDays(new Date(filter.endDate), 1);
+    const startOfRange = this.getStartOfDayUtc(filter.startDate);
+    const endOfRange = this.getEndOfDayUtc(filter.endDate);
 
     // 1. Ejecutar todas las consultas en paralelo con selects optimizados
     const [
       productos,
-      facturas,
-      facturasCentros,
-      facturasHastaCierre,
+      facturasCompletas,
       pagosEnRango,
       paymentStatistics,
       // currentDolar,
@@ -367,12 +367,11 @@ export class DashboardService {
         },
       }),
 
-      // Facturas en el rango
+      // Facturas del tipo hasta el cierre (cubre rango + centros en una sola consulta)
       this.prismaService.invoice.findMany({
         where: {
           dispatchDate: {
-            gte: this.getStartOfDayUtc(filter.startDate),
-            lte: this.getEndOfDayUtc(filter.endDate),
+            lte: endOfRange,
           },
           invoiceItems: {
             every: {
@@ -434,88 +433,6 @@ export class DashboardService {
           },
         },
         orderBy: { dispatchDate: 'asc' },
-      }),
-
-      // Facturas de centros
-      this.prismaService.invoice.findMany({
-        where: {
-          dispatchDate: { lte: this.getEndOfDayUtc(filter.endDate) },
-          client: {
-            block: {
-              name: { contains: 'centro', mode: 'insensitive' },
-            },
-          },
-          invoiceItems: {
-            every: {
-              product: {
-                type: {
-                  contains: filter.type,
-                  mode: 'insensitive',
-                },
-              },
-            },
-          },
-        },
-        select: {
-          id: true,
-          totalAmount: true,
-          InvoicePayment: {
-            select: {
-              amount: true,
-            },
-          },
-          invoiceItems: {
-            select: { quantity: true },
-          },
-          client: {
-            select: {
-              block: {
-                select: { name: true },
-              },
-            },
-          },
-        },
-        orderBy: { dispatchDate: 'asc' },
-      }),
-
-      // Facturas hasta cierre
-      this.prismaService.invoice.findMany({
-        where: {
-          dispatchDate: { lte: this.getEndOfDayUtc(endDatePlusOne) },
-          invoiceItems: {
-            some: {
-              product: {
-                type: {
-                  contains: filter.type,
-                  mode: 'insensitive',
-                },
-              },
-            },
-          },
-        },
-        select: {
-          id: true,
-          totalAmount: true,
-          invoiceItems: {
-            select: { quantity: true },
-          },
-          InvoicePayment: {
-            select: {
-              amount: true,
-              payment: {
-                select: {
-                  account: {
-                    select: {
-                      method: {
-                        select: { currency: true },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
       }),
 
       // Pagos en rango
@@ -600,6 +517,15 @@ export class DashboardService {
         },
       }),
     ]);
+
+    // Derivar facturas del rango y facturas de centros a partir de la consulta única
+    const facturas = facturasCompletas.filter((f: any) => {
+      const d = new Date(f.dispatchDate);
+      return d >= startOfRange && d <= endOfRange;
+    });
+    const facturasCentros = facturasCompletas.filter((f: any) =>
+      f.client.block.name.toLowerCase().includes('centro'),
+    );
 
     // 2. Preparar estructuras de datos optimizadas
     const dias = eachDayOfInterval({
@@ -810,12 +736,8 @@ export class DashboardService {
       }
     });
 
-    // 8. Calcular deuda por cobrar
-    const deudaPorCobrar = facturasHastaCierre.reduce(
-      (sum, f) =>
-        sum + calculateInvoiceRemainingUsd(f.totalAmount, f.InvoicePayment),
-      0,
-    );
+    // 8. Deuda por cobrar: reutiliza el totalPending de getInvoiceStatistics
+    const deudaPorCobrar = invoiceStatistics.payments.totalPending;
 
     // bultosPorCobrar ya se obtuvo en el paso 4 (invoiceStatistics.packagePending)
 
@@ -846,18 +768,26 @@ export class DashboardService {
     wsReporte.getCell('C5').value = 'Ingresos de la semana';
     wsReporte.getCell('B6').value = 'Divisas:';
     wsReporte.getCell('B6').font = { bold: true };
-    wsReporte.getCell('B7').value = pagosDivisas.toFixed(2);
+    const cellB7 = wsReporte.getCell('B7');
+    cellB7.value = pagosDivisas;
+    cellB7.numFmt = '#,##0.00';
     wsReporte.getCell('C6').value = 'Transferencia:';
     wsReporte.getCell('C6').font = { bold: true };
-    wsReporte.getCell('C7').value = pagosTransferencias.toFixed(2);
+    const cellC7 = wsReporte.getCell('C7');
+    cellC7.value = pagosTransferencias;
+    cellC7.numFmt = '#,##0.00';
     wsReporte.getCell('D6').value = 'Sin asociar:';
     wsReporte.getCell('D6').font = { bold: true };
-    wsReporte.getCell('D7').value = totalPagosSinAsociar.toFixed(2);
+    const cellD7 = wsReporte.getCell('D7');
+    cellD7.value = totalPagosSinAsociar;
+    cellD7.numFmt = '#,##0.00';
 
     // Bultos pagados
     wsReporte.getCell('B8').value = 'Bultos Pagados:';
     wsReporte.getCell('B8').font = { bold: true };
-    wsReporte.getCell('B9').value = bultosPagados.toFixed(2);
+    const cellB9 = wsReporte.getCell('B9');
+    cellB9.value = bultosPagados;
+    cellB9.numFmt = '#,##0.00';
     wsReporte.getCell('D8').value = 'Ganancias:';
     wsReporte.getCell('D8').font = { bold: true };
 
@@ -891,33 +821,45 @@ export class DashboardService {
     wsReporte.getCell(`D${rowIndex}`).value = totalDespachado as number;
 
     // Bultos y deuda por cobrar
-    wsReporte.getCell('B18').value = 'Bultos por cobrar:';
+    wsReporte.getCell('B18').value = 'Bultos por cobrar (hasta fecha):';
     wsReporte.getCell('B18').font = { bold: true };
-    wsReporte.getCell('B19').value = bultosPorCobrar.toFixed(4);
+    const cellB19 = wsReporte.getCell('B19');
+    cellB19.value = bultosPorCobrar;
+    cellB19.numFmt = '#,##0.0000';
     wsReporte.getCell('D18').value = 'Deuda por cobrar:';
     wsReporte.getCell('D18').font = { bold: true };
-    wsReporte.getCell('D19').value = deudaPorCobrar.toFixed(2);
+    const cellD19 = wsReporte.getCell('D19');
+    cellD19.value = deudaPorCobrar;
+    cellD19.numFmt = '#,##0.00';
 
     // Bultos del centro
     wsReporte.getCell('B20').value = 'Bultos del centro';
     wsReporte.getCell('B20').font = { bold: true };
     wsReporte.getCell('D20').value = 'Facturas perdidas:';
     wsReporte.getCell('D20').font = { bold: true };
-    wsReporte.getCell('E20').value =
-      invoiceStatisticsWeek.packageLostTotal.toFixed(4);
+    const cellE20 = wsReporte.getCell('E20');
+    cellE20.value = invoiceStatisticsWeek.packageLostTotal;
+    cellE20.numFmt = '#,##0.0000';
     wsReporte.getCell('B21').value = 'Despachados:';
     wsReporte.getCell('B21').font = { bold: true };
-    wsReporte.getCell('C21').value = bultosDespachadosCentro.toFixed(2);
+    const cellC21 = wsReporte.getCell('C21');
+    cellC21.value = bultosDespachadosCentro;
+    cellC21.numFmt = '#,##0.00';
     wsReporte.getCell('B22').value = 'Pagos:';
     wsReporte.getCell('B22').font = { bold: true };
-    wsReporte.getCell('C22').value = bultosPagadosCentroTotal.toFixed(2);
+    const cellC22 = wsReporte.getCell('C22');
+    cellC22.value = bultosPagadosCentroTotal;
+    cellC22.numFmt = '#,##0.00';
     wsReporte.getCell('B23').value = 'Pendientes:';
     wsReporte.getCell('B23').font = { bold: true };
-    wsReporte.getCell('C23').value = bultosPendientesCentroTotal.toFixed(2);
+    const cellC23 = wsReporte.getCell('C23');
+    cellC23.value = bultosPendientesCentroTotal;
+    cellC23.numFmt = '#,##0.00';
     wsReporte.getCell('B24').value = 'Gastos:';
     wsReporte.getCell('B24').font = { bold: true };
-    wsReporte.getCell('C24').value =
-      paymentStatistics.expensesGroup.total.toFixed(2);
+    const cellC24 = wsReporte.getCell('C24');
+    cellC24.value = paymentStatistics.expensesGroup.total;
+    cellC24.numFmt = '#,##0.00';
 
     // Detalle por producto (datos de getInvoiceStatistics)
     let detailRow = 25;
@@ -1067,14 +1009,14 @@ export class DashboardService {
       totalPagado += montoPagoUSD;
 
       if (pago.InvoicePayment.length === 0) {
-        wsPagos.addRow([
+        const row = wsPagos.addRow([
           format(pago.paymentDate, 'dd/MM/yyyy'),
           pago.reference,
           pago.account.name,
           pago.account.method.name,
-          montoPagoUSD.toFixed(2),
-          Number(pago.dolar.dolar).toFixed(2),
-          montoPagoBS.toFixed(2),
+          montoPagoUSD,
+          Number(pago.dolar.dolar),
+          montoPagoBS,
           pago.description,
           'Sin factura asociada',
           '-',
@@ -1083,6 +1025,9 @@ export class DashboardService {
           '-',
           '-',
         ]);
+        row.getCell(5).numFmt = '#,##0.00';
+        row.getCell(6).numFmt = '#,##0.00';
+        row.getCell(7).numFmt = '#,##0.00';
       } else {
         pago.InvoicePayment.forEach((invoicePayment) => {
           const factura = invoicePayment.invoice;
@@ -1098,30 +1043,43 @@ export class DashboardService {
           totalItemsPagados += equivalenteItems;
           totalFacturasAfectadas.add(factura.id);
 
-          wsPagos.addRow([
+          const row = wsPagos.addRow([
             format(pago.paymentDate, 'dd/MM/yyyy'),
             pago.reference,
             pago.account.name,
             pago.account.method.name,
-            montoPagoUSD.toFixed(2),
-            Number(pago.dolar.dolar).toFixed(2),
-            montoPagoBS.toFixed(2),
+            montoPagoUSD,
+            Number(pago.dolar.dolar),
+            montoPagoBS,
             pago.description,
             `#${factura.controlNumber}`,
-            totalFactura.toFixed(2),
+            totalFactura,
             cantidadTotalItems,
-            montoAsignado.toFixed(2),
-            equivalenteItems.toFixed(2),
-            `${(porcentajePagado * 100).toFixed(1)}%`,
+            montoAsignado,
+            equivalenteItems,
+            porcentajePagado,
           ]);
+          row.getCell(5).numFmt = '#,##0.00';
+          row.getCell(6).numFmt = '#,##0.00';
+          row.getCell(7).numFmt = '#,##0.00';
+          row.getCell(10).numFmt = '#,##0.00';
+          row.getCell(11).numFmt = '#,##0.0000';
+          row.getCell(12).numFmt = '#,##0.00';
+          row.getCell(13).numFmt = '#,##0.0000';
+          row.getCell(14).numFmt = '0.0%';
         });
       }
     });
 
     wsPagos.addRow([]);
     wsPagos.addRow(['=== RESUMEN GENERAL ===']);
-    wsPagos.addRow(['Total Pagado ($):', totalPagado.toFixed(2)]);
-    wsPagos.addRow(['Total Items Equivalentes:', totalItemsPagados.toFixed(2)]);
+    const rowTotalPagado = wsPagos.addRow(['Total Pagado ($):', totalPagado]);
+    rowTotalPagado.getCell(2).numFmt = '#,##0.00';
+    const rowTotalItems = wsPagos.addRow([
+      'Total Items Equivalentes:',
+      totalItemsPagados,
+    ]);
+    rowTotalItems.getCell(2).numFmt = '#,##0.00';
     wsPagos.addRow(['Facturas Afectadas:', totalFacturasAfectadas.size]);
 
     // HOJA RESUMEN POR PRODUCTO
@@ -1172,22 +1130,26 @@ export class DashboardService {
 
     let totalGeneralProductos = 0;
     Object.entries(productosResumen).forEach(([nombreProducto, datos]) => {
-      wsResumenProductos.addRow([
+      const row = wsResumenProductos.addRow([
         nombreProducto,
-        datos.cantidadPagada.toFixed(2),
-        datos.precioPromedio.toFixed(2),
-        datos.montoTotalPagado.toFixed(2),
+        datos.cantidadPagada,
+        datos.precioPromedio,
+        datos.montoTotalPagado,
       ]);
+      row.getCell(2).numFmt = '#,##0.0000';
+      row.getCell(3).numFmt = '#,##0.00';
+      row.getCell(4).numFmt = '#,##0.00';
       totalGeneralProductos += datos.montoTotalPagado;
     });
 
     wsResumenProductos.addRow([]);
-    wsResumenProductos.addRow([
+    const rowTotal = wsResumenProductos.addRow([
       'TOTAL GENERAL',
       '',
       '',
-      totalGeneralProductos.toFixed(2),
+      totalGeneralProductos,
     ]);
+    rowTotal.getCell(4).numFmt = '#,##0.00';
 
     // Aplicar estilos
     [wsPagos, wsResumenProductos].forEach((ws) => {
