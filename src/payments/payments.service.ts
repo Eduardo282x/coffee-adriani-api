@@ -5,8 +5,7 @@ import {
   DashboardExcel,
   DTODateRangeFilter,
 } from 'src/dto/base.dto';
-import { format, eachDayOfInterval } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { eachDayOfInterval } from 'date-fns';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   AccountsDTO,
@@ -44,6 +43,16 @@ interface PaymentFilter {
   credit?: 'credit' | 'noCredit';
 }
 
+const SPANISH_WEEKDAYS = [
+  'Domingo',
+  'Lunes',
+  'Martes',
+  'Miércoles',
+  'Jueves',
+  'Viernes',
+  'Sábado',
+];
+
 @Injectable()
 export class PaymentsService {
   constructor(
@@ -60,8 +69,11 @@ export class PaymentsService {
     return new Date(`${date}T23:59:59.999Z`);
   }
 
-  private capitalize(text: string) {
-    return text.charAt(0).toUpperCase() + text.slice(1);
+  private toDateKeyUTC(date: Date): string {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   // NUEVOS MÉTODOS OPTIMIZADOS EN PaymentsService
@@ -855,12 +867,8 @@ export class PaymentsService {
 
   async getPaymentItemsAnalysis(filter: DashboardExcel) {
     const { type, startDate, endDate } = filter;
-    const formatDateStr = (date: Date | string): string => {
-      const d = date instanceof Date ? date : new Date(date);
-      return format(d, 'yyyy-MM-dd');
-    };
-    const startDateStr = formatDateStr(startDate);
-    const endDateStr = formatDateStr(endDate);
+    const startDateStr = this.toDateKeyUTC(new Date(startDate));
+    const endDateStr = this.toDateKeyUTC(new Date(endDate));
 
     const start = this.getStartOfDayUtc(startDateStr);
     const end = this.getEndOfDayUtc(endDateStr);
@@ -927,10 +935,10 @@ export class PaymentsService {
     >();
 
     days.forEach((dia) => {
-      const dateKey = format(dia, 'yyyy-MM-dd');
+      const dateKey = this.toDateKeyUTC(dia);
       dailyMap.set(dateKey, {
         date: dateKey,
-        day: this.capitalize(format(dia, 'EEEE', { locale: es })),
+        day: SPANISH_WEEKDAYS[dia.getUTCDay()],
         totalItems: 0,
         totalAmount: 0,
         detailItems: {},
@@ -953,6 +961,10 @@ export class PaymentsService {
     >();
 
     let totalPayments = 0;
+    const generalItemsMap: Record<
+      string,
+      { totalElements: number; totalAmount: number }
+    > = {};
 
     for (const payment of payments) {
       const currency = payment.account.method.currency;
@@ -964,7 +976,9 @@ export class PaymentsService {
 
       totalPayments += 1;
 
-      const dayEntry = dailyMap.get(format(payment.paymentDate, 'yyyy-MM-dd'));
+      const dayEntry = dailyMap.get(
+        this.toDateKeyUTC(new Date(payment.paymentDate)),
+      );
       if (dayEntry) {
         dayEntry.totalAmount += montoPagoUSD;
       }
@@ -985,21 +999,33 @@ export class PaymentsService {
         );
         const equivalenteItems = cantidadTotalItems * porcentajePagado;
 
+        items.forEach((item) => {
+          const cantidadPagada = toNumber(item.quantity) * porcentajePagado;
+          const productKey =
+            `${item.product.name} ${item.product.presentation}`.trim();
+
+          const existing = dayEntry?.detailItems[productKey] || {
+            totalElements: 0,
+            totalAmount: 0,
+          };
+          existing.totalElements += cantidadPagada;
+          existing.totalAmount += toNumber(item.unitPrice) * cantidadPagada;
+          if (dayEntry) {
+            dayEntry.detailItems[productKey] = existing;
+          }
+
+          const globalExisting = generalItemsMap[productKey] || {
+            totalElements: 0,
+            totalAmount: 0,
+          };
+          globalExisting.totalElements += cantidadPagada;
+          globalExisting.totalAmount +=
+            toNumber(item.unitPrice) * cantidadPagada;
+          generalItemsMap[productKey] = globalExisting;
+        });
+
         if (dayEntry) {
           dayEntry.totalItems += equivalenteItems;
-
-          items.forEach((item) => {
-            const cantidadPagada = toNumber(item.quantity) * porcentajePagado;
-            const productKey =
-              `${item.product.name} ${item.product.presentation}`.trim();
-            const existing = dayEntry.detailItems[productKey] || {
-              totalElements: 0,
-              totalAmount: 0,
-            };
-            existing.totalElements += cantidadPagada;
-            existing.totalAmount += toNumber(item.unitPrice) * cantidadPagada;
-            dayEntry.detailItems[productKey] = existing;
-          });
         }
 
         if (!invoicesMap.has(invoice.id)) {
@@ -1054,12 +1080,32 @@ export class PaymentsService {
     const totalItems = daily.reduce((acc, d) => acc + d.totalItems, 0);
     const totalAmount = daily.reduce((acc, d) => acc + d.totalAmount, 0);
 
+    const generalItemsDetail = Object.entries(generalItemsMap)
+      .map(([product, data]) => ({
+        product,
+        totalElements: round2(data.totalElements),
+        unitPrice:
+          data.totalElements > 0
+            ? round2(data.totalAmount / data.totalElements)
+            : 0,
+        totalAmount: round2(data.totalAmount),
+      }))
+      .sort((a, b) => b.totalElements - a.totalElements);
+
     return {
+      type,
+      startDate: startDateStr,
+      endDate: endDateStr,
       totals: {
         totalItems: round2(totalItems),
         totalAmount: round2(totalAmount),
         totalInvoices: invoices.length,
         totalPayments,
+      },
+      generalItems: {
+        totalItems: round2(totalItems),
+        totalAmount: round2(totalAmount),
+        detailItems: generalItemsDetail,
       },
       daily,
       invoices,
