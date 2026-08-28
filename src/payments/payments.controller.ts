@@ -16,7 +16,7 @@ import {
   PayInvoiceDTO,
   PaymentDTO,
 } from './payment.dto';
-import { DTODateRangeFilter } from 'src/dto/base.dto';
+import { DTODateRangeFilter, DashboardExcel } from 'src/dto/base.dto';
 
 @Controller('payments')
 export class PaymentsController {
@@ -103,6 +103,11 @@ export class PaymentsController {
   @Get('/details/:id')
   async getPaymentDetails(@Param('id', ParseIntPipe) id: number) {
     return await this.paymentService.getPaymentDetails(id);
+  }
+
+  @Post('/analysis')
+  async getPaymentItemsAnalysis(@Body() filter: DashboardExcel) {
+    return await this.paymentService.getPaymentItemsAnalysis(filter);
   }
 
   @Get('/descriptions')

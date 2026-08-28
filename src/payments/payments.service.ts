@@ -2,8 +2,11 @@ import { Injectable } from '@nestjs/common';
 import {
   badResponse,
   baseResponse,
+  DashboardExcel,
   DTODateRangeFilter,
 } from 'src/dto/base.dto';
+import { format, eachDayOfInterval } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   AccountsDTO,
@@ -16,6 +19,8 @@ import { BankData } from './payments.data';
 import {
   calculateInvoiceRemainingUsd,
   calculatePaymentRemaining,
+  round2,
+  toNumber,
 } from 'src/common/remaining-calculator';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
@@ -53,6 +58,10 @@ export class PaymentsService {
 
   private getEndOfDayUtc(date: string) {
     return new Date(`${date}T23:59:59.999Z`);
+  }
+
+  private capitalize(text: string) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   // NUEVOS MÉTODOS OPTIMIZADOS EN PaymentsService
@@ -842,6 +851,219 @@ export class PaymentsService {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new Error(`Error al obtener estadísticas de pagos: ${errMsg}`);
     }
+  }
+
+  async getPaymentItemsAnalysis(filter: DashboardExcel) {
+    const { type, startDate, endDate } = filter;
+    const formatDateStr = (date: Date | string): string => {
+      const d = date instanceof Date ? date : new Date(date);
+      return format(d, 'yyyy-MM-dd');
+    };
+    const startDateStr = formatDateStr(startDate);
+    const endDateStr = formatDateStr(endDate);
+
+    const start = this.getStartOfDayUtc(startDateStr);
+    const end = this.getEndOfDayUtc(endDateStr);
+
+    const payments = await this.prismaService.payment.findMany({
+      where: {
+        type: 'INCOME',
+        paymentDate: { gte: start, lte: end },
+      },
+      select: {
+        id: true,
+        amount: true,
+        paymentDate: true,
+        dolar: { select: { dolar: true } },
+        account: { select: { method: { select: { currency: true } } } },
+        InvoicePayment: {
+          select: {
+            id: true,
+            amount: true,
+            invoice: {
+              select: {
+                id: true,
+                controlNumber: true,
+                dispatchDate: true,
+                dueDate: true,
+                totalAmount: true,
+                status: true,
+                client: {
+                  select: { name: true, block: { select: { name: true } } },
+                },
+                invoiceItems: {
+                  where: {
+                    product: { type: { contains: type, mode: 'insensitive' } },
+                  },
+                  select: {
+                    quantity: true,
+                    unitPrice: true,
+                    product: { select: { name: true, presentation: true } },
+                  },
+                },
+                InvoicePayment: { select: { amount: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { paymentDate: 'asc' },
+    });
+
+    const days = eachDayOfInterval({ start, end });
+
+    const dailyMap = new Map<
+      string,
+      {
+        date: string;
+        day: string;
+        totalItems: number;
+        totalAmount: number;
+        detailItems: Record<
+          string,
+          { totalElements: number; totalAmount: number }
+        >;
+      }
+    >();
+
+    days.forEach((dia) => {
+      const dateKey = format(dia, 'yyyy-MM-dd');
+      dailyMap.set(dateKey, {
+        date: dateKey,
+        day: this.capitalize(format(dia, 'EEEE', { locale: es })),
+        totalItems: 0,
+        totalAmount: 0,
+        detailItems: {},
+      });
+    });
+
+    const invoicesMap = new Map<
+      number,
+      {
+        controlNumber: string;
+        client: string;
+        block: string;
+        status: string;
+        dispatchDate: Date;
+        dueDate: Date;
+        totalBultos: number;
+        totalAmount: number;
+        remaining: number;
+      }
+    >();
+
+    let totalPayments = 0;
+
+    for (const payment of payments) {
+      const currency = payment.account.method.currency;
+      const rate = toNumber(payment.dolar.dolar);
+      const montoPagoUSD =
+        currency === 'USD'
+          ? toNumber(payment.amount)
+          : toNumber(payment.amount) / (rate || 1);
+
+      totalPayments += 1;
+
+      const dayEntry = dailyMap.get(format(payment.paymentDate, 'yyyy-MM-dd'));
+      if (dayEntry) {
+        dayEntry.totalAmount += montoPagoUSD;
+      }
+
+      for (const ip of payment.InvoicePayment) {
+        const invoice = ip.invoice;
+        const items = invoice.invoiceItems;
+        if (!items || items.length === 0) continue;
+
+        const montoAsignado = toNumber(ip.amount);
+        const totalFactura = toNumber(invoice.totalAmount);
+        const porcentajePagado =
+          totalFactura > 0 ? montoAsignado / totalFactura : 0;
+
+        const cantidadTotalItems = items.reduce(
+          (sum, item) => sum + toNumber(item.quantity),
+          0,
+        );
+        const equivalenteItems = cantidadTotalItems * porcentajePagado;
+
+        if (dayEntry) {
+          dayEntry.totalItems += equivalenteItems;
+
+          items.forEach((item) => {
+            const cantidadPagada = toNumber(item.quantity) * porcentajePagado;
+            const productKey =
+              `${item.product.name} ${item.product.presentation}`.trim();
+            const existing = dayEntry.detailItems[productKey] || {
+              totalElements: 0,
+              totalAmount: 0,
+            };
+            existing.totalElements += cantidadPagada;
+            existing.totalAmount += toNumber(item.unitPrice) * cantidadPagada;
+            dayEntry.detailItems[productKey] = existing;
+          });
+        }
+
+        if (!invoicesMap.has(invoice.id)) {
+          invoicesMap.set(invoice.id, {
+            controlNumber: invoice.controlNumber,
+            client: invoice.client?.name || '',
+            block: invoice.client?.block?.name || '',
+            status: invoice.status,
+            dispatchDate: invoice.dispatchDate,
+            dueDate: invoice.dueDate,
+            totalBultos: cantidadTotalItems,
+            totalAmount: totalFactura,
+            remaining: calculateInvoiceRemainingUsd(
+              totalFactura,
+              invoice.InvoicePayment,
+            ),
+          });
+        }
+      }
+    }
+
+    const daily = Array.from(dailyMap.values()).map((entry) => ({
+      date: entry.date,
+      day: entry.day,
+      totalItems: round2(entry.totalItems),
+      totalAmount: round2(entry.totalAmount),
+      detailItems: Object.entries(entry.detailItems)
+        .map(([product, data]) => ({
+          product,
+          totalElements: round2(data.totalElements),
+          unitPrice:
+            data.totalElements > 0
+              ? round2(data.totalAmount / data.totalElements)
+              : 0,
+          totalAmount: round2(data.totalAmount),
+        }))
+        .sort((a, b) => b.totalElements - a.totalElements),
+    }));
+
+    const invoices = Array.from(invoicesMap.values()).map((inv) => ({
+      controlNumber: inv.controlNumber,
+      client: inv.client,
+      block: inv.block,
+      status: inv.status,
+      dispatchDate: inv.dispatchDate,
+      dueDate: inv.dueDate,
+      totalBultos: round2(inv.totalBultos),
+      totalAmount: round2(inv.totalAmount),
+      remaining: round2(inv.remaining),
+    }));
+
+    const totalItems = daily.reduce((acc, d) => acc + d.totalItems, 0);
+    const totalAmount = daily.reduce((acc, d) => acc + d.totalAmount, 0);
+
+    return {
+      totals: {
+        totalItems: round2(totalItems),
+        totalAmount: round2(totalAmount),
+        totalInvoices: invoices.length,
+        totalPayments,
+      },
+      daily,
+      invoices,
+    };
   }
 
   async getPaymentDetails(paymentId: number) {
