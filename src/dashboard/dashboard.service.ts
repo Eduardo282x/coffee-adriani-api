@@ -135,23 +135,19 @@ export class DashboardService {
   }
 
   private getStartOfDayUtc(date: Date | string) {
-    if (date instanceof Date) {
-      return date;
+    const parseString = date.toString();
+    if (parseString.length > 10) {
+      return new Date(parseString);
     }
-    if (date.length > 10) {
-      return new Date(date);
-    }
-    return new Date(`${date}T00:00:00.000Z`);
+    return new Date(`${parseString}T00:00:00.000Z`);
   }
 
   private getEndOfDayUtc(date: Date | string) {
-    if (date instanceof Date) {
-      return date;
+    const parseDate = date.toLocaleString();
+    if (parseDate.length > 10) {
+      return new Date(parseDate);
     }
-    if (date.length > 10) {
-      return new Date(date);
-    }
-    return new Date(`${date}T23:59:59.999Z`);
+    return new Date(`${parseDate}T23:59:59.999Z`);
   }
 
   async getDashboardData(filter: DashboardExcel) {
@@ -375,8 +371,8 @@ export class DashboardService {
       this.prismaService.invoice.findMany({
         where: {
           dispatchDate: {
-            gte: filter.startDate,
-            lte: filter.endDate,
+            gte: this.getStartOfDayUtc(filter.startDate),
+            lte: this.getEndOfDayUtc(filter.endDate),
           },
           invoiceItems: {
             every: {
@@ -443,7 +439,7 @@ export class DashboardService {
       // Facturas de centros
       this.prismaService.invoice.findMany({
         where: {
-          dispatchDate: { lte: filter.endDate },
+          dispatchDate: { lte: this.getEndOfDayUtc(filter.endDate) },
           client: {
             block: {
               name: { contains: 'centro', mode: 'insensitive' },
@@ -485,7 +481,7 @@ export class DashboardService {
       // Facturas hasta cierre
       this.prismaService.invoice.findMany({
         where: {
-          dispatchDate: { lte: endDatePlusOne },
+          dispatchDate: { lte: this.getEndOfDayUtc(endDatePlusOne) },
           invoiceItems: {
             some: {
               product: {
@@ -526,8 +522,8 @@ export class DashboardService {
       this.prismaService.payment.findMany({
         where: {
           paymentDate: {
-            gte: filter.startDate,
-            lte: endDatePlusOne,
+            gte: this.getStartOfDayUtc(filter.startDate),
+            lte: this.getEndOfDayUtc(endDatePlusOne),
           },
           type: 'INCOME',
         },
@@ -592,12 +588,6 @@ export class DashboardService {
         type: filter.type,
       }),
 
-      // Dólar actual
-      // this.prismaService.historyDolar.findFirst({
-      //   select: { dolar: true },
-      //   orderBy: { date: 'desc' },
-      // }),
-
       // Movimientos de inventario antes del rango (agrupados)
       this.prismaService.inventoryEntryDetail.findMany({
         where: {
@@ -613,8 +603,8 @@ export class DashboardService {
 
     // 2. Preparar estructuras de datos optimizadas
     const dias = eachDayOfInterval({
-      start: filter.startDate,
-      end: filter.endDate,
+      start: this.getStartOfDayUtc(filter.startDate),
+      end: this.getEndOfDayUtc(filter.endDate),
     });
     // const exchangeRateUsed = currentDolar?.dolar || 1;
 
