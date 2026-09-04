@@ -50,7 +50,7 @@ export class DolarService {
       where: {
         status: {
           not: {
-            in: ['Pagado', 'Cancelada'],
+            in: ['Pagado', 'Vencida', 'Perdidas', 'Cancelada'],
           },
         },
       },

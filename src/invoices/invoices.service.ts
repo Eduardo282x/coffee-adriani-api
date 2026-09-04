@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import {
   badResponse,
   baseResponse,
-  DashboardExcel,
   DTOBaseResponse,
   DTODateRangeFilter,
 } from 'src/dto/base.dto';
@@ -10,6 +9,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import {
   DetProducts,
   DTOInvoice,
+  DTOQueryFilterExport,
   InvoiceStatistics,
   OptionalFilterInvoices,
   ResponseInvoice,
@@ -1968,20 +1968,60 @@ export class InvoicesService {
   // ----------------------------------------------------------------
 
   async exportInvoicesToExcelWithExcelJS(
-    dateRange: DashboardExcel,
+    filter: DTOQueryFilterExport,
   ): Promise<Buffer> {
+    const { type, status, zone, startDate, endDate, blockId } = filter;
+
     const where: any = {};
-    if (dateRange.startDate && dateRange.endDate) {
+
+    if (startDate && endDate) {
       where.dispatchDate = {
-        gte: this.getStartOfDayUtc(dateRange.startDate.toString()),
-        lte: this.getEndOfDayUtc(dateRange.endDate.toString()),
+        gte: this.getStartOfDayUtc(startDate.toString()),
+        lte: this.getEndOfDayUtc(endDate.toString()),
       };
-      where.invoiceItems = {
-        some: {
-          product: {
-            type: dateRange.type,
-          },
+    }
+
+    where.invoiceItems = {
+      some: {
+        product: {
+          type: type,
         },
+      },
+    };
+
+    if (status) {
+      if (status == 'Abonadas') {
+        where.OR = [
+          {
+            status: {
+              notIn: ['Cancelada', 'Pagado'],
+            },
+          },
+        ];
+        where.AND = {
+          InvoicePayment: {
+            some: {},
+          },
+        };
+      } else {
+        where.status = status as InvoiceStatus;
+      }
+    }
+
+    if (zone) {
+      where.client = {
+        ...where.client,
+        zone: {
+          contains: zone,
+          mode: 'insensitive',
+        },
+      };
+    }
+
+    if (blockId) {
+      where.client = {
+        ...where.client,
+        blockId: Number(blockId),
       };
     }
 

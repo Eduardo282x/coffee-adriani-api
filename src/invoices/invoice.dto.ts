@@ -10,6 +10,7 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
+import { DashboardExcel } from 'src/dto/base.dto';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
 import {
   DTOInventoryDetail,
@@ -210,4 +211,16 @@ export interface Summary {
   invoiceCount: number;
   averageInvoiceValue: number;
   paymentPercentage: number;
+}
+
+export class DTOQueryFilterExport extends DashboardExcel {
+  @IsString()
+  @IsOptional()
+  zone: string;
+  @IsString()
+  @IsOptional()
+  blockId: string;
+  @IsString()
+  @IsOptional()
+  status: string;
 }

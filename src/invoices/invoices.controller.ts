@@ -10,8 +10,8 @@ import {
   Query,
   Res,
 } from '@nestjs/common';
-import { DTOInvoice } from './invoice.dto';
-import { DashboardExcel, DTODateRangeFilter } from 'src/dto/base.dto';
+import { DTOInvoice, DTOQueryFilterExport } from './invoice.dto';
+import { DTODateRangeFilter } from 'src/dto/base.dto';
 import { FastifyReply } from 'fastify';
 import { ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { InvoicesService } from './invoices.service';
@@ -192,7 +192,7 @@ export class InvoicesController {
   @Post('/export')
   async exportInvoicesExcel(
     @Res({ passthrough: true }) res: FastifyReply,
-    @Body() query: DashboardExcel,
+    @Body() query: DTOQueryFilterExport,
   ) {
     const buffer =
       await this.invoicesService.exportInvoicesToExcelWithExcelJS(query);
