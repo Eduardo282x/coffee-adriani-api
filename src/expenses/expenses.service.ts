@@ -249,6 +249,9 @@ export class ExpensesService {
       let totalEarnDay = 0;
       let totalEarnMonth = 0;
       let totalEarnRange = 0;
+      let totalRemaining = 0;
+      let totalGifts = 0;
+      let totalExpenseAssociated = 0;
       let quantityProductsMonth = 0;
       let quantityProductsRange = 0;
       const productSales: Record<
@@ -278,6 +281,9 @@ export class ExpensesService {
         const hasExpenseAssociated = expenseAssociatedAmount > 0;
         const hasRateDifference = invoice.status === 'Pagado' && remaining > 0;
 
+        totalRemaining += remaining;
+        totalExpenseAssociated += expenseAssociatedAmount;
+
         // Calcular earn con history lookup
         // Determinar moneda del invoice: buscar la primera InvoicePayment关联ación con payment/account/method
         // Como no tenemos payment en el include, usamos el approach de inferir de los items
@@ -287,6 +293,9 @@ export class ExpensesService {
 
         let earn = 0;
         for (const item of invoice.invoiceItems) {
+          if (item.type === 'GIFT') {
+            totalGifts += Number(item.subtotal || 0);
+          }
           const history = findHistoryAtDate(
             item.product.name,
             item.product.presentation,
@@ -401,6 +410,17 @@ export class ExpensesService {
           totalEarnDay: Number(totalEarnDay.toFixed(2)),
           totalEarnMonth: Number(totalEarnMonth.toFixed(2)),
           totalEarnRange: Number(totalEarnRange.toFixed(2)),
+          earns: {
+            estimated: Number(totalEarnRange.toFixed(2)),
+            real: Number(
+              (
+                totalEarnRange -
+                totalRemaining -
+                totalGifts -
+                totalExpenseAssociated
+              ).toFixed(2),
+            ),
+          },
           productPercentages,
           quantityProducts: {
             totalEarnMonth: Number(quantityProductsMonth.toFixed(4)),
