@@ -441,6 +441,7 @@ export class ExpensesService {
 
       const payments = await this.prismaService.payment.findMany({
         where: {
+          deleted: false,
           account: {
             name: { contains: 'Gastos' },
           },
@@ -482,6 +483,7 @@ export class ExpensesService {
 
       const payments = await this.prismaService.payment.findMany({
         where: {
+          deleted: false,
           type: 'INCOME',
           paymentDate: {
             gte: startDate,
@@ -520,6 +522,7 @@ export class ExpensesService {
 
       const payments = await this.prismaService.payment.findMany({
         where: {
+          deleted: false,
           type: { in: ['EXPENSE', 'SUPPLIER', 'PERSONAL_EXPENSES'] },
           paymentDate: {
             gte: startDate,

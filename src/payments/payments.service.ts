@@ -99,6 +99,7 @@ export class PaymentsService {
 
       // Construir where clause dinámicamente
       const where: any = {
+        deleted: false,
         type: { notIn: ['SUPPLIER', 'PERSONAL_EXPENSES'] },
       };
 
@@ -401,6 +402,7 @@ export class PaymentsService {
       // Construir where clause dinámicamente
       const where: any = {
         // Las estadísticas de ingresos solo consideran pagos INCOME
+        deleted: false,
         type: 'INCOME',
       };
 
@@ -728,14 +730,17 @@ export class PaymentsService {
 
       // Totales separados por tipo de pago (EXPENSE, PERSONAL_EXPENSES, SUPPLIER)
       const expenseWhere: any = {
+        deleted: false,
         type: 'EXPENSE',
       };
 
       const personalExpensesWhere: any = {
+        deleted: false,
         type: 'PERSONAL_EXPENSES',
       };
 
       const supplierWhere: any = {
+        deleted: false,
         type: 'SUPPLIER',
       };
 
@@ -875,6 +880,7 @@ export class PaymentsService {
 
     const payments = await this.prismaService.payment.findMany({
       where: {
+        deleted: false,
         type: 'INCOME',
         paymentDate: { gte: start, lte: end },
       },
@@ -1114,8 +1120,8 @@ export class PaymentsService {
 
   async getPaymentDetails(paymentId: number) {
     try {
-      const payment = await this.prismaService.payment.findUnique({
-        where: { id: paymentId },
+      const payment = await this.prismaService.payment.findFirst({
+        where: { id: paymentId, deleted: false },
         include: {
           dolar: true,
           account: {
@@ -1193,6 +1199,7 @@ export class PaymentsService {
           },
         },
         where: {
+          deleted: false,
           type: { notIn: ['SUPPLIER', 'PERSONAL_EXPENSES'] },
         },
         orderBy: { paymentDate: 'desc' },
@@ -1311,6 +1318,7 @@ export class PaymentsService {
         },
         orderBy: { paymentDate: 'desc' },
         where: {
+          deleted: false,
           paymentDate: {
             gte: filter.startDate,
             lte: filter.endDate,
@@ -1377,6 +1385,7 @@ export class PaymentsService {
     return await this.prismaService.payment.groupBy({
       by: ['description'],
       where: {
+        deleted: false,
         description: {
           not: '',
         },
@@ -1509,7 +1518,7 @@ export class PaymentsService {
       );
 
       const findPayment = await this.prismaService.payment.findFirst({
-        where: { id: pay.paymentId },
+        where: { id: pay.paymentId, deleted: false },
         include: {
           account: { include: { method: true } },
           dolar: true,
@@ -1848,7 +1857,10 @@ export class PaymentsService {
         });
       }
 
-      await this.prismaService.payment.delete({ where: { id } });
+      await this.prismaService.payment.update({
+        where: { id },
+        data: { deleted: true },
+      });
       return { message: 'Pago eliminado exitosamente', success: true };
     } catch (err: unknown) {
       return {

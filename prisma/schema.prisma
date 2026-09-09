@@ -189,6 +189,7 @@ model Payment {
   status                 PaymentStatus
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
+  deleted                Boolean                 @default(false)
   type                   AccountType             @default(INCOME)
   InvoicePayment         InvoicePayment[]
   inventoryEntryPayments InventoryEntryPayment[]

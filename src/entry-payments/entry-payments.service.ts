@@ -25,8 +25,8 @@ export class EntryPaymentsService {
         return badResponse;
       }
 
-      const payment = await this.prismaService.payment.findUnique({
-        where: { id: data.paymentId },
+      const payment = await this.prismaService.payment.findFirst({
+        where: { id: data.paymentId, deleted: false },
       });
 
       if (!payment) {
@@ -307,8 +307,8 @@ export class EntryPaymentsService {
     data: Partial<CreatePaymentForEntryDTO>,
   ) {
     try {
-      const payment = await this.prismaService.payment.findUnique({
-        where: { id: paymentId },
+      const payment = await this.prismaService.payment.findFirst({
+        where: { id: paymentId, deleted: false },
       });
 
       if (!payment) {
@@ -364,8 +364,8 @@ export class EntryPaymentsService {
 
   async deletePayment(paymentId: number) {
     try {
-      const payment = await this.prismaService.payment.findUnique({
-        where: { id: paymentId },
+      const payment = await this.prismaService.payment.findFirst({
+        where: { id: paymentId, deleted: false },
       });
 
       const entryPayment =
@@ -393,8 +393,9 @@ export class EntryPaymentsService {
         },
       });
 
-      await this.prismaService.payment.delete({
+      await this.prismaService.payment.update({
         where: { id: paymentId },
+        data: { deleted: true },
       });
 
       return {

@@ -438,6 +438,7 @@ export class DashboardService {
       // Pagos en rango
       this.prismaService.payment.findMany({
         where: {
+          deleted: false,
           paymentDate: {
             gte: this.getStartOfDayUtc(filter.startDate),
             lte: this.getEndOfDayUtc(endDatePlusOne),
