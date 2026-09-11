@@ -330,16 +330,24 @@ export class ExpensesService {
         for (const item of invoice.invoiceItems) {
           if (item.type === 'GIFT') {
             totalGifts += Number(item.subtotal || 0);
+            continue;
           }
           const history = findHistoryAtDate(
             item.product.name,
             item.product.presentation,
             saleRefDate,
           );
-          const product = history || productMap.get(item.productId);
+          const currentProduct = productMap.get(item.productId);
+          const product = history || currentProduct;
 
-          const purchasePrice = Number(product?.purchasePrice || 0);
-          const purchasePriceUSD = Number(product?.purchasePriceUSD || 0);
+          const purchasePrice =
+            Number(product?.purchasePrice) ||
+            Number(currentProduct?.purchasePrice) ||
+            0;
+          const purchasePriceUSD =
+            Number(product?.purchasePriceUSD) ||
+            Number(currentProduct?.purchasePriceUSD) ||
+            0;
 
           if (isUSD) {
             earn +=

@@ -162,6 +162,7 @@ export class ProductsService {
           priceUSD: product.priceUSD,
           amount: product.amount,
           purchasePrice: product.purchasePrice,
+          purchasePriceUSD: product.purchasePriceUSD,
         },
       });
 
