@@ -64,6 +64,24 @@ export class ExpensesService {
       );
   }
 
+  private async getInventoryLossesTotal(expenseFilter: ExpensesDTO) {
+    const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+
+    const losses = await this.prismaService.inventoryLoss.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        product: {
+          type: { contains: expenseFilter.type, mode: 'insensitive' },
+        },
+      },
+      select: { totalCost: true },
+    });
+
+    const total = losses.reduce((sum, loss) => sum + Number(loss.totalCost), 0);
+
+    return { total: Number(total.toFixed(2)), count: losses.length };
+  }
+
   async getExpensesFilter(expenseFilter: ExpensesDTO) {
     try {
       const [
@@ -72,6 +90,7 @@ export class ExpensesService {
         paymentsNoAssociatedRaw,
         paymentsExpensesRaw,
         statistics,
+        losses,
       ] = await Promise.all([
         this.getInvoicesWithMetrics(expenseFilter),
         this.getPayments(expenseFilter),
@@ -82,6 +101,7 @@ export class ExpensesService {
           endDate: format(expenseFilter.endDate, 'yyyy-MM-dd'),
           type: expenseFilter.type,
         }),
+        this.getInventoryLossesTotal(expenseFilter),
       ]);
 
       const paymentsNoAssociated = paymentsNoAssociatedRaw as unknown as any[];
@@ -96,6 +116,21 @@ export class ExpensesService {
 
       const invoiceMetricsData = invoiceMetrics as any;
 
+      const summary = {
+        ...invoiceMetricsData.summary,
+        losses,
+        earns: {
+          estimated: Number(
+            (invoiceMetricsData.summary.earns.estimated - losses.total).toFixed(
+              2,
+            ),
+          ),
+          real: Number(
+            (invoiceMetricsData.summary.earns.real - losses.total).toFixed(2),
+          ),
+        },
+      };
+
       const entrance = Number(statistics.totals.total);
       const expensesTotal = Number(statistics.expenses.total);
       const personalExpensesTotal = Number(statistics.personalExpenses.total);
@@ -104,7 +139,7 @@ export class ExpensesService {
 
       return {
         invoices: invoiceMetricsData.invoices,
-        summary: invoiceMetricsData.summary,
+        summary,
         payments,
         paymentsNoAssociated: {
           payments: paymentsNoAssociated,

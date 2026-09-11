@@ -177,3 +177,46 @@ export class ExecuteInventoryCutDTO {
   @IsIn(['open', 'close', 'both'])
   action: 'open' | 'close' | 'both';
 }
+
+export class CreateInventoryLossDTO {
+  @IsNumber()
+  @IsPositive()
+  productId: number;
+
+  @IsNumber()
+  @IsPositive()
+  quantity: number;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsDate()
+  @IsOptional()
+  @Transform(({ value }) => new Date(value))
+  date?: Date;
+}
+
+export class InventoryLossFilterDTO {
+  @IsString()
+  @IsOptional()
+  typeProduct?: string;
+
+  @IsString()
+  @IsOptional()
+  startDate?: string;
+
+  @IsString()
+  @IsOptional()
+  endDate?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  page?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  limit?: number;
+}

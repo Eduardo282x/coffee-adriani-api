@@ -97,6 +97,7 @@ model Product {
   HistoryInventory      HistoryInventory[]
   inventoryEntryDetails InventoryEntryDetail[]
   inventoryCutDetails   InventoryCutDetail[]
+  inventoryLosses       InventoryLoss[]
   deleted               Boolean                @default(false)
 }
 
@@ -392,6 +393,18 @@ model InventoryCutDetail {
   productId      Int
   product        Product      @relation(fields: [productId], references: [id])
   amount         Decimal      @db.Decimal(10, 3)
+}
+
+model InventoryLoss {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Decimal  @db.Decimal(10, 3)
+  unitCost  Decimal  @db.Decimal(10, 2)
+  totalCost Decimal  @db.Decimal(10, 2)
+  reason    String   @default("")
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model WeeklyReportSnapshot {

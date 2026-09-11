@@ -9,6 +9,8 @@ import {
   InventoryEntryFilterDTO,
   InventoryCutFilterDTO,
   ExecuteInventoryCutDTO,
+  CreateInventoryLossDTO,
+  InventoryLossFilterDTO,
 } from './inventory.dto';
 import { badResponse, baseResponse } from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
@@ -1201,6 +1203,135 @@ export class InventoryService {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new Error(`Error al obtener entrada de empresa: ${errMsg}`);
     }
+  }
+
+  // ============ Mermas de inventario (pérdidas de producto) ============
+
+  async createInventoryLoss(data: CreateInventoryLossDTO) {
+    try {
+      const product = await this.prismaService.product.findUnique({
+        where: { id: data.productId },
+      });
+
+      if (!product) {
+        badResponse.message = 'El producto no existe.';
+        return badResponse;
+      }
+
+      if (product.type.toLowerCase() !== 'queso') {
+        badResponse.message =
+          'Solo se puede registrar merma de productos tipo Queso.';
+        return badResponse;
+      }
+
+      const inventory = await this.prismaService.inventory.findFirst({
+        where: { productId: data.productId },
+      });
+
+      if (!inventory) {
+        badResponse.message = 'El producto no se encontró en el inventario.';
+        return badResponse;
+      }
+
+      if (Number(data.quantity) > Number(inventory.quantity)) {
+        badResponse.message = `La cantidad de merma supera el inventario disponible (${Number(inventory.quantity)}).`;
+        return badResponse;
+      }
+
+      const unitCost = Number(product.purchasePrice);
+      const totalCost = Number((unitCost * data.quantity).toFixed(2));
+      const lossDate = data.date ? new Date(data.date) : new Date();
+
+      await this.prismaService.$transaction(async (tx) => {
+        await tx.inventoryLoss.create({
+          data: {
+            productId: data.productId,
+            quantity: data.quantity,
+            unitCost,
+            totalCost,
+            reason: data.reason ?? '',
+            date: lossDate,
+          },
+        });
+
+        await tx.inventory.update({
+          where: { id: inventory.id },
+          data: {
+            quantity: {
+              decrement: data.quantity,
+            },
+          },
+        });
+      });
+
+      baseResponse.message = 'Merma registrada y descontada del inventario.';
+      baseResponse.data = { totalCost };
+      return baseResponse;
+    } catch (err) {
+      await this.prismaService.errorMessages.create({
+        data: {
+          message: err instanceof Error ? err.message : String(err),
+          from: 'inventoryService',
+        },
+      });
+      badResponse.message = err instanceof Error ? err.message : String(err);
+      return badResponse;
+    }
+  }
+
+  async getInventoryLosses(filter: InventoryLossFilterDTO) {
+    const { typeProduct, startDate, endDate, page = 1, limit = 50 } = filter;
+    const safePage = page > 0 ? page : 1;
+    const safeLimit = limit > 0 ? Math.min(limit, 100) : 50;
+    const skip = (safePage - 1) * safeLimit;
+
+    const where: any = {};
+
+    if (startDate && endDate) {
+      where.date = {
+        gte: this.getStartOfDayUtc(startDate),
+        lte: this.getEndOfDayUtc(endDate),
+      };
+    }
+
+    if (typeProduct) {
+      where.product = {
+        type: {
+          equals: typeProduct,
+          mode: 'insensitive',
+        },
+      };
+    }
+
+    const [losses, totalCount] = await Promise.all([
+      this.prismaService.inventoryLoss.findMany({
+        where,
+        include: { product: true },
+        orderBy: [{ date: 'desc' }, { id: 'desc' }],
+        skip,
+        take: safeLimit,
+      }),
+      this.prismaService.inventoryLoss.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(totalCount / safeLimit);
+
+    return {
+      losses: losses.map((loss) => ({
+        ...loss,
+        quantity: Number(loss.quantity),
+        unitCost: Number(loss.unitCost),
+        totalCost: Number(loss.totalCost),
+      })),
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        totalCount,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPreviousPage: safePage > 1,
+      },
+    };
   }
 
   // ============ Cortes de inventario (semanal y mensual) ============

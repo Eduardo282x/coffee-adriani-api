@@ -17,6 +17,8 @@ import {
   CreateInventoryEntryDTO,
   InventoryCutFilterDTO,
   ExecuteInventoryCutDTO,
+  CreateInventoryLossDTO,
+  InventoryLossFilterDTO,
 } from './inventory.dto';
 
 @Controller('inventory')
@@ -173,5 +175,15 @@ export class InventoryController {
   @Post('/cuts/execute')
   async executeCut(@Body() data: ExecuteInventoryCutDTO) {
     return await this.inventoryService.executeCut(data);
+  }
+
+  @Get('/losses')
+  async getInventoryLosses(@Query() filter: InventoryLossFilterDTO) {
+    return await this.inventoryService.getInventoryLosses(filter);
+  }
+
+  @Post('/losses')
+  async createInventoryLoss(@Body() data: CreateInventoryLossDTO) {
+    return await this.inventoryService.createInventoryLoss(data);
   }
 }
