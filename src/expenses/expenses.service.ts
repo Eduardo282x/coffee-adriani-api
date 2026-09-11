@@ -304,7 +304,7 @@ export class ExpensesService {
         const hasGiftItems = invoice.invoiceItems.some(
           (item) => item.type === 'GIFT',
         );
-        const saleRefDate = invoice.dispatchDate || invoice.createdAt;
+        const saleRefDate = invoice.createdAt || invoice.dispatchDate;
 
         const expenseAssociatedAmount = (invoice.InvoicePayment || []).reduce(
           (acc, ip: any) =>
@@ -346,6 +346,7 @@ export class ExpensesService {
             0;
           const purchasePriceUSD =
             Number(product?.purchasePriceUSD) ||
+            Number(product?.purchasePrice) ||
             Number(currentProduct?.purchasePriceUSD) ||
             0;
 
