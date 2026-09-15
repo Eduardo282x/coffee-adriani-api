@@ -907,6 +907,7 @@ export class PaymentsService {
                 },
                 invoiceItems: {
                   where: {
+                    type: 'SALE',
                     product: { type: { contains: type, mode: 'insensitive' } },
                   },
                   select: {
@@ -991,6 +992,9 @@ export class PaymentsService {
 
       for (const ip of payment.InvoicePayment) {
         const invoice = ip.invoice;
+        if (invoice.status === 'Perdidas' || invoice.status === 'Cancelada') {
+          continue;
+        }
         const items = invoice.invoiceItems;
         if (!items || items.length === 0) continue;
 
@@ -1000,13 +1004,19 @@ export class PaymentsService {
           totalFactura > 0 ? montoAsignado / totalFactura : 0;
 
         const cantidadTotalItems = items.reduce(
-          (sum, item) => sum + toNumber(item.quantity),
+          (sum, item) =>
+            sum +
+            toNumber(item.quantity) *
+              (item.product.presentation === '1kilo' ? 0.2 : 1),
           0,
         );
         const equivalenteItems = cantidadTotalItems * porcentajePagado;
 
         items.forEach((item) => {
-          const cantidadPagada = toNumber(item.quantity) * porcentajePagado;
+          const cantidadPagada =
+            toNumber(item.quantity) *
+            (item.product.presentation === '1kilo' ? 0.2 : 1) *
+            porcentajePagado;
           const productKey =
             `${item.product.name} ${item.product.presentation}`.trim();
 
