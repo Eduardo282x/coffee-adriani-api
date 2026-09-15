@@ -573,14 +573,28 @@ export class InventoryService {
           (sum, p) => sum + Number(p.amount),
           0,
         );
-        const remaining = Number(entry.totalAmount) - totalPaid;
+        const totalAmount = Number(entry.totalAmount);
+        const remaining = totalAmount - totalPaid;
+        const pendingBultosBase = entry.details.reduce(
+          (sum, d) =>
+            sum +
+            Number(d.quantity) *
+              (d.type === 'SALE' ? 1 : 0) *
+              (d.product.presentation === '1kilo' ? 0.2 : 1),
+          0,
+        );
+        const pendingBultos =
+          totalAmount > 0
+            ? pendingBultosBase * (Math.max(0, remaining) / totalAmount)
+            : 0;
 
         return {
           ...entry,
           totalBultos,
+          pendingBultos: Number(pendingBultos.toFixed(2)),
           totalPaid: totalPaid.toFixed(2),
           remaining: remaining.toFixed(2),
-          totalAmount: Number(entry.totalAmount).toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
         };
       });
 
@@ -658,7 +672,11 @@ export class InventoryService {
         select: {
           totalAmount: true,
           details: {
-            select: { quantity: true },
+            select: {
+              quantity: true,
+              type: true,
+              product: { select: { presentation: true } },
+            },
           },
           payments: {
             select: { amount: true },
@@ -685,10 +703,34 @@ export class InventoryService {
       );
       const totalPending = totalAmount - totalPaid;
 
+      const totalPendingBultos = entries.reduce((sum, entry) => {
+        const entryAmount = Number(entry.totalAmount);
+        const bultosBase = entry.details.reduce(
+          (s, detail) =>
+            s +
+            Number(detail.quantity) *
+              (detail.type === 'SALE' ? 1 : 0) *
+              (detail.product.presentation === '1kilo' ? 0.2 : 1),
+          0,
+        );
+        const entryPaid = entry.payments.reduce(
+          (s, payment) => s + Number(payment.amount),
+          0,
+        );
+        const entryRemaining = entryAmount - entryPaid;
+        return (
+          sum +
+          (entryAmount > 0
+            ? bultosBase * (Math.max(0, entryRemaining) / entryAmount)
+            : 0)
+        );
+      }, 0);
+
       return {
         totals: {
           totalInvoices,
           totalBultos,
+          totalPendingBultos: Number(totalPendingBultos.toFixed(2)),
           totalPaid: totalPaid.toFixed(2),
           totalPending: totalPending.toFixed(2),
           totalAmount: totalAmount.toFixed(2),
