@@ -1120,6 +1120,20 @@ export class InventoryService {
         );
         const remaining = Number(entry.totalAmount) - totalPaid;
 
+        const pendingBultosBase = entry.details.reduce(
+          (sum, d) =>
+            sum +
+            Number(d.quantity) *
+              (d.type === 'SALE' ? 1 : 0) *
+              (d.product.presentation === '1kilo' ? 0.2 : 1),
+          0,
+        );
+        const pendingBultos =
+          Number(entry.totalAmount) > 0
+            ? pendingBultosBase *
+              (Math.max(0, remaining) / Number(entry.totalAmount))
+            : 0;
+
         return {
           id: entry.id,
           controlNumber: entry.controlNumber,
@@ -1127,6 +1141,7 @@ export class InventoryService {
           description: entry.description,
           date: entry.date,
           status: entry.status,
+          pendingBultos: Number(pendingBultos).toFixed(2),
           totalAmount: Number(entry.totalAmount).toFixed(2),
           totalBultos,
           totalPaid: totalPaid.toFixed(2),
