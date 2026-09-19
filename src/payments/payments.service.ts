@@ -62,6 +62,7 @@ interface InvoiceAnalysisRow {
   dispatchDate: Date;
   dueDate: Date;
   totalBultos: number;
+  totalBultosPagados: number;
   totalAmount: number;
   remaining: number;
   date: string;
@@ -1083,6 +1084,7 @@ export class PaymentsService {
               dispatchDate: invoice.dispatchDate,
               dueDate: invoice.dueDate,
               totalBultos: cantidadTotalItems,
+              totalBultosPagados: equivalenteItems,
               totalAmount: totalFactura,
               remaining: calculateInvoiceRemainingUsd(
                 totalFactura,
@@ -1108,6 +1110,7 @@ export class PaymentsService {
       dispatchDate: inv.dispatchDate,
       dueDate: inv.dueDate,
       totalBultos: round2(inv.totalBultos),
+      totalBultosPagados: round2(inv.totalBultosPagados),
       totalAmount: round2(inv.totalAmount),
       remaining: round2(inv.remaining),
       date: inv.date,
