@@ -4,7 +4,7 @@ import { InvoicesService } from 'src/invoices/invoices.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CollectionDTO, MarkDTO, MessageDTO } from './collection.dto';
 import { ResponseInvoice } from 'src/invoices/invoice.dto';
-import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
+// import { WhatsAppService } from 'src/whatsapp/whatsapp.service';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 
 @Injectable()
@@ -12,7 +12,7 @@ export class CollectionService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly invoiceService: InvoicesService,
-    private readonly whatsAppService: WhatsAppService,
+    // private readonly whatsAppService: WhatsAppService,
   ) {}
 
   async getClientReminder() {
@@ -65,7 +65,7 @@ export class CollectionService {
 
       return response;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -84,7 +84,7 @@ export class CollectionService {
 
       return response;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -216,7 +216,7 @@ export class CollectionService {
       baseResponse.message = 'Mensaje guardado exitosamente.';
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -233,7 +233,7 @@ export class CollectionService {
       baseResponse.message = 'Mensaje actualizado exitosamente.';
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -246,7 +246,7 @@ export class CollectionService {
       baseResponse.message = 'Mensaje eliminado exitosamente.';
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -266,7 +266,7 @@ export class CollectionService {
       baseResponse.message = `Mensajes ${findMessageSelected.title} marcado para todos.`;
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -282,7 +282,7 @@ export class CollectionService {
       baseResponse.message = `Mensajes marcados para ${mark.send ? 'Enviar' : 'No enviar'}.`;
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -300,7 +300,7 @@ export class CollectionService {
       baseResponse.message = 'Mensaje actualizado exitosamente.';
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -322,7 +322,7 @@ export class CollectionService {
       baseResponse.message = 'Clientes agregados a la cobranza';
       return baseResponse;
     } catch (err) {
-      badResponse.message = err.message;
+      badResponse.message = err instanceof Error ? err.message : String(err);
       return badResponse;
     }
   }
@@ -413,11 +413,8 @@ export class CollectionService {
           }
 
           try {
-            const response: DTOBaseResponse =
-              await this.whatsAppService.sendMessage(
-                phone,
-                rem.message.content,
-              );
+            const response: DTOBaseResponse = null;
+
             if (response.success) {
               responseMessages.push(response);
               await this.prismaService.clientReminder.update({
@@ -444,7 +441,7 @@ export class CollectionService {
             }
           } catch (err) {
             console.error(
-              `Error enviando a ${rem.client.name}: ${err.message}`,
+              `Error enviando a ${rem.client.name}: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
         });
@@ -471,7 +468,10 @@ export class CollectionService {
       return baseResponse;
     } catch (err) {
       console.error('Error en envío masivo:', err);
-      return { message: 'Error enviando mensajes', error: err.message };
+      return {
+        message: 'Error enviando mensajes',
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 }
