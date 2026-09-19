@@ -1073,7 +1073,10 @@ export class PaymentsService {
           uniqueInvoiceIds.add(invoice.id);
 
           const invoiceKey = `${invoice.id}_${dayEntry.date}`;
-          if (!invoicesMap.has(invoiceKey)) {
+          const existingRow = invoicesMap.get(invoiceKey);
+          if (existingRow) {
+            existingRow.totalBultosPagados += equivalenteItems;
+          } else {
             const row: InvoiceAnalysisRow = {
               controlNumber: invoice.controlNumber,
               client: invoice.client?.name || '',
