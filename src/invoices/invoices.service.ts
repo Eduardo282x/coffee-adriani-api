@@ -887,7 +887,14 @@ export class InvoicesService {
     try {
       const invoice = await this.prismaService.invoice.findUnique({
         where: { id: invoiceId },
-        include: {
+        select: {
+          id: true,
+          controlNumber: true,
+          consignment: true,
+          status: true,
+          dispatchDate: true,
+          dueDate: true,
+          totalAmount: true,
           client: {
             select: {
               name: true,
@@ -895,15 +902,34 @@ export class InvoicesService {
             },
           },
           invoiceItems: {
-            include: {
-              product: true,
+            select: {
+              id: true,
+              type: true,
+              quantity: true,
+              unitPrice: true,
+              subtotal: true,
+              product: {
+                select: {
+                  name: true,
+                  presentation: true,
+                },
+              },
             },
           },
           InvoicePayment: {
-            include: {
+            select: {
+              id: true,
+              amount: true,
+              createdAt: true,
               payment: {
-                include: {
-                  account: true,
+                select: {
+                  paymentDate: true,
+                  account: {
+                    select: {
+                      name: true,
+                      bank: true,
+                    },
+                  },
                 },
               },
             },
@@ -915,13 +941,32 @@ export class InvoicesService {
         return { ...badResponse, message: 'Invoice not found' };
       }
 
+      const totalAmount = Number(invoice.totalAmount);
+      const remaining = calculateInvoiceRemainingUsd(
+        invoice.totalAmount,
+        invoice.InvoicePayment,
+      );
+      const totalItems = this.calculateInvoiceItems(invoice.invoiceItems);
+      const paidItems =
+        totalAmount > 0
+          ? totalItems * ((totalAmount - remaining) / totalAmount)
+          : 0;
+
+      const invoicePayments = invoice.InvoicePayment.map((ip) => {
+        const paidItemsPerPayment =
+          totalAmount > 0 ? totalItems * (Number(ip.amount) / totalAmount) : 0;
+        return {
+          ...ip,
+          paidItems: Number(paidItemsPerPayment.toFixed(4)),
+        };
+      });
+
       return {
         ...invoice,
-        totalAmount: invoice.totalAmount.toFixed(2),
-        remaining: calculateInvoiceRemainingUsd(
-          invoice.totalAmount,
-          invoice.InvoicePayment,
-        ).toFixed(2),
+        InvoicePayment: invoicePayments,
+        totalAmount: totalAmount.toFixed(2),
+        remaining: remaining.toFixed(2),
+        paidItems: Number(paidItems.toFixed(4)),
       };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
