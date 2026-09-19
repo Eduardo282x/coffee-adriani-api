@@ -52,6 +52,22 @@ const SPANISH_WEEKDAYS = [
   'Sábado',
 ];
 
+interface InvoiceAnalysisRow {
+  controlNumber: string;
+  client: string;
+  block: string;
+  zone: string;
+  blockId: number;
+  status: string;
+  dispatchDate: Date;
+  dueDate: Date;
+  totalBultos: number;
+  totalAmount: number;
+  remaining: number;
+  date: string;
+  day: string;
+}
+
 @Injectable()
 export class PaymentsService {
   constructor(
@@ -902,7 +918,12 @@ export class PaymentsService {
                 totalAmount: true,
                 status: true,
                 client: {
-                  select: { name: true, block: { select: { name: true } } },
+                  select: {
+                    name: true,
+                    zone: true,
+                    blockId: true,
+                    block: { select: { name: true } },
+                  },
                 },
                 invoiceItems: {
                   where: {
@@ -954,6 +975,7 @@ export class PaymentsService {
           string,
           { totalElements: number; totalAmount: number }
         >;
+        invoices: InvoiceAnalysisRow[];
       }
     >();
 
@@ -965,23 +987,12 @@ export class PaymentsService {
         totalItems: 0,
         totalAmount: 0,
         detailItems: {},
+        invoices: [],
       });
     });
 
-    const invoicesMap = new Map<
-      number,
-      {
-        controlNumber: string;
-        client: string;
-        block: string;
-        status: string;
-        dispatchDate: Date;
-        dueDate: Date;
-        totalBultos: number;
-        totalAmount: number;
-        remaining: number;
-      }
-    >();
+    const invoicesMap = new Map<string, InvoiceAnalysisRow>();
+    const uniqueInvoiceIds = new Set<number>();
 
     let totalPayments = 0;
     const generalItemsMap: Record<
@@ -1057,24 +1068,56 @@ export class PaymentsService {
           dayEntry.totalItems += equivalenteItems;
         }
 
-        if (!invoicesMap.has(invoice.id)) {
-          invoicesMap.set(invoice.id, {
-            controlNumber: invoice.controlNumber,
-            client: invoice.client?.name || '',
-            block: invoice.client?.block?.name || '',
-            status: invoice.status,
-            dispatchDate: invoice.dispatchDate,
-            dueDate: invoice.dueDate,
-            totalBultos: cantidadTotalItems,
-            totalAmount: totalFactura,
-            remaining: calculateInvoiceRemainingUsd(
-              totalFactura,
-              invoice.InvoicePayment,
-            ),
-          });
+        if (dayEntry) {
+          uniqueInvoiceIds.add(invoice.id);
+
+          const invoiceKey = `${invoice.id}_${dayEntry.date}`;
+          if (!invoicesMap.has(invoiceKey)) {
+            const row: InvoiceAnalysisRow = {
+              controlNumber: invoice.controlNumber,
+              client: invoice.client?.name || '',
+              block: invoice.client?.block?.name || '',
+              zone: invoice.client?.zone || '',
+              blockId: invoice.client?.blockId ?? 0,
+              status: invoice.status,
+              dispatchDate: invoice.dispatchDate,
+              dueDate: invoice.dueDate,
+              totalBultos: cantidadTotalItems,
+              totalAmount: totalFactura,
+              remaining: calculateInvoiceRemainingUsd(
+                totalFactura,
+                invoice.InvoicePayment,
+              ),
+              date: dayEntry.date,
+              day: dayEntry.day,
+            };
+            invoicesMap.set(invoiceKey, row);
+            dayEntry.invoices.push(row);
+          }
         }
       }
     }
+
+    const mapInvoiceRow = (inv: InvoiceAnalysisRow) => ({
+      controlNumber: inv.controlNumber,
+      client: inv.client,
+      block: inv.block,
+      zone: inv.zone,
+      blockId: inv.blockId,
+      status: inv.status,
+      dispatchDate: inv.dispatchDate,
+      dueDate: inv.dueDate,
+      totalBultos: round2(inv.totalBultos),
+      totalAmount: round2(inv.totalAmount),
+      remaining: round2(inv.remaining),
+      date: inv.date,
+      day: inv.day,
+    });
+
+    const sortInvoicesByBlockId = (
+      a: InvoiceAnalysisRow,
+      b: InvoiceAnalysisRow,
+    ) => a.blockId - b.blockId;
 
     const daily = Array.from(dailyMap.values()).map((entry) => ({
       date: entry.date,
@@ -1092,19 +1135,12 @@ export class PaymentsService {
           totalAmount: round2(data.totalAmount),
         }))
         .sort((a, b) => b.totalElements - a.totalElements),
+      invoices: entry.invoices.sort(sortInvoicesByBlockId).map(mapInvoiceRow),
     }));
 
-    const invoices = Array.from(invoicesMap.values()).map((inv) => ({
-      controlNumber: inv.controlNumber,
-      client: inv.client,
-      block: inv.block,
-      status: inv.status,
-      dispatchDate: inv.dispatchDate,
-      dueDate: inv.dueDate,
-      totalBultos: round2(inv.totalBultos),
-      totalAmount: round2(inv.totalAmount),
-      remaining: round2(inv.remaining),
-    }));
+    const invoices = Array.from(invoicesMap.values())
+      .sort(sortInvoicesByBlockId)
+      .map(mapInvoiceRow);
 
     const totalItems = daily.reduce((acc, d) => acc + d.totalItems, 0);
     const totalAmount = daily.reduce((acc, d) => acc + d.totalAmount, 0);
@@ -1128,7 +1164,7 @@ export class PaymentsService {
       totals: {
         totalItems: round2(totalItems),
         totalAmount: round2(totalAmount),
-        totalInvoices: invoices.length,
+        totalInvoices: uniqueInvoiceIds.size,
         totalPayments,
       },
       generalItems: {
