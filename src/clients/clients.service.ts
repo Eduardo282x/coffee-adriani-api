@@ -417,6 +417,43 @@ export class ClientsService {
       }
 
       clientsReports.sort((a, b) => {
+        if (client.orderBy) {
+          const dir = client.orderDirection === 'desc' ? -1 : 1;
+          let comparison = 0;
+
+          switch (client.orderBy) {
+            case 'name':
+              comparison = a.name.localeCompare(b.name);
+              break;
+            case 'address':
+              comparison = a.address.localeCompare(b.address);
+              break;
+            case 'block':
+              comparison = (a.block?.name || '').localeCompare(
+                b.block?.name || '',
+              );
+              break;
+            case 'debt':
+              comparison = a.debt - b.debt;
+              break;
+            case 'totalPaid':
+              comparison = a.totalPaid - b.totalPaid;
+              break;
+            case 'totalInvoices':
+              comparison = a.totalInvoices - b.totalInvoices;
+              break;
+            case 'dispatchDate':
+              comparison =
+                (a.lastInvoiceDispatchDate?.getTime() || 0) -
+                (b.lastInvoiceDispatchDate?.getTime() || 0);
+              break;
+            default:
+              comparison = 0;
+          }
+
+          if (comparison !== 0) return comparison * dir;
+        }
+
         if (a.blockId !== b.blockId) return (a.blockId || 0) - (b.blockId || 0);
         return a.address.localeCompare(b.address);
       });
@@ -489,8 +526,8 @@ export class ClientsService {
               ? cli.lastInvoiceDispatchDate.toISOString().slice(0, 10)
               : '',
             `${formatNumberWithDots(cli.totalInvoices)} $`,
-            `${formatNumberWithDots(cli.debt)} $`,
             `${formatNumberWithDots(cli.totalPaid)} $`,
+            `${formatNumberWithDots(cli.debt)} $`,
           ];
 
           doc.font('Helvetica').fontSize(8).fillColor('black');

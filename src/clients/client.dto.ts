@@ -1,12 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsBoolean,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsPhoneNumber,
-  IsString,
-} from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class DTOClients {
   @IsString()
@@ -37,6 +30,17 @@ export class DTOBlocks {
 
 export type StatusPay = 'clean' | 'pending' | 'all';
 
+export type ReportOrderBy =
+  | 'name'
+  | 'address'
+  | 'block'
+  | 'debt'
+  | 'totalPaid'
+  | 'totalInvoices'
+  | 'dispatchDate';
+
+export type ReportOrderDirection = 'asc' | 'desc';
+
 export class DTOReportClients {
   @IsString()
   type: string;
@@ -50,4 +54,10 @@ export class DTOReportClients {
   @IsNotEmpty({ message: 'El estatus es requerido' })
   @Type(() => String)
   status: StatusPay;
+  @IsString()
+  @IsOptional()
+  orderBy: ReportOrderBy;
+  @IsString()
+  @IsOptional()
+  orderDirection: ReportOrderDirection;
 }
