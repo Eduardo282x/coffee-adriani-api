@@ -5,7 +5,6 @@ import {
   DashboardExcel,
   DTODateRangeFilter,
 } from 'src/dto/base.dto';
-import { eachDayOfInterval } from 'date-fns';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   AccountsDTO,
@@ -913,7 +912,15 @@ export class PaymentsService {
                   select: {
                     quantity: true,
                     unitPrice: true,
-                    product: { select: { name: true, presentation: true } },
+                    unitPriceUSD: true,
+                    product: {
+                      select: {
+                        name: true,
+                        presentation: true,
+                        purchasePrice: true,
+                        purchasePriceUSD: true,
+                      },
+                    },
                   },
                 },
                 InvoicePayment: { select: { amount: true } },
@@ -925,7 +932,16 @@ export class PaymentsService {
       orderBy: { paymentDate: 'asc' },
     });
 
-    const days = eachDayOfInterval({ start, end });
+    const days: Date[] = [];
+    for (
+      let d = new Date(`${startDateStr}T00:00:00.000Z`);
+      d <= end;
+      d = new Date(d.getTime() + 86400000)
+    ) {
+      if (d.getUTCDay() !== 0) {
+        days.push(d);
+      }
+    }
 
     const dailyMap = new Map<
       string,
@@ -974,21 +990,11 @@ export class PaymentsService {
     > = {};
 
     for (const payment of payments) {
-      const currency = payment.account.method.currency;
-      const rate = toNumber(payment.dolar.dolar);
-      const montoPagoUSD =
-        currency === 'USD'
-          ? toNumber(payment.amount)
-          : toNumber(payment.amount) / (rate || 1);
-
       totalPayments += 1;
 
       const dayEntry = dailyMap.get(
         this.toDateKeyUTC(new Date(payment.paymentDate)),
       );
-      if (dayEntry) {
-        dayEntry.totalAmount += montoPagoUSD;
-      }
 
       for (const ip of payment.InvoicePayment) {
         const invoice = ip.invoice;
@@ -1020,14 +1026,22 @@ export class PaymentsService {
           const productKey =
             `${item.product.name} ${item.product.presentation}`.trim();
 
+          const purchasePriceUSD =
+            toNumber(item.product.purchasePriceUSD) ||
+            toNumber(item.product.purchasePrice) ||
+            0;
+          const unitProfit = toNumber(item.unitPriceUSD) - purchasePriceUSD;
+          const profitItem = unitProfit * cantidadPagada;
+
           const existing = dayEntry?.detailItems[productKey] || {
             totalElements: 0,
             totalAmount: 0,
           };
           existing.totalElements += cantidadPagada;
-          existing.totalAmount += toNumber(item.unitPrice) * cantidadPagada;
+          existing.totalAmount += profitItem;
           if (dayEntry) {
             dayEntry.detailItems[productKey] = existing;
+            dayEntry.totalAmount += profitItem;
           }
 
           const globalExisting = generalItemsMap[productKey] || {
@@ -1035,8 +1049,7 @@ export class PaymentsService {
             totalAmount: 0,
           };
           globalExisting.totalElements += cantidadPagada;
-          globalExisting.totalAmount +=
-            toNumber(item.unitPrice) * cantidadPagada;
+          globalExisting.totalAmount += profitItem;
           generalItemsMap[productKey] = globalExisting;
         });
 
