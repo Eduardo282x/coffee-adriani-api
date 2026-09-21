@@ -11,6 +11,64 @@ import {
 export class EntryPaymentsService {
   constructor(private readonly prismaService: PrismaService) {}
 
+  private addDaysToDate(date: Date, days: number): Date {
+    const target = new Date(date);
+    target.setUTCDate(target.getUTCDate() + days);
+    return target;
+  }
+
+  private getStartOfDayUtc(date: Date | string) {
+    if (typeof date === 'string') {
+      return new Date(`${date}T00:00:00.000Z`);
+    }
+    const d = new Date(date);
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+  }
+
+  private getEndOfDayUtc(date: Date | string) {
+    if (typeof date === 'string') {
+      return new Date(`${date}T23:59:59.999Z`);
+    }
+    const d = new Date(date);
+    d.setUTCHours(23, 59, 59, 999);
+    return d;
+  }
+
+  private async resolveDolarForPaymentDate(
+    paymentDate: Date,
+    requestedDolarId?: number,
+  ) {
+    const baseDate = new Date(paymentDate);
+
+    for (const offset of [0, 1, -1]) {
+      const target = this.addDaysToDate(baseDate, offset);
+      const records = await this.prismaService.historyDolar.findMany({
+        where: {
+          date: {
+            gte: this.getStartOfDayUtc(target),
+            lte: this.getEndOfDayUtc(target),
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+
+      if (records.length > 0) {
+        if (requestedDolarId) {
+          const requested = records.find((r) => r.id === requestedDolarId);
+          if (requested) {
+            return requested;
+          }
+        }
+        return records[records.length - 1];
+      }
+    }
+
+    return await this.prismaService.historyDolar.findFirst({
+      orderBy: { id: 'desc' },
+    });
+  }
+
   async associatePaymentToEntry(data: AssociatePaymentDTO) {
     try {
       const entry = await this.prismaService.inventoryEntry.findUnique({
@@ -186,9 +244,10 @@ export class EntryPaymentsService {
         return badResponse;
       }
 
-      const getDolar = await this.prismaService.historyDolar.findFirst({
-        orderBy: { date: 'desc' },
-      });
+      const getDolar = await this.resolveDolarForPaymentDate(
+        data.paymentDate,
+        data.dolarId,
+      );
 
       const payment = await this.prismaService.payment.create({
         data: {
@@ -196,7 +255,7 @@ export class EntryPaymentsService {
           accountId: data.accountId,
           reference: data.reference,
           description: data.description || '',
-          dolarId: data.dolarId || getDolar?.id || 1,
+          dolarId: getDolar?.id || 1,
           paymentDate: data.paymentDate,
           status: 'CONFIRMED',
           type: 'SUPPLIER',
@@ -315,6 +374,15 @@ export class EntryPaymentsService {
         throw new Error('Pago no encontrado');
       }
 
+      let dolarId = payment.dolarId;
+      if (data.dolarId !== undefined) {
+        const resolvedDolar = await this.resolveDolarForPaymentDate(
+          data.paymentDate || payment.paymentDate,
+          data.dolarId,
+        );
+        dolarId = resolvedDolar?.id ?? payment.dolarId;
+      }
+
       const updatedPayment = await this.prismaService.payment.update({
         where: { id: paymentId },
         data: {
@@ -331,7 +399,7 @@ export class EntryPaymentsService {
             data.paymentDate !== undefined
               ? data.paymentDate
               : payment.paymentDate,
-          dolarId: data.dolarId !== undefined ? data.dolarId : payment.dolarId,
+          dolarId,
         },
       });
 
