@@ -29,22 +29,36 @@ export class ProductsService {
     return new Date(`${date}T23:59:59.999Z`);
   }
 
-  async getDolarFilter(date: string) {
-    const records = await this.prismaService.historyDolar.findMany({
-      where: {
-        date: {
-          gte: this.getStartOfDayUtc(date),
-          lt: this.getEndOfDayUtc(date),
-        },
-      },
-      orderBy: { id: 'asc' },
-    });
+  private addDaysToDate(date: string, days: number): string {
+    const base =
+      date.length > 10 ? new Date(date) : new Date(`${date}T00:00:00.000Z`);
+    base.setUTCDate(base.getUTCDate() + days);
+    return base.toISOString().slice(0, 10);
+  }
 
-    const unique = new Map<string, (typeof records)[number]>();
-    for (const record of records) {
-      unique.set(record.dolar.toString(), record);
+  async getDolarFilter(date: string) {
+    for (const offset of [0, 1, -1]) {
+      const targetDate = this.addDaysToDate(date, offset);
+      const records = await this.prismaService.historyDolar.findMany({
+        where: {
+          date: {
+            gte: this.getStartOfDayUtc(targetDate),
+            lt: this.getEndOfDayUtc(targetDate),
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+
+      if (records.length > 0) {
+        const unique = new Map<string, (typeof records)[number]>();
+        for (const record of records) {
+          unique.set(record.dolar.toString(), record);
+        }
+        return Array.from(unique.values());
+      }
     }
-    return Array.from(unique.values());
+
+    return [];
   }
 
   async getTypeProduct() {
