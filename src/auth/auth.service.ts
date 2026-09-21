@@ -90,7 +90,7 @@ export class AuthService {
       }
 
       const hashedPassword = await bcrypt.hash(credentials.password, 12);
-      const updateUser = await this.prismaService.users.update({
+      await this.prismaService.users.update({
         where: { id: findUser.id },
         data: { password: hashedPassword },
         include: { roles: true },

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTODolar, DTOProducts } from './product.dto';
-import { Dolar, parseCustomDate } from 'src/dolar/dolar.service';
+import { Dolar } from 'src/dolar/dolar.service';
 import axios from 'axios';
 
 @Injectable()
@@ -30,14 +30,21 @@ export class ProductsService {
   }
 
   async getDolarFilter(date: string) {
-    return await this.prismaService.historyDolar.findMany({
+    const records = await this.prismaService.historyDolar.findMany({
       where: {
         date: {
           gte: this.getStartOfDayUtc(date),
           lt: this.getEndOfDayUtc(date),
         },
       },
+      orderBy: { id: 'asc' },
     });
+
+    const unique = new Map<string, (typeof records)[number]>();
+    for (const record of records) {
+      unique.set(record.dolar.toString(), record);
+    }
+    return Array.from(unique.values());
   }
 
   async getTypeProduct() {
@@ -58,6 +65,7 @@ export class ProductsService {
         date: new Date(response.fechaActualizacion),
       };
       return await this.saveDolar(parseResponse);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err: Error | any) {
       badResponse.message =
         'Error al obtener el precio del dolar en estos momentos.';
@@ -67,6 +75,17 @@ export class ProductsService {
 
   async saveDolar(dolar: DTODolar) {
     try {
+      const lastDolar = await this.prismaService.historyDolar.findFirst({
+        orderBy: { id: 'desc' },
+      });
+
+      const roundedDolar = Math.round(dolar.dolar * 100) / 100;
+
+      if (lastDolar && Number(lastDolar.dolar) === roundedDolar) {
+        baseResponse.message = 'La tasa de dolar ya se encuentra registrada.';
+        return baseResponse;
+      }
+
       await this.prismaService.historyDolar.create({
         data: {
           dolar: dolar.dolar,
