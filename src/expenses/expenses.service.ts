@@ -182,7 +182,7 @@ export class ExpensesService {
             },
           },
           invoiceItems: {
-            every: {
+            some: {
               product: {
                 type: { contains: type, mode: 'insensitive' },
               },
@@ -296,14 +296,16 @@ export class ExpensesService {
       let totalQuantity = 0;
 
       const result = invoices.map((invoice) => {
+        const normalizedType = this.normalizeText(type);
+        const typeItems = invoice.invoiceItems.filter((item) =>
+          this.normalizeText(item.product?.type).includes(normalizedType),
+        );
         const remaining = calculateInvoiceRemainingUsd(
           invoice.totalAmount,
           invoice.InvoicePayment,
         );
-        const totalItems = this.calculateInvoiceItems(invoice.invoiceItems);
-        const hasGiftItems = invoice.invoiceItems.some(
-          (item) => item.type === 'GIFT',
-        );
+        const totalItems = this.calculateInvoiceItems(typeItems);
+        const hasGiftItems = typeItems.some((item) => item.type === 'GIFT');
         const saleRefDate = invoice.createdAt || invoice.dispatchDate;
 
         const expenseAssociatedAmount = (invoice.InvoicePayment || []).reduce(
@@ -323,11 +325,11 @@ export class ExpensesService {
         // Determinar moneda del invoice: buscar la primera InvoicePayment关联ación con payment/account/method
         // Como no tenemos payment en el include, usamos el approach de inferir de los items
         // Simplificación: si unitPriceUSD existe y > 0, asumimos USD
-        const firstItem = invoice.invoiceItems[0];
+        const firstItem = typeItems[0];
         const isUSD = firstItem && Number(firstItem.unitPriceUSD) > 0;
 
         let earn = 0;
-        for (const item of invoice.invoiceItems) {
+        for (const item of typeItems) {
           if (item.type === 'GIFT') {
             totalGifts += Number(item.subtotal || 0);
             continue;
@@ -382,7 +384,7 @@ export class ExpensesService {
         }
 
         // Product sales
-        for (const item of invoice.invoiceItems) {
+        for (const item of typeItems) {
           const pid = item.productId;
           if (!productSales[pid]) {
             productSales[pid] = {
@@ -410,7 +412,7 @@ export class ExpensesService {
           hasRateDifference,
           hasExpenseAssociated,
           expenseAssociatedAmount,
-          invoiceItems: invoice.invoiceItems.map((item) => ({
+          invoiceItems: typeItems.map((item) => ({
             id: item.id,
             productId: item.productId,
             quantity: Number(item.quantity),
@@ -563,6 +565,7 @@ export class ExpensesService {
   async getPaymentsExpenses(expenseFilter: ExpensesDTO) {
     try {
       const { startDate, endDate } = this.getNormalizedDateRange(expenseFilter);
+      const { type } = expenseFilter;
 
       const payments = await this.prismaService.payment.findMany({
         where: {
@@ -572,6 +575,26 @@ export class ExpensesService {
             gte: startDate,
             lte: endDate,
           },
+          OR: [
+            {
+              InvoicePayment: { none: {} },
+            },
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    invoiceItems: {
+                      some: {
+                        product: {
+                          type: { contains: type, mode: 'insensitive' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
         },
         include: {
           account: {

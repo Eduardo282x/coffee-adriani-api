@@ -777,6 +777,29 @@ export class PaymentsService {
             methodId: methodId,
           };
         }
+
+        if (type) {
+          where.OR = [
+            {
+              InvoicePayment: { none: {} },
+            },
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    invoiceItems: {
+                      some: {
+                        product: {
+                          type: { contains: type, mode: 'insensitive' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ];
+        }
       };
 
       typePaymentFilters(expenseWhere);
