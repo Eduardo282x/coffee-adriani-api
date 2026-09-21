@@ -18,9 +18,11 @@ async function bootstrap() {
   );
   app.setGlobalPrefix('api');
 
-  const allowedOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',').map((origin) => origin.trim())
-    : true;
+  const allowedOrigins = [
+    'https://cafe-adriani.duckdns.org',
+    'https://cafe-adriani-frontend-xnvayt-d5ec0a-185-237-253-171.sslip.io',
+    'http://localhost:5173',
+  ];
 
   // Fastify: manejar correctamente los preflight (OPTIONS) de PUT/DELETE
   await app.register(cors, {
