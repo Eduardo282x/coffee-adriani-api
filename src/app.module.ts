@@ -30,6 +30,7 @@ import { N8nModule } from './n8n/n8n.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { EntryPaymentsModule } from './entry-payments/entry-payments.module';
 import { TestCronModule } from './test-cron/test-cron.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
   imports: [
@@ -60,6 +61,14 @@ import { TestCronModule } from './test-cron/test-cron.module';
     SuppliersModule,
     EntryPaymentsModule,
     TestCronModule,
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60000,
+          limit: 100,
+        },
+      ],
+    }),
   ],
   controllers: [AppController],
   providers: [
@@ -67,7 +76,11 @@ import { TestCronModule } from './test-cron/test-cron.module';
     JwtService,
     {
       provide: APP_GUARD,
-      useClass: AuthGuard, // se ejecuta primero
+      useClass: ThrottlerGuard, // se ejecuta primero
+    },
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
     },
     {
       provide: APP_GUARD,
