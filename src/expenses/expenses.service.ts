@@ -189,6 +189,7 @@ export class ExpensesService {
             },
           },
         },
+        orderBy: { dispatchDate: 'asc' },
         include: {
           client: { select: { id: true, name: true } },
           invoiceItems: { include: { product: true } },
@@ -429,14 +430,6 @@ export class ExpensesService {
         };
       });
 
-      const filteredInvoices = result.filter(
-        (inv) =>
-          inv.remaining !== 0 ||
-          inv.hasGiftItems ||
-          inv.hasRateDifference ||
-          inv.hasExpenseAssociated,
-      );
-
       const productPercentages = Object.entries(productSales)
         .map(([id, data]) => ({
           productId: Number(id),
@@ -451,7 +444,7 @@ export class ExpensesService {
         .sort((a, b) => b.quantity - a.quantity);
 
       return {
-        invoices: filteredInvoices,
+        invoices: result,
         summary: {
           totalEarnDay: Number(totalEarnDay.toFixed(2)),
           totalEarnMonth: Number(totalEarnMonth.toFixed(2)),
