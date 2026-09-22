@@ -178,7 +178,9 @@ export class ExpensesService {
           status: 'Pagado',
           InvoicePayment: {
             some: {
-              createdAt: { gte: startDate, lte: endDate },
+              payment: {
+                paymentDate: { gte: startDate, lte: endDate },
+              },
             },
           },
           invoiceItems: {
