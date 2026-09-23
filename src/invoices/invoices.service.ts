@@ -913,6 +913,7 @@ export class InvoicesService {
                 select: {
                   name: true,
                   presentation: true,
+                  priceUSD: true,
                 },
               },
             },
