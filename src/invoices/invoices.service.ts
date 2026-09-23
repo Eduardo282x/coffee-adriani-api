@@ -908,6 +908,7 @@ export class InvoicesService {
               quantity: true,
               unitPrice: true,
               subtotal: true,
+              productId: true,
               product: {
                 select: {
                   name: true,
