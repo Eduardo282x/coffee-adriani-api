@@ -911,8 +911,10 @@ export class InvoicesService {
               productId: true,
               product: {
                 select: {
+                  id: true,
                   name: true,
                   presentation: true,
+                  price: true,
                   priceUSD: true,
                 },
               },
@@ -1736,9 +1738,98 @@ export class InvoicesService {
           },
         });
 
+        // Liberar el numero de control original si se reutiliza (patrón de ANULADO)
+        const uniqueControlNumber = async (base: string) => {
+          let candidate = base;
+          let suffix = 1;
+          while (
+            await tx.inventoryEntry.findUnique({
+              where: { controlNumber: candidate },
+            })
+          ) {
+            candidate = `${base}-${suffix++}`;
+          }
+          return candidate;
+        };
+
+        // Restaurar el inventario que se descontó con la factura original
+        const oldOutEntry = await tx.inventoryEntry.findFirst({
+          where: {
+            controlNumber: invoice.controlNumber,
+            movementType: 'OUT',
+          },
+          include: { details: true },
+        });
+
+        if (oldOutEntry) {
+          await tx.inventoryEntry.update({
+            where: { id: oldOutEntry.id },
+            data: {
+              controlNumber: await uniqueControlNumber(
+                `ANULADO-${invoice.controlNumber}`,
+              ),
+            },
+          });
+
+          for (const detail of oldOutEntry.details) {
+            const findInventory = await tx.inventory.findFirst({
+              where: { productId: detail.productId },
+            });
+            if (findInventory) {
+              await tx.inventory.update({
+                where: { id: findInventory.id },
+                data: {
+                  quantity: {
+                    increment: detail.quantity,
+                  },
+                },
+              });
+            }
+          }
+        }
+
+        // Validar que exista inventario suficiente para los nuevos detalles
+        const productIds = newInvoice.details.map((det) => det.productId);
+        const products = await tx.product.findMany({
+          where: { id: { in: productIds } },
+        });
+        const productMap = new Map(products.map((p) => [p.id, p]));
+
+        for (const det of newInvoice.details) {
+          const findInventory = await tx.inventory.findFirst({
+            where: { productId: det.productId },
+          });
+          const available = Number(findInventory?.quantity || 0);
+          if (!findInventory || available < Number(det.quantity)) {
+            throw new Error(
+              `El producto ${productMap.get(det.productId)?.name || det.productId} excede la cantidad disponible en inventario. Disponible: ${available}`,
+            );
+          }
+        }
+
         await tx.invoiceProduct.deleteMany({ where: { invoiceId: id } });
 
         await tx.invoiceProduct.createMany({ data: dataDetailsInvoice });
+
+        // Descontar el nuevo inventario y registrar la nueva salida
+        const inventoryResult =
+          await this.inventoryService.updateInventoryInvoice(
+            {
+              controlNumber: newInvoice.controlNumber,
+              description: `Salida de producto por factura ${newInvoice.controlNumber}`,
+              date: newInvoice.dispatchDate,
+              details: newInvoice.details.map((det) => ({
+                productId: det.productId,
+                quantity: det.quantity,
+                type: det.type || 'SALE',
+              })),
+            },
+            tx,
+          );
+
+        if (!inventoryResult.success) {
+          throw new Error(inventoryResult.message);
+        }
       });
 
       return { message: 'Factura actualizada correctamente', success: true };
