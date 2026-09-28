@@ -16,8 +16,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DolarModule } from './dolar/dolar.module';
-import { MainloadModule } from './mainload/mainload.module';
 import { ConfigModule } from '@nestjs/config';
+import { envValidationSchema } from './config/env.validation';
 import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from './guards/auth/auth.guard';
 import { RolesGuard } from './guards/roles/roles.guard';
@@ -49,9 +49,13 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     AuthModule,
     UsersModule,
     DolarModule,
-    MainloadModule,
     ConfigModule.forRoot({
       isGlobal: true,
+      validationSchema: envValidationSchema,
+      validationOptions: {
+        abortEarly: false,
+        allowUnknown: true,
+      },
     }),
     ExpensesModule,
     CollectionModule,
@@ -63,10 +67,9 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     TestCronModule,
     ThrottlerModule.forRoot({
       throttlers: [
-        {
-          ttl: 60000,
-          limit: 100,
-        },
+        { name: 'default', ttl: 60_000, limit: 100 },
+        { name: 'auth', ttl: 60_000, limit: 10 },
+        { name: 'writes', ttl: 60_000, limit: 30 },
       ],
     }),
   ],

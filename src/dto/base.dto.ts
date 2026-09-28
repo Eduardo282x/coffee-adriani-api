@@ -7,16 +7,40 @@ export class DTOBaseResponse {
   data?: any;
 }
 
-export const baseResponse: DTOBaseResponse = {
-  message: '',
-  success: true,
-  data: null,
-};
+/**
+ * Factories de respuesta.
+ *
+ * Antes `baseResponse` y `badResponse` eran objetos de modulo mutables: cada
+ * request hacia `badResponse.message = ...` sobre el MISMO objeto, asi que una
+ * peticion concurrente podia devolver el mensaje (o el `data`) de otra
+ * peticion. Usar estas factories elimina esa fuga.
+ */
+export function createBaseResponse(
+  data: any = null,
+  message = '',
+): DTOBaseResponse {
+  return { message, success: true, data };
+}
 
-export const badResponse: DTOBaseResponse = {
-  message: '',
-  success: false,
-};
+export function createBadResponse(
+  message = '',
+  data: any = null,
+): DTOBaseResponse {
+  return { message, success: false, data };
+}
+
+/**
+ * @deprecated Fuente de fuga de datos entre requests. Usar
+ * `createBaseResponse` / `createBadResponse`. Se conserva solo para los modulos
+ * que aun no fueron migrados.
+ */
+export const baseResponse: DTOBaseResponse = createBaseResponse();
+
+/**
+ * @deprecated Fuente de fuga de datos entre requests. Usar
+ * `createBadResponse`.
+ */
+export const badResponse: DTOBaseResponse = createBadResponse();
 
 export class DTODateRangeFilter {
   @IsOptional()

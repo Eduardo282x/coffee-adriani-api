@@ -6,25 +6,57 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 import compression from '@fastify/compress';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import { resolveCorsOrigins } from './config/env.validation';
+import { CorsIoAdapter } from './websokects/cors-io.adapter';
 
 async function bootstrap() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter(),
+    new FastifyAdapter({
+      // Dokploy/Traefik actua como proxy inverso: sin esto `request.ip` devuelve
+      // la IP del proxy y el rate limiting por IP es inútil.
+      trustProxy: trustProxyHops,
+      // Necesario para que los WebSockets sobrevivan a upgrades a traves del proxy.
+      forceCloseConnections: false,
+    }),
   );
-  app.setGlobalPrefix('api');
 
-  const allowedOrigins = [
-    'https://cafe-adriani.duckdns.org',
-    'https://cafe-adriani-frontend-xnvayt-d5ec0a-185-237-253-171.sslip.io',
-    'http://localhost:5173',
-  ];
+  app.setGlobalPrefix('api', {
+    // El gateway de WebSockets cuelga de /ws, fuera del prefijo HTTP.
+    exclude: ['ws'],
+  });
+  app.enableShutdownHooks();
 
-  // Fastify: manejar correctamente los preflight (OPTIONS) de PUT/DELETE
+  const allowedOrigins = resolveCorsOrigins(
+    process.env.CORS_ORIGINS,
+    isProduction,
+  );
+
+  if (isProduction && allowedOrigins.length === 0) {
+    throw new Error(
+      'CORS_ORIGINS quedo vacio en produccion: se filtraron todos los origenes por defecto.',
+    );
+  }
+
+  // El CORS del engine de Socket.IO se resuelve aqui, con el `.env` ya
+  // cargado por ConfigModule. Sin esto el gateway usaria la lista evaluada al
+  // importar el decorador, que todavia no conocia `CORS_ORIGINS`.
+  app.useWebSocketAdapter(new CorsIoAdapter(app, allowedOrigins));
+
+  await app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: isProduction ? undefined : false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  });
+
   await app.register(cors, {
     origin: allowedOrigins,
     credentials: true,
@@ -38,6 +70,7 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      transformOptions: { enableImplicitConversion: false },
       exceptionFactory: (errors) => {
         const message = errors
           .map((error) => `${Object.values(error.constraints).join(', ')}`)
@@ -49,16 +82,15 @@ async function bootstrap() {
   );
 
   await app.register(compression, {
-    encodings: ['gzip', 'deflate'], // Brotli es genial pero gzip es estándar
+    encodings: ['gzip', 'deflate'],
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (!isProduction) {
     const config = new DocumentBuilder()
       .setTitle('Cafe-adriani')
       .setDescription('Cafe Adriani description')
       .setVersion('1.0')
       .addTag('coffee')
-      // Agregar configuración de seguridad Bearer
       .addBearerAuth(
         {
           type: 'http',
@@ -68,7 +100,7 @@ async function bootstrap() {
           description: 'Enter JWT token',
           in: 'header',
         },
-        'JWT-auth', // Este nombre es importante, lo usarás en los decoradores
+        'JWT-auth',
       )
       .build();
     const documentFactory = () => SwaggerModule.createDocument(app, config);
@@ -77,11 +109,13 @@ async function bootstrap() {
     });
   }
 
-  const port = process.env.PORT || 3000;
+  const port = process.env.PORT || 3002;
 
-  // Es CRUCIAL añadir '0.0.0.0' para que sea accesible externamente
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 Application is running on: http://localhost:${port}`);
+  // eslint-disable-next-line no-console
+  console.log(
+    `Application running on port ${port} | origins=${allowedOrigins.join(',')} | trustProxy=${trustProxyHops}`,
+  );
 }
 bootstrap();

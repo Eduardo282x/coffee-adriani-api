@@ -22,6 +22,7 @@
   "dependencies": {
     "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
     "@fastify/static": "^10.1.2",
     "@nestjs/common": "^11.1.29",
     "@nestjs/config": "^4.0.4",
@@ -43,6 +44,7 @@
     "date-fns": "^4.4.0",
     "exceljs": "^4.4.0",
     "fastify": "^5.11.3",
+    "joi": "^18.2.9",
     "jsonwebtoken": "^9.0.3",
     "pdfkit": "^0.17.2",
     "pdfkit-table": "^0.1.99",

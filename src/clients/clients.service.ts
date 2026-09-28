@@ -580,6 +580,9 @@ export class ClientsService {
       const clients = await this.prismaService.client.findMany({
         include: {
           invoices: {
+            // Una factura soft-deleted no debe contar como "ultima factura":
+            // de lo contrario el cliente nunca vuelve a recibir la alerta.
+            where: { deleted: false },
             orderBy: { dueDate: 'desc' },
             take: 1, // traer solo la última factura por cliente
           },
@@ -587,7 +590,6 @@ export class ClientsService {
       });
 
       const now = new Date();
-      let created = 0;
 
       for (const client of clients) {
         const lastInvoice = client.invoices && client.invoices[0];
@@ -620,8 +622,6 @@ export class ClientsService {
             seen: false,
           },
         });
-
-        created++;
       }
     } catch (error) {
       await this.prismaService.errorMessages.create({
