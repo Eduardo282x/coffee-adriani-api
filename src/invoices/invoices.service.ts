@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   badResponse,
   baseResponse,
+  createBadResponse,
   DTOBaseResponse,
   DTODateRangeFilter,
 } from 'src/dto/base.dto';
@@ -20,7 +21,11 @@ import { ClientsService } from 'src/clients/clients.service';
 // import * as XLSX from 'xlsx';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
-import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
+import {
+  calculateInvoiceRemainingUsd,
+  isInvoiceSettled,
+} from 'src/common/remaining-calculator';
+import { endOfDayUtc, startOfDayUtc } from 'src/common/date-utils';
 import { N8nService } from 'src/n8n/n8n.service';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
 
@@ -48,18 +53,18 @@ export class InvoicesService {
     private readonly n8nService: N8nService,
   ) {}
 
-  private getStartOfDayUtc(date: string) {
-    if (date.length > 10) {
-      return new Date(date);
-    }
-    return new Date(`${date}T00:00:00.000Z`);
+  /**
+   * Delegado en `src/common/date-utils.ts`. Antes el helper local anexaba
+   * `T00:00:00.000Z` a un `YYYY-MM-DD`, es decir medianoche UTC, que en
+   * Caracas es 20:00 del dia anterior: los rangos empezaban 4 horas antes de
+   * lo esperado.
+   */
+  private getStartOfDayUtc(date: string | Date) {
+    return startOfDayUtc(date);
   }
 
-  private getEndOfDayUtc(date: string) {
-    if (date.length > 10) {
-      return new Date(date);
-    }
-    return new Date(`${date}T23:59:59.999Z`);
+  private getEndOfDayUtc(date: string | Date) {
+    return endOfDayUtc(date);
   }
 
   async notifyInvoiceCreated(
@@ -121,6 +126,16 @@ export class InvoicesService {
     }
   }
 
+  private async logError(message: string, from: string): Promise<void> {
+    try {
+      await this.prismaService.errorMessages.create({
+        data: { message, from },
+      });
+    } catch {
+      // Silenciado intencional: no enmascarar el error original.
+    }
+  }
+
   async getInvoicesPaginated(filters: FilterInvoice) {
     try {
       const {
@@ -137,30 +152,39 @@ export class InvoicesService {
       } = filters;
 
       const offset = (page - 1) * limit;
-      const where: any = {};
+      const where: any = {
+        // `Invoice` tiene soft-delete. `payments.service.ts` lo filtra en sus
+        // consultas pero aqui no: toda factura eliminada seguia apareciendo en
+        // el listado y en los totales de la pagina.
+        deleted: false,
+      };
+
+      const orFilters: any[] = [];
 
       if (filter?.status || status) {
         const setStatusFilter = filter ? filter.status : status;
         if (status == 'Abonadas') {
-          where.OR = [
+          orFilters.push({
+            status: {
+              notIn: ['Cancelada', 'Pagado'],
+            },
+          });
+          where.AND = [
             {
-              status: {
-                notIn: ['Cancelada', 'Pagado'],
+              InvoicePayment: {
+                some: {},
               },
             },
           ];
-          where.AND = {
-            InvoicePayment: {
-              some: {},
-            },
-          };
         } else {
           where.status = setStatusFilter as InvoiceStatus;
         }
       }
 
       if (search) {
-        where.OR = [
+        // Antes `search` sobrescribia `where.OR` y eliminaba en silencio el
+        // filtro de estado. Ahora ambos conviven.
+        orFilters.push(
           {
             client: {
               name: {
@@ -175,7 +199,11 @@ export class InvoicesService {
               mode: 'insensitive',
             },
           },
-        ];
+        );
+      }
+
+      if (orFilters.length > 0) {
+        where.OR = orFilters;
       }
       if (zone) {
         where.client = {
@@ -259,6 +287,13 @@ export class InvoicesService {
           take: limit,
         }),
         this.prismaService.invoice.count({ where }),
+        /**
+         * Resumen de toda la coleccion filtrada. Antes este select pedia
+         * `product.presentation` en cada item, lo que hacia un JOIN a Product
+         * por cada una de las ~15k filas de `InvoiceProduct` en cada peticion
+         * de pagina. Ahora solo trae las columnas necesarias y la
+         * presentacion se resuelve con un Map de los 23 productos.
+         */
         this.prismaService.invoice.findMany({
           select: {
             totalAmount: true,
@@ -267,13 +302,37 @@ export class InvoicesService {
               select: {
                 quantity: true,
                 type: true,
-                product: { select: { presentation: true } },
+                productId: true,
               },
             },
           },
           where,
         }),
       ]);
+
+      const allProducts = await this.prismaService.product.findMany({
+        select: { id: true, presentation: true },
+      });
+      const presentationByProduct = new Map(
+        allProducts.map((product) => [product.id, product.presentation]),
+      );
+      const itemsWeight = (
+        items: Array<{
+          quantity: unknown;
+          type: string;
+          productId: number;
+        }>,
+      ) =>
+        items
+          .filter((item) => item.type === 'SALE')
+          .reduce(
+            (sum, item) =>
+              sum +
+              (presentationByProduct.get(item.productId) === '1kilo'
+                ? Number(item.quantity) * 0.2
+                : Number(item.quantity)),
+            0,
+          );
 
       // Formatear datos
       const formattedInvoices = invoices.map((invoice) => {
@@ -298,11 +357,11 @@ export class InvoicesService {
       });
 
       const summaryTotalItems = allMatchingInvoices.reduce(
-        (sum, inv) => sum + this.calculateInvoiceItems(inv.invoiceItems),
+        (sum, inv) => sum + itemsWeight(inv.invoiceItems),
         0,
       );
       const summaryPendingItems = allMatchingInvoices.reduce((sum, inv) => {
-        const totalItems = this.calculateInvoiceItems(inv.invoiceItems);
+        const totalItems = itemsWeight(inv.invoiceItems);
         const remaining = Number(
           calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment),
         );
@@ -368,28 +427,32 @@ export class InvoicesService {
       const { type, zone, startDate, endDate, search, blockId, status } =
         filters;
 
-      const where: any = {};
+      const where: any = { deleted: false };
+      const orFilters: any[] = [];
+
       if (status) {
         if (status == 'Abonadas') {
-          where.OR = [
+          orFilters.push({
+            status: {
+              notIn: ['Cancelada', 'Pagado'],
+            },
+          });
+          where.AND = [
             {
-              status: {
-                notIn: ['Cancelada', 'Pagado'],
+              InvoicePayment: {
+                some: {},
               },
             },
           ];
-          where.AND = {
-            InvoicePayment: {
-              some: {},
-            },
-          };
         } else {
           where.status = status as InvoiceStatus;
         }
       }
 
       if (search) {
-        where.OR = [
+        // Mismo criterio que `getInvoicesPaginated`: `search` no puede
+        // pisar el filtro de estado.
+        orFilters.push(
           {
             client: {
               name: {
@@ -404,7 +467,11 @@ export class InvoicesService {
               mode: 'insensitive',
             },
           },
-        ];
+        );
+      }
+
+      if (orFilters.length > 0) {
+        where.OR = orFilters;
       }
       if (zone) {
         where.client = {
@@ -986,7 +1053,7 @@ export class InvoicesService {
     filter?: OptionalFilterInvoices,
   ): Promise<ResponseInvoice | DTOBaseResponse> {
     try {
-      const where: any = {};
+      const where: any = { deleted: false };
       if (filter && filter.status) {
         where.status = filter.status as InvoiceStatus;
       }
@@ -1105,9 +1172,10 @@ export class InvoicesService {
             dispatchDate: 'desc',
           },
           where: {
+            deleted: false,
             dispatchDate: {
-              gte: invoice.startDate,
-              lte: invoice.endDate,
+              gte: this.getStartOfDayUtc(invoice.startDate),
+              lte: this.getEndOfDayUtc(invoice.endDate),
             },
           },
         })
@@ -1235,6 +1303,7 @@ export class InvoicesService {
             // }
           },
           where: {
+            deleted: false,
             status: {
               notIn: ['Cancelada', 'Pagado'],
             },
@@ -1282,6 +1351,7 @@ export class InvoicesService {
       const clients = await this.prismaService.client.findMany({
         include: {
           invoices: {
+            where: { deleted: false },
             orderBy: { dueDate: 'desc' },
             take: 1,
           },
@@ -1338,8 +1408,7 @@ export class InvoicesService {
       });
 
       if (!findInvoice) {
-        badResponse.message = 'No se encontró la factura';
-        return badResponse;
+        return createBadResponse('No se encontró la factura');
       }
 
       const findPaymentInvoice =
@@ -1347,42 +1416,52 @@ export class InvoicesService {
           where: { invoiceId: invoiceId },
         });
 
-      const calculateRemaining = findPaymentInvoice.reduce(
-        (acc, item) => acc + Number(item.amount),
-        0,
+      /**
+       * Se reutiliza el calculador central en vez de restar a mano: asi la
+       * tolerancia y el redondeo son los mismos que aplica `payInvoice`.
+       * Antes esta resta cruda no pasaba por la tolerancia configurable ni
+       * por el redondeo a 2 decimales.
+       */
+      const newRemaining = calculateInvoiceRemainingUsd(
+        findInvoice.totalAmount,
+        findPaymentInvoice,
       );
-      const newRemaining = Number(findInvoice.totalAmount) - calculateRemaining;
+
       await this.prismaService.invoice.update({
         data: {
-          status: newRemaining < 2 ? 'Pagado' : findInvoice.status,
+          status: isInvoiceSettled(newRemaining)
+            ? 'Pagado'
+            : findInvoice.status,
         },
         where: {
           id: invoiceId,
         },
       });
 
-      const findInvoicesClient = await this.prismaService.invoice.findMany({
+      // La factura queda al dia: se recalculan las vencidas del cliente.
+      const overdueCount = await this.prismaService.invoice.count({
         where: {
           clientId: findInvoice.clientId,
           status: 'Vencida',
+          deleted: false,
         },
       });
 
-      if (!findInvoicesClient) {
-        const findClientReminder =
-          await this.prismaService.clientReminder.findFirst({
-            where: { clientId: findInvoice.clientId },
-          });
-
-        if (findClientReminder) {
-          await this.prismaService.clientReminder.delete({
-            where: { id: findClientReminder.id },
-          });
-        }
+      /**
+       * `if (!findInvoicesClient)` nunca se cumplia: `findMany` devuelve un
+       * array, y un array vacio es truthy en JavaScript. El recordatorio del
+       * cliente por lo tanto NUNCA se eliminaba desde esta ruta (el mismo bug
+       * en `payments.service.ts` si estaba escrito con `.length > 0`).
+       */
+      if (overdueCount === 0) {
+        await this.prismaService.clientReminder.deleteMany({
+          where: { clientId: findInvoice.clientId },
+        });
       }
     } catch (err) {
-      badResponse.message = err instanceof Error ? err.message : String(err);
-      return badResponse;
+      const message = err instanceof Error ? err.message : String(err);
+      await this.logError(message, 'invoicesService.checkInvoicePayments');
+      return createBadResponse(message);
     }
   }
 
@@ -1507,6 +1586,7 @@ export class InvoicesService {
   async findInvoiceWithoutDetails() {
     const invoices = await this.prismaService.invoice.findMany({
       where: {
+        deleted: false,
         invoiceItems: {
           none: {},
         },
@@ -1522,6 +1602,7 @@ export class InvoicesService {
 
   async InvoiceValidateTotal() {
     const invoices = await this.prismaService.invoice.findMany({
+      where: { deleted: false },
       include: {
         client: true,
         invoiceItems: true,
@@ -2110,7 +2191,7 @@ export class InvoicesService {
   ): Promise<Buffer> {
     const { type, status, zone, startDate, endDate, blockId } = filter;
 
-    const where: any = {};
+    const where: any = { deleted: false };
 
     if (startDate && endDate) {
       where.dispatchDate = {

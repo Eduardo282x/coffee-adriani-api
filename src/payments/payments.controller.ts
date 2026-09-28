@@ -9,6 +9,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { PaymentsService } from './payments.service';
 import {
   AccountsDTO,
@@ -151,11 +152,19 @@ export class PaymentsController {
     return await this.paymentService.createAccountPayment(account);
   }
 
+  /**
+   * Asignar y desasignar dinero es la operacion mas sensible de la API:
+   * escribe saldos, cambia estados de factura y no es idempotente. Se limita
+   * con el bucket `writes` (30/min) para acotar tanto el error humano como un
+   * bucle automatizado que reintente en bucle.
+   */
+  @Throttle({ writes: { limit: 30, ttl: 60_000 } })
   @Post('/associate')
   async payInvoice(@Body() payment: PayInvoiceDTO) {
     return await this.paymentService.payInvoice(payment);
   }
 
+  @Throttle({ writes: { limit: 30, ttl: 60_000 } })
   @Put('/disassociate')
   async payDisassociate(@Body() payment: PayDisassociateDTO) {
     return await this.paymentService.payDisassociate(payment);

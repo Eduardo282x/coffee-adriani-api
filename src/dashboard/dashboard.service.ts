@@ -16,6 +16,14 @@ import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatistics } from 'src/invoices/invoice.dto';
 import { PaymentsService } from 'src/payments/payments.service';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
+import {
+  endOfDayUtc,
+  formatDateInTz,
+  getBusinessTimeZone,
+  getLowStockThreshold,
+  startOfDayUtc,
+  startOfNextDayUtc,
+} from 'src/common/date-utils';
 
 const SNAPSHOT_PRODUCT_TYPES = ['Cafe', 'Queso', 'Huevo', 'Guayaba'];
 
@@ -134,20 +142,27 @@ export class DashboardService {
     });
   }
 
+  /**
+   * Reimplementado en `src/common/date-utils.ts`.
+   *
+   * La version local hacia `new Date(date.toLocaleString())` y luego
+   * `new Date("28/09/2026, 12:00:00 AM")`. Eso depende del locale del
+   * runtime y del separador invisible U+202F que ICU >= 72 inserta antes de
+   * AM/PM, por lo que devolvia `Invalid Date` y los rangos del dashboard se
+   * convertian en `gte: Invalid Date` (comparacion siempre falsa => cero
+   * resultados). Ahora los rangos son dias de calendario en
+   * `BUSINESS_TZ` con limite exclusivo.
+   */
   private getStartOfDayUtc(date: Date | string) {
-    const parseString = date.toString();
-    if (parseString.length > 10) {
-      return new Date(parseString);
-    }
-    return new Date(`${parseString}T00:00:00.000Z`);
+    return startOfDayUtc(date);
   }
 
   private getEndOfDayUtc(date: Date | string) {
-    const parseDate = date.toLocaleString();
-    if (parseDate.length > 10) {
-      return new Date(parseDate);
-    }
-    return new Date(`${parseDate}T23:59:59.999Z`);
+    return endOfDayUtc(date);
+  }
+
+  private getStartOfNextDayUtc(date: Date | string) {
+    return startOfNextDayUtc(date);
   }
 
   async getDashboardData(filter: DashboardExcel) {
@@ -223,12 +238,22 @@ export class DashboardService {
             },
           },
           where: {
+            deleted: false,
             status: {
               in: ['Pagado', 'Pendiente', 'Vencida'],
             },
-            dispatchDate: { gte: filter.startDate, lte: filter.endDate },
+            dispatchDate: {
+              gte: this.getStartOfDayUtc(filter.startDate),
+              lt: this.getStartOfNextDayUtc(filter.endDate),
+            },
+            /**
+             * `every` exigia que TODOS los items de la factura fueran del tipo
+             * filtrado, asi que un cafe con queso no aparecia nunca en la
+             * lista de pendientes aunque tuviera saldo. La intencion es
+             * "facturas que contengan el tipo".
+             */
             invoiceItems: {
-              every: {
+              some: {
                 product: {
                   type: {
                     contains: filter.type,
@@ -274,8 +299,18 @@ export class DashboardService {
         };
       });
 
-      // 4. Filtrar productos con bajo stock (evitar iteración adicional)
-      const lowStock = productsPercent.filter((p) => p.percent < 30);
+      /**
+       * Stock bajo por cantidad ABSOLUTA (`LOW_STOCK_THRESHOLD`, 10 por
+       * defecto). Antes se filtraba por `percent < 30`, que es participacion
+       * en el inventario total: en un deposito con 3000 kg de cafe, un producto
+       * con 2 kg quedaba en 0.07% y si entraba, pero un producto con 90 kg
+       * (3%) tambien entraba aunque fuera Plenty. La alerta de reposicion
+       * tiene que depender de las unidades, no del porcentaje.
+       */
+      const lowStockThreshold = getLowStockThreshold();
+      const lowStock = productsPercent.filter(
+        (p) => p.amount < lowStockThreshold,
+      );
 
       return {
         invoices: {
@@ -338,7 +373,9 @@ export class DashboardService {
   async generateInventoryAndInvoicesExcelV2(
     filter: DashboardExcel,
   ): Promise<Buffer> {
-    const endDatePlusOne = addDays(new Date(filter.endDate), 1);
+    // `endDatePlusOne` sumaba un dia en hora local y luego se tomaba el
+    // "fin de dia" de ese dia siguiente, dejando entrar 24 horas extra de pagos
+    // en cada export. El rango ya esta definido por `endOfRange`.
     const startOfRange = this.getStartOfDayUtc(filter.startDate);
     const endOfRange = this.getEndOfDayUtc(filter.endDate);
 
@@ -370,11 +407,14 @@ export class DashboardService {
       // Facturas del tipo hasta el cierre (cubre rango + centros en una sola consulta)
       this.prismaService.invoice.findMany({
         where: {
+          deleted: false,
           dispatchDate: {
             lte: endOfRange,
           },
+          // Igual que en `getDashboardData`: basta con que la factura
+          // contenga el tipo, no con que todos sus items sean del tipo.
           invoiceItems: {
-            every: {
+            some: {
               product: {
                 type: {
                   contains: filter.type,
@@ -441,7 +481,7 @@ export class DashboardService {
           deleted: false,
           paymentDate: {
             gte: this.getStartOfDayUtc(filter.startDate),
-            lte: this.getEndOfDayUtc(endDatePlusOne),
+            lte: this.getEndOfDayUtc(filter.endDate),
           },
           type: 'INCOME',
         },
@@ -501,15 +541,24 @@ export class DashboardService {
 
       // Estadísticas de pagos (incluye unassociatedAmount)
       this.paymentsService.getPaymentsStatistics({
-        startDate: format(new Date(2000, 1, 1), 'yyyy-MM-dd'),
-        endDate: format(new Date(filter.endDate), 'yyyy-MM-dd'),
+        // `new Date(2000, 1, 1)` depende de la zona local del contenedor y
+        // `format(new Date(filter.endDate))` puede desplazar el dia; ambos
+        // se pasan como cadenas de calendario ya resueltas.
+        startDate: '2000-01-01',
+        endDate: formatDateInTz(
+          new Date(filter.endDate),
+          getBusinessTimeZone(),
+        ),
         type: filter.type,
       }),
 
       // Movimientos de inventario antes del rango (agrupados)
       this.prismaService.inventoryEntryDetail.findMany({
         where: {
-          inventoryEntry: { date: { lt: filter.startDate } },
+          // El string crudo se coercione a medianoche UTC, que en Caracas es
+          // 20:00 del dia anterior: excluia movimientos validos del primer
+          // dia del rango.
+          inventoryEntry: { date: { lt: startOfRange } },
         },
         select: {
           productId: true,
@@ -574,25 +623,34 @@ export class DashboardService {
     const totalPagosSinAsociar = paymentStatistics.totals.unassociatedAmount;
 
     // 4. Estadísticas de facturas usando el servicio para consistencia
-    const baseStartDate = new Date(2020, 1, 1);
+    // Se pasan las fechas como `YYYY-MM-DD`: el servicio las interpreta como
+    // dias de calendario de la zona de negocio. Con `toISOString()` un
+    // `2026-09-28` se convertia en `2026-09-28T00:00:00.000Z` y el servicio
+    // la reconvertia a ese mismo instante, corrimiento el rango 4 horas.
+    const startYmd = formatDateInTz(
+      filter.startDate instanceof Date
+        ? filter.startDate
+        : new Date(filter.startDate),
+      getBusinessTimeZone(),
+    );
+    const endYmd = formatDateInTz(
+      filter.endDate instanceof Date
+        ? filter.endDate
+        : new Date(filter.endDate),
+      getBusinessTimeZone(),
+    );
     const [invoiceStatisticsWeek, invoiceStatistics] = await Promise.all([
       // Estadísticas de la semana (rango del filtro)
       this.invoicesService.getInvoiceStatistics({
         type: filter.type,
-        startDate:
-          filter.startDate instanceof Date
-            ? filter.startDate.toISOString()
-            : new Date(filter.startDate).toISOString(),
-        endDate:
-          filter.endDate instanceof Date
-            ? filter.endDate.toISOString()
-            : new Date(filter.endDate).toISOString(),
+        startDate: startYmd,
+        endDate: endYmd,
       }) as Promise<InvoiceStatistics>,
       // Estadísticas acumuladas (desde 2020 hasta endDate) para bultosPorCobrar
       this.invoicesService.getInvoiceStatistics({
         type: filter.type,
-        startDate: baseStartDate.toISOString(),
-        endDate: new Date(filter.endDate).toISOString(),
+        startDate: '2020-01-01',
+        endDate: endYmd,
       }) as Promise<InvoiceStatistics>,
     ]);
 
@@ -1183,6 +1241,7 @@ export class DashboardService {
     // Obtener facturas en el rango con items y cliente
     const invoices = await this.prismaService.invoice.findMany({
       where: {
+        deleted: false,
         dispatchDate: {
           gte: this.getStartOfDayUtc(startDate),
           lte: this.getEndOfDayUtc(endDate),

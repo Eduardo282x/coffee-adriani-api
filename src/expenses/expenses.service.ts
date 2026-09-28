@@ -483,9 +483,15 @@ export class ExpensesService {
       const payments = await this.prismaService.payment.findMany({
         where: {
           deleted: false,
-          account: {
-            name: { contains: 'Gastos' },
-          },
+          // El alcance real es "pagos de gasto", no "pagos cuya cuenta se
+          // llama Gastos". Se filtra por el tipo persistido en el pago; la
+          // cuenta se usa solo como red de seguridad para los registros
+          // historicos que quedaron sin tipo explicito.
+          OR: [
+            { type: 'EXPENSE' },
+            { type: 'PERSONAL_EXPENSES' },
+            { account: { name: { contains: 'Gastos' } } },
+          ],
           InvoicePayment: {
             some: {
               createdAt: {
