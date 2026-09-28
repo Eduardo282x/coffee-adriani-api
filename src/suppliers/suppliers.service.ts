@@ -4,24 +4,8 @@ import { badResponse, baseResponse } from 'src/dto/base.dto';
 import {
   CreateSupplierDTO,
   SupplierFilterDTO,
-  SupplierPaymentFilterDTO,
   UpdateSupplierDTO,
 } from './suppliers.dto';
-
-interface SupplierFilter {
-  page?: number;
-  limit?: number;
-  search?: string;
-  active?: boolean;
-}
-
-interface SupplierPaymentFilter {
-  supplierId: number;
-  startDate?: Date | string;
-  endDate?: Date | string;
-  page?: number;
-  limit?: number;
-}
 
 @Injectable()
 export class SuppliersService {

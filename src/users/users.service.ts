@@ -1,17 +1,56 @@
 import { Injectable } from '@nestjs/common';
-import { badResponse, baseResponse, DTOBaseResponse } from 'src/dto/base.dto';
+import {
+  createBadResponse,
+  createBaseResponse,
+  DTOBaseResponse,
+} from 'src/dto/base.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DTOUser } from './user.dto';
 import * as bcrypt from 'bcrypt';
-import { Role, Users } from 'src/generated/prisma/client';
+import { Role } from 'src/generated/prisma/client';
+
+const BCRYPT_ROUNDS = 12;
+
+/** Forma publica de un usuario. El hash de contrasena nunca sale de la API. */
+export interface PublicUser {
+  id: number;
+  username: string;
+  name: string;
+  lastName: string;
+  rolId: number;
+  roles: Role;
+}
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async getUsers(): Promise<Users[]> {
+  private async logError(message: string, from: string): Promise<void> {
+    try {
+      await this.prismaService.errorMessages.create({
+        data: { message, from },
+      });
+    } catch {
+      // El logging de errores no debe propagar fallos.
+    }
+  }
+
+  /**
+   * Antes devolvia el modelo `Users` completo, incluida la columna `password`
+   * (hash bcrypt) a cualquier endpoint que llamara a este metodo.
+   */
+  private static readonly safeUserSelect = {
+    id: true,
+    username: true,
+    name: true,
+    lastName: true,
+    rolId: true,
+    roles: true,
+  } as const;
+
+  async getUsers(): Promise<PublicUser[]> {
     return await this.prismaService.users.findMany({
-      include: { roles: true },
+      select: UsersService.safeUserSelect,
     });
   }
 
@@ -20,63 +59,71 @@ export class UsersService {
   }
 
   async createUsers(user: DTOUser): Promise<DTOBaseResponse> {
+    if (!user.password) {
+      return createBadResponse(
+        'Debe enviar una contrasena para crear el usuario (minimo 8 caracteres).',
+      );
+    }
+
     try {
-      const hashedPassword = await bcrypt.hash('1234', 12);
       await this.prismaService.users.create({
         data: {
           username: user.username,
           name: user.name,
           lastName: user.lastName,
-          password: hashedPassword,
+          password: await bcrypt.hash(user.password, BCRYPT_ROUNDS),
           rolId: user.rolId,
         },
       });
 
-      baseResponse.message = 'Usuario creado exitosamente.';
-      return baseResponse;
-    } catch (err: Error | any) {
-      await this.prismaService.errorMessages.create({
-        data: { message: err.message, from: 'UserService' },
-      });
-      badResponse.message = err.message;
-      return badResponse;
+      return createBaseResponse(
+        { id: user.username },
+        'Usuario creado exitosamente.',
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.logError(message, 'UserService.createUsers');
+      return createBadResponse(message);
     }
   }
 
   async updateUsers(id: number, user: DTOUser): Promise<DTOBaseResponse> {
     try {
-      await this.prismaService.users.update({
-        where: { id },
-        data: {
-          username: user.username,
-          name: user.name,
-          lastName: user.lastName,
-          rolId: user.rolId,
-        },
-      });
+      const data: {
+        username: string;
+        name: string;
+        lastName: string;
+        rolId: number;
+        password?: string;
+      } = {
+        username: user.username,
+        name: user.name,
+        lastName: user.lastName,
+        rolId: user.rolId,
+      };
 
-      baseResponse.message = 'Usuario actualizado exitosamente.';
-      return baseResponse;
-    } catch (err: Error | any) {
-      await this.prismaService.errorMessages.create({
-        data: { message: err.message, from: 'UserService' },
-      });
-      badResponse.message = err.message;
-      return badResponse;
+      if (user.password) {
+        data.password = await bcrypt.hash(user.password, BCRYPT_ROUNDS);
+      }
+
+      await this.prismaService.users.update({ where: { id }, data });
+
+      return createBaseResponse(null, 'Usuario actualizado exitosamente.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.logError(message, 'UserService.updateUsers');
+      return createBadResponse(message);
     }
   }
 
   async deleteUsers(id: number): Promise<DTOBaseResponse> {
     try {
       await this.prismaService.users.delete({ where: { id } });
-      baseResponse.message = ' Usuario eliminado';
-      return baseResponse;
-    } catch (err: Error | any) {
-      await this.prismaService.errorMessages.create({
-        data: { message: err.message, from: 'UserService' },
-      });
-      badResponse.message = err.message;
-      return badResponse;
+      return createBaseResponse(null, 'Usuario eliminado');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.logError(message, 'UserService.deleteUsers');
+      return createBadResponse(message);
     }
   }
 }

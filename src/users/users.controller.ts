@@ -11,11 +11,16 @@ import { UsersService } from './users.service';
 import { DTOUser } from './user.dto';
 import { Roles } from 'src/guards/roles/roles.decorator';
 
+/**
+ * Toda la gestion de usuarios es exclusiva del Administrador. Antes solo
+ * `GET /users` lo exigia: crear, actualizar y borrar usuarios, y listar roles,
+ * quedaban abiertos a cualquier usuario autenticado.
+ */
+@Roles('Administrador')
 @Controller('users')
 export class UsersController {
   constructor(private readonly userService: UsersService) {}
 
-  @Roles('Administrador')
   @Get()
   async getUsers() {
     return await this.userService.getUsers();

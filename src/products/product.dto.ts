@@ -1,12 +1,5 @@
 import { Transform } from 'class-transformer';
-import {
-  IsDate,
-  IsDecimal,
-  IsNumber,
-  IsPositive,
-  IsString,
-  Min,
-} from 'class-validator';
+import { IsDate, IsNumber, IsPositive, IsString, Min } from 'class-validator';
 
 export class DTOProducts {
   @IsString()

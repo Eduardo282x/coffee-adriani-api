@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsNumber, IsString } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class DTOUser {
   @IsString()
@@ -12,4 +18,15 @@ export class DTOUser {
   lastName: string;
   @IsNumber()
   rolId: number;
+  /**
+   * Obligatoria al crear. Opcional al actualizar (si viene vacia, la
+   * contraseña no se toca). Antes el servicio hasheaba una constante "1234",
+   * lo que dejaba a todas las cuentas nuevas con una credencial conocida.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(8, {
+    message: 'La contraseña debe tener al menos 8 caracteres',
+  })
+  password?: string;
 }
