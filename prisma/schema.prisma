@@ -16,6 +16,37 @@ model Users {
   password String
   rolId    Int
   roles    Role   @relation(fields: [rolId], references: [id])
+
+  refreshTokens RefreshToken[]
+
+  // Verificado contra produccion: 6 usuarios, 0 usernames duplicados.
+  // El login es por `username`, asi que la unicidad debe estar garantizada por
+  // la base y no solo por la validacion del DTO.
+  @@unique([username])
+  @@index([rolId])
+}
+
+/// Sesiones de refresh.
+///
+/// El token NUNCA se guarda en claro: solo su SHA-256 (`tokenHash`, unico).
+/// `replacedByHash` permite detectar reuso de un token ya rotado: si llega un
+/// token revocado que tiene sucesor, se asume robo y se revoca toda la
+/// cadena de la cuenta.
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      Users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  replacedByHash String?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  // Limpieza periodica: el cron borra tokens expirados o revocados hace dias.
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 model Role {
@@ -41,6 +72,9 @@ model Client {
   ClientReminder        ClientReminder[]
   ClientReminderHistory ClientReminderHistory[]
   Notification          Notification[]
+
+  // Filtro por block en listados de facturas y reportes por zona.
+  @@index([blockId])
 }
 
 model Block {
@@ -68,6 +102,16 @@ model Invoice {
   deleted        Boolean          @default(false)
   invoiceItems   InvoiceProduct[]
   InvoicePayment InvoicePayment[]
+
+  // Antes solo existian el PK y el indice unico de controlNumber: 8481 filas
+  // se escaneaban completas en cada listado, en cada reporte y en cada
+  // `count`. `deleted` encabeza los indices porque todas las consultas de
+  // negocio filtran soft-delete y hoy la columna no tiene indice alguno.
+  @@index([deleted, dispatchDate])
+  @@index([clientId, status])
+  @@index([status, dispatchDate])
+  @@index([sellerId])
+  @@index([dueDate])
 }
 
 enum InvoiceStatus {
@@ -119,6 +163,12 @@ model Inventory {
   productId Int
   quantity  Decimal  @db.Decimal(10, 3)
   createdAt DateTime @default(now())
+
+  // `findFirst({ where: { productId } })` devolvia una fila arbitraria si
+  // habia mas de una, y los locks por `id` no protegian el producto. Ahora la
+  // fila es unica por producto. Verificado en produccion: 23 filas, 23
+  // productos, 0 duplicados, asi que el indice se crea sin limpieza previa.
+  @@unique([productId])
 }
 
 enum InventoryType {
@@ -137,6 +187,12 @@ model HistoryInventory {
   description   String        @default("")
   movementType  InventoryType
   movementDate  DateTime      @default(now())
+
+  // Tabla legacy: 14 387 filas que el codigo actual no lee ni escribe. Se
+  // indexa para no penalizar consultas administrativas manuales, pero debe
+  // evaluarse su archivo: sigue creciendo sin destino.
+  @@index([productId, movementDate])
+  @@index([movementDate])
 }
 
 model HistoryDolar {
@@ -144,6 +200,9 @@ model HistoryDolar {
   dolar   Decimal   @db.Decimal(10, 2)
   date    DateTime  @default(now())
   Payment Payment[]
+
+  // La tasa vigente se busca por la fecha mas reciente.
+  @@index([date])
 }
 
 model InvoiceProduct {
@@ -159,6 +218,10 @@ model InvoiceProduct {
   subtotal     Decimal            @db.Decimal(10, 2)
 
   @@unique([invoiceId, productId, type]) // No se puede repetir el producto en la misma factura
+  // El unique solo cubre el prefijo (invoiceId, productId, ...). Todos los
+  // reportes de dashboard filtran por `product.type`, que require el join
+  // desde este lado: sin indice sobre 15 487 filas era un seq scan por request.
+  @@index([productId])
 }
 
 enum InvoiceTypeProduct {
@@ -175,6 +238,10 @@ model AccountsPayments {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   Payment   Payment[]
+
+  // Varias cuentas apuntan al mismo metodo (p. ej. varias cuentas de
+  // transferencia). El filtro de gastos lo recorre por metodo.
+  @@index([methodId])
 }
 
 model Payment {
@@ -194,6 +261,12 @@ model Payment {
   type                   AccountType             @default(INCOME)
   InvoicePayment         InvoicePayment[]
   inventoryEntryPayments InventoryEntryPayment[]
+
+  // 9858 filas y ni un indice fuera del PK: los reportes de pagos por rango de
+  // fecha con filtro de soft-delete hacian seq scan + sort.
+  @@index([deleted, paymentDate])
+  @@index([accountId])
+  @@index([dolarId])
 }
 
 model InvoicePayment {
@@ -208,6 +281,10 @@ model InvoicePayment {
   createdAt DateTime @default(now())
 
   @@unique([invoiceId, paymentId]) // No se puede repetir la relación
+  // El balance disponible de un pago se calcula sumando sus asignaciones, y
+  // eso empieza por `WHERE "paymentId" = ?`. El unique (invoiceId, paymentId)
+  // no sirve para esa consulta porque `paymentId` no es su columna inicial.
+  @@index([paymentId])
 }
 
 model PaymentMethod {
@@ -249,6 +326,10 @@ model Notification {
   createdAt DateTime @default(now())
   Client    Client   @relation(fields: [clientId], references: [id])
   clientId  Int
+
+  // Listado de no vistas y purga de inactividad por cliente.
+  @@index([seen, createdAt])
+  @@index([clientId])
 }
 
 model Seller {
@@ -290,6 +371,10 @@ model ErrorMessages {
   message   String
   from      String
   createdAt DateTime @default(now())
+
+  // Crecen de forma indefinida y se consultan por fecha en el panel.
+  @@index([createdAt])
+  @@index([from])
 }
 
 model Message {
@@ -311,6 +396,12 @@ model ClientReminder {
   client    Client    @relation(fields: [clientId], references: [id])
   message   Message   @relation(fields: [messageId], references: [id])
   createdAt DateTime  @default(now())
+
+  // NO se hace `@@unique([clientId])` a proposito: produccion tiene 2 clientes
+  // con mas de un recordatorio y la app borra por `clientId`. El indice
+  // acelera esas consultas; la deduplicacion queda como reporte de limpieza.
+  @@index([clientId])
+  @@index([send, sentAt])
 }
 
 model ClientReminderHistory {
@@ -323,6 +414,8 @@ model ClientReminderHistory {
   client      Client    @relation(fields: [clientId], references: [id])
   message     Message   @relation(fields: [messageId], references: [id])
   createdAt   DateTime  @default(now())
+
+  @@index([clientId])
 }
 
 model Settings {
@@ -346,6 +439,10 @@ model InventoryEntry {
   payments      InventoryEntryPayment[]
   createdAt     DateTime                @default(now())
   updatedAt     DateTime                @updatedAt
+
+  @@index([date])
+  @@index([supplierId])
+  @@index([status, date])
 }
 
 model InventoryEntryDetail {
@@ -361,6 +458,9 @@ model InventoryEntryDetail {
   type             InvoiceTypeProduct @default(SALE)
 
   @@unique([inventoryEntryId, productId, type])
+  // El reporte de inventario inicial agrupa movimientos por producto, luego
+  // filtra por `inventoryEntry.date`.
+  @@index([productId])
 }
 
 model InventoryEntryPayment {
@@ -384,6 +484,13 @@ model InventoryCut {
   status    String               @default("OPEN")
   createdAt DateTime             @default(now())
   details   InventoryCutDetail[]
+
+  // SIN `@@unique([type, period, startDate, endDate])` a proposito: produccion
+  // ya tiene 20 grupos de cortes duplicados y el indice unico haria fallar la
+  // migracion. Hay que corregir la logica que los genera y limpiar, y solo
+  // entonces agregar la restriccion.
+  @@index([type, period, startDate])
+  @@index([status])
 }
 
 model InventoryCutDetail {
@@ -393,6 +500,8 @@ model InventoryCutDetail {
   productId      Int
   product        Product      @relation(fields: [productId], references: [id])
   amount         Decimal      @db.Decimal(10, 3)
+
+  @@index([productId])
 }
 
 model InventoryLoss {
@@ -405,6 +514,8 @@ model InventoryLoss {
   reason    String   @default("")
   date      DateTime @default(now())
   createdAt DateTime @default(now())
+
+  @@index([productId, date])
 }
 
 model WeeklyReportSnapshot {
