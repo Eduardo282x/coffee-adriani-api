@@ -56,7 +56,11 @@ CREATE INDEX "HistoryInventory_movementDate_idx" ON "HistoryInventory"("movement
 CREATE UNIQUE INDEX "Inventory_productId_key" ON "Inventory"("productId");
 
 -- CreateIndex
-CREATE INDEX "InventoryCut_type_period_startDate_idx" ON "InventoryCut"("type", "period", "startDate");
+-- Reemplaza el indice no unico `[type, period, startDate]`: el unico incluye
+-- `status` porque cada ventana tiene legitimamente un corte OPEN y uno CLOSE, y
+-- `createCut()` deduplica por `type + period + startDate + status`. Sus columnas
+-- iniciales cubren las mismas consultas. Verificado en produccion: 0 duplicados.
+CREATE UNIQUE INDEX "InventoryCut_type_period_startDate_status_key" ON "InventoryCut"("type", "period", "startDate", "status");
 
 -- CreateIndex
 CREATE INDEX "InventoryCut_status_idx" ON "InventoryCut"("status");

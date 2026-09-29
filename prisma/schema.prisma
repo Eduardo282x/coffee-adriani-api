@@ -485,11 +485,13 @@ model InventoryCut {
   createdAt DateTime             @default(now())
   details   InventoryCutDetail[]
 
-  // SIN `@@unique([type, period, startDate, endDate])` a proposito: produccion
-  // ya tiene 20 grupos de cortes duplicados y el indice unico haria fallar la
-  // migracion. Hay que corregir la logica que los genera y limpiar, y solo
-  // entonces agregar la restriccion.
-  @@index([type, period, startDate])
+  // La unicidad incluye `status` y NO `endDate` a proposito: cada ventana
+  // genera legitimamente dos cortes, uno OPEN y uno CLOSE, y `createCut()`
+  // deduplica por `type + period + startDate + status`. Un
+  // `@@unique([type, period, startDate, endDate])` rechazaria el CLOSE de una
+  // ventana que ya tiene OPEN y dejaria el cron sin poder cerrar el periodo.
+  // `endDate` se deriva de `startDate`, asi que no aporta al desempate.
+  @@unique([type, period, startDate, status])
   @@index([status])
 }
 
