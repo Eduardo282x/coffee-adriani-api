@@ -120,11 +120,14 @@ export class ExpensesService {
         ...invoiceMetricsData.summary,
         losses,
         earns: {
-          estimated: Number(
-            (invoiceMetricsData.summary.earns.estimated - losses.total).toFixed(
-              2,
-            ),
-          ),
+          // `estimated` es la ganancia bruta de venta (precio de venta menos
+          // costo de compra) y NO descuenta la merma: la merma es perdida de
+          // mercancia, no un costo de la venta que la genero, y ya se expone
+          // aparte en `summary.losses`. Aplicarla aqui convertia una ganancia
+          // de venta positiva en negativa (Queso 20/09-26/09: 196.71 - 244.90
+          // = -48.19, cuando la venta habia dejado 196.71).
+          // `real` si la descuenta, porque es la ganancia cobrada neta.
+          estimated: Number(invoiceMetricsData.summary.earns.estimated),
           real: Number(
             (invoiceMetricsData.summary.earns.real - losses.total).toFixed(2),
           ),
