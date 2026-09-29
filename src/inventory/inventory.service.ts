@@ -12,9 +12,31 @@ import {
   CreateInventoryLossDTO,
   InventoryLossFilterDTO,
 } from './inventory.dto';
-import { badResponse, baseResponse } from 'src/dto/base.dto';
+import {
+  badResponse,
+  baseResponse,
+  createBadResponse,
+  createBaseResponse,
+} from 'src/dto/base.dto';
 import { ProductsService } from 'src/products/products.service';
+import {
+  getLossAllowedProductTypes,
+  isLossAllowedProductType,
+} from 'src/common/business-rules';
 import { InvoiceTypeProduct, Prisma } from 'src/generated/prisma/client';
+import {
+  computeEntryTotalFromSubtotals,
+  computeNetStockDeltas,
+  computeRebasedDetailQuantity,
+  round3,
+} from 'src/common/inventory-rebase';
+
+/**
+ * Fallos de negocio previstos (stock insuficiente, numero de control repetido,
+ * producto inexistente). Provocan rollback y se devuelven como `badResponse`
+ * en vez de terminar en la tabla de errores.
+ */
+class InventoryValidationError extends Error {}
 
 @Injectable()
 export class InventoryService {
@@ -41,6 +63,118 @@ export class InventoryService {
 
   private normalizeControlNumber(controlNumber?: string | null): string {
     return (controlNumber ?? '').trimEnd();
+  }
+
+  /** El logging de errores jamas debe propagar un fallo propio. */
+  private async logError(message: string, from: string): Promise<void> {
+    try {
+      await this.prismaService.errorMessages.create({
+        data: { message, from },
+      });
+    } catch {
+      // Silenciado intencional.
+    }
+  }
+
+  /**
+   * Bloquea las filas de inventario de varios productos en orden determinista.
+   * El orden estable evita deadlocks entre transacciones concurrentes que tocan
+   * los mismos productos en distinto orden.
+   */
+  private async lockInventoryByProduct(
+    tx: Prisma.TransactionClient,
+    productIds: number[],
+  ): Promise<void> {
+    const uniqueIds = [...new Set(productIds)].sort((a, b) => a - b);
+
+    if (uniqueIds.length === 0) {
+      return;
+    }
+
+    await tx.$queryRaw(
+      Prisma.sql`SELECT id FROM "Inventory" WHERE "productId" IN (${Prisma.join(
+        uniqueIds,
+      )}) ORDER BY "productId" FOR UPDATE`,
+    );
+  }
+
+  /**
+   * La cabecera debe seguir cuadrando con la suma de sus detalles. Al tocar la
+   * cantidad de un detalle hay que recalcular primero su subtotal y despues el
+   * totalAmount de la cabecera, si no el reporte historico descuadra.
+   */
+  private async recalculateEntryTotal(
+    tx: Prisma.TransactionClient,
+    entryId: number,
+  ): Promise<number> {
+    const details = await tx.inventoryEntryDetail.findMany({
+      where: { inventoryEntryId: entryId },
+      select: { subtotal: true },
+    });
+
+    const totalAmount = computeEntryTotalFromSubtotals(
+      details.map((detail) => detail.subtotal),
+    );
+
+    await tx.inventoryEntry.update({
+      where: { id: entryId },
+      data: { totalAmount },
+    });
+
+    return totalAmount;
+  }
+
+  /**
+   * Aplica el stock de una entrada sobre el inventario. Los deltas ya vienen
+   * netos por producto y las filas deben estar bloqueadas con
+   * `lockInventoryByProduct` antes de llamar.
+   *
+   * Se lanzan errores en vez de devolverse porque asi la transaccion revierte
+   * entera; devolver un `badResponse` a mitad de camino dejaba la cabecera de la
+   * entrada y los detalles anteriores ya escritos.
+   */
+  private async applyStockDeltas(
+    tx: Prisma.TransactionClient,
+    deltas: Map<number, number>,
+  ): Promise<void> {
+    for (const [productId, delta] of [...deltas.entries()].sort(
+      ([a], [b]) => a - b,
+    )) {
+      if (delta === 0) {
+        continue;
+      }
+
+      const record = await tx.inventory.findFirst({ where: { productId } });
+
+      if (!record) {
+        if (delta < 0) {
+          throw new InventoryValidationError(
+            `El producto con ID ${productId} no se encontro en el inventario.`,
+          );
+        }
+
+        await tx.inventory.create({
+          data: { productId, quantity: Number(delta.toFixed(3)) },
+        });
+        continue;
+      }
+
+      const available = Number(record.quantity);
+      const next = Number((available + delta).toFixed(3));
+
+      if (next < 0) {
+        throw new InventoryValidationError(
+          `Stock insuficiente para el producto ${productId}: disponible ${available}, requerido ${Math.abs(
+            delta,
+          )}.`,
+        );
+      }
+
+      await tx.inventory.update({
+        where: { id: record.id },
+        data: { quantity: next },
+      });
+    }
   }
 
   async getInventory() {
@@ -195,156 +329,208 @@ export class InventoryService {
 
   async saveInventory(inventory: DTOInventory) {
     try {
-      const normalizedControlNumber = this.normalizeControlNumber(
-        inventory.controlNumber,
-      );
+      return await this.prismaService.$transaction(async (tx) => {
+        const normalizedControlNumber = this.normalizeControlNumber(
+          inventory.controlNumber,
+        );
 
-      const existingEntry = await this.prismaService.inventoryEntry.findUnique({
-        where: { controlNumber: normalizedControlNumber },
-      });
+        const existingEntry = await tx.inventoryEntry.findUnique({
+          where: { controlNumber: normalizedControlNumber },
+        });
 
-      if (existingEntry) {
-        badResponse.message =
-          'Ya existe una entrada de inventario con este número de control';
-        return badResponse;
-      }
+        if (existingEntry) {
+          throw new InventoryValidationError(
+            'Ya existe una entrada de inventario con este número de control',
+          );
+        }
 
-      const productIds = inventory.details.map((detail) => detail.productId);
-      const products = await this.prismaService.product.findMany({
-        where: { id: { in: productIds } },
-      });
-      const productMap = new Map(
-        products.map((product) => [product.id, product]),
-      );
+        const productIds = inventory.details.map((detail) => detail.productId);
+        const products = await tx.product.findMany({
+          where: { id: { in: productIds } },
+        });
+        const productMap = new Map(
+          products.map((product) => [product.id, product]),
+        );
 
-      const totalAmount = inventory.details.reduce((sum, detail) => {
-        const price = Number(productMap.get(detail.productId)?.price || 0);
-        return sum + price * detail.quantity;
-      }, 0);
+        const totalAmount = Number(
+          inventory.details
+            .reduce((sum, detail) => {
+              const price = Number(
+                productMap.get(detail.productId)?.price || 0,
+              );
+              return sum + price * detail.quantity;
+            }, 0)
+            .toFixed(2),
+        );
 
-      const entry = await this.prismaService.inventoryEntry.create({
-        data: {
-          controlNumber: normalizedControlNumber,
-          movementType: 'IN',
-          totalAmount,
-          status: 'CREADA',
-          title: inventory.description || 'Entrada de inventario',
-          description: `Entrada de mercancía ${inventory.description ? `- ${inventory.description}` : ''}`,
-          date: inventory.date,
-          supplierId: null,
-        },
-      });
-
-      for (const detail of inventory.details) {
-        const product = productMap.get(detail.productId);
-        const unitPrice = Number(product?.price || 0);
-        const unitPriceUSD = Number(product?.priceUSD || 0);
-        const subtotal = unitPrice * detail.quantity;
-
-        await this.prismaService.inventoryEntryDetail.create({
+        const entry = await tx.inventoryEntry.create({
           data: {
-            inventoryEntryId: entry.id,
-            productId: detail.productId,
-            quantity: detail.quantity,
-            unitPrice,
-            unitPriceUSD,
-            subtotal,
+            controlNumber: normalizedControlNumber,
+            movementType: 'IN',
+            totalAmount,
+            status: 'CREADA',
+            title: inventory.description || 'Entrada de inventario',
+            description: `Entrada de mercancía ${inventory.description ? `- ${inventory.description}` : ''}`,
+            date: inventory.date,
+            supplierId: null,
           },
         });
 
-        const findProductInInventory =
-          await this.prismaService.inventory.findFirst({
-            where: { productId: detail.productId },
-          });
+        for (const detail of inventory.details) {
+          const product = productMap.get(detail.productId);
+          const unitPrice = Number(product?.price || 0);
+          const unitPriceUSD = Number(product?.priceUSD || 0);
+          const subtotal = Number((unitPrice * detail.quantity).toFixed(2));
 
-        if (findProductInInventory) {
-          await this.prismaService.inventory.update({
+          await tx.inventoryEntryDetail.create({
             data: {
-              quantity:
-                Number(findProductInInventory.quantity) +
-                Number(detail.quantity),
-            },
-            where: {
-              id: findProductInInventory.id,
-            },
-          });
-        } else {
-          await this.prismaService.inventory.create({
-            data: {
+              inventoryEntryId: entry.id,
               productId: detail.productId,
               quantity: detail.quantity,
+              unitPrice,
+              unitPriceUSD,
+              subtotal,
             },
           });
         }
+
+        await this.lockInventoryByProduct(tx, productIds);
+        await this.applyStockDeltas(
+          tx,
+          computeNetStockDeltas('IN', [], inventory.details),
+        );
+
+        return createBaseResponse(null, 'Productos guardados en inventario.');
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (!(err instanceof InventoryValidationError)) {
+        await this.logError(message, 'inventoryService.saveInventory');
       }
 
-      baseResponse.message = 'Productos guardados en inventario.';
-      return baseResponse;
-    } catch (err) {
-      await this.prismaService.errorMessages.create({
-        data: {
-          message: err instanceof Error ? err.message : String(err),
-          from: 'inventoryService',
-        },
-      });
-      badResponse.message = err instanceof Error ? err.message : String(err);
-      return badResponse;
+      return createBadResponse(message);
     }
   }
 
   async updateAmountInventory(inventory: DTOInventorySimple, id: number) {
+    const requested = Number(inventory.quantity);
+
+    if (!Number.isFinite(requested) || requested < 0) {
+      return createBadResponse(
+        'La cantidad de inventario debe ser un numero mayor o igual a 0.',
+      );
+    }
+
     try {
-      const findProductInInventory =
-        await this.prismaService.inventory.findFirst({
+      return await this.prismaService.$transaction(async (tx) => {
+        // Serializa ediciones concurrentes de la misma fila de inventario.
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "Inventory" WHERE id = ${id} FOR UPDATE`,
+        );
+
+        const record = await tx.inventory.findFirst({
           where: { id },
+          include: { product: { select: { name: true } } },
         });
 
-      if (!findProductInInventory) {
-        badResponse.message = 'No se encontró el producto en el inventario.';
-        return badResponse;
-      }
+        if (!record) {
+          return createBadResponse(
+            'No se encontró el producto en el inventario.',
+          );
+        }
 
-      const findDetail =
-        await this.prismaService.inventoryEntryDetail.findFirst({
+        const currentQuantity = Number(record.quantity);
+        const delta = round3(requested - currentQuantity);
+
+        if (delta === 0) {
+          return createBaseResponse(
+            { previous: currentQuantity, current: currentQuantity },
+            'Inventario sin cambios.',
+          );
+        }
+
+        const lastInDetail = await tx.inventoryEntryDetail.findFirst({
           where: {
-            productId: findProductInInventory.productId,
+            productId: record.productId,
             inventoryEntry: { movementType: 'IN' },
           },
-          orderBy: { inventoryEntry: { date: 'desc' } },
-        });
-
-      const oldAmount = findDetail
-        ? Number(findProductInInventory.quantity) - Number(findDetail.quantity)
-        : Number(findProductInInventory.quantity);
-      const updateAmountHistory = inventory.quantity - oldAmount;
-
-      await this.prismaService.inventory.update({
-        data: {
-          quantity: inventory.quantity,
-        },
-        where: { id },
-      });
-
-      if (findDetail) {
-        await this.prismaService.inventoryEntryDetail.update({
-          where: { id: findDetail.id },
-          data: {
-            quantity: updateAmountHistory,
+          orderBy: [{ inventoryEntry: { date: 'desc' } }, { id: 'desc' }],
+          include: {
+            inventoryEntry: { select: { id: true, description: true } },
           },
         });
-      }
 
-      baseResponse.message = 'Inventario modificado.';
-      return baseResponse;
-    } catch (err) {
-      await this.prismaService.errorMessages.create({
-        data: {
-          message: err instanceof Error ? err.message : String(err),
-          from: 'inventoryService',
-        },
+        if (!lastInDetail) {
+          await tx.inventory.update({
+            where: { id },
+            data: { quantity: requested },
+          });
+
+          return createBaseResponse(
+            { previous: currentQuantity, current: requested, delta },
+            'Inventario modificado. El producto no tiene entradas de tipo IN, asi que no se ajusto ningun detalle.',
+          );
+        }
+
+        const rebase = computeRebasedDetailQuantity(
+          currentQuantity,
+          Number(lastInDetail.quantity),
+          requested,
+        );
+
+        if (!rebase.ok) {
+          return createBadResponse(
+            `No se puede reducir el inventario de ${record.product.name} a ${requested}: la ultima entrada solo tiene ${Number(
+              lastInDetail.quantity,
+            )} y la diferencia pide mas de lo que hay registrado. Registre la reduccion como merma de inventario.`,
+          );
+        }
+
+        const unitPrice = Number(lastInDetail.unitPrice);
+        const subtotal = Number(
+          (unitPrice * rebase.rebasedQuantity).toFixed(2),
+        );
+        const previousDescription = lastInDetail.inventoryEntry.description;
+        const note = `Se actualizo de ${currentQuantity} a ${requested} el producto de ${record.product.name}`;
+
+        await tx.inventoryEntryDetail.update({
+          where: { id: lastInDetail.id },
+          data: { quantity: rebase.rebasedQuantity, subtotal },
+        });
+
+        await tx.inventory.update({
+          where: { id },
+          data: { quantity: requested },
+        });
+
+        await tx.inventoryEntry.update({
+          where: { id: lastInDetail.inventoryEntry.id },
+          data: {
+            totalAmount: await this.recalculateEntryTotal(
+              tx,
+              lastInDetail.inventoryEntry.id,
+            ),
+            description: previousDescription
+              ? `${previousDescription} | ${note}`
+              : note,
+          },
+        });
+
+        return createBaseResponse(
+          {
+            previous: currentQuantity,
+            current: requested,
+            delta,
+            entryId: lastInDetail.inventoryEntry.id,
+          },
+          'Inventario modificado.',
+        );
       });
-      badResponse.message = err instanceof Error ? err.message : String(err);
-      return badResponse;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.logError(message, 'inventoryService.updateAmountInventory');
+      return createBadResponse(message);
     }
   }
 
@@ -389,8 +575,7 @@ export class InventoryService {
     inventory: DTOInventory,
     tx?: Prisma.TransactionClient,
   ) {
-    try {
-      const prisma = tx ?? this.prismaService;
+    const run = async (prisma: Prisma.TransactionClient) => {
       const normalizedControlNumber = this.normalizeControlNumber(
         inventory.controlNumber,
       );
@@ -400,9 +585,9 @@ export class InventoryService {
       });
 
       if (existingEntry) {
-        badResponse.message =
-          'Ya existe una entrada de inventario con este número de control';
-        return badResponse;
+        throw new InventoryValidationError(
+          'Ya existe una entrada de inventario con este número de control',
+        );
       }
 
       const productIds = inventory.details.map((detail) => detail.productId);
@@ -413,10 +598,14 @@ export class InventoryService {
         products.map((product) => [product.id, product]),
       );
 
-      const totalAmount = inventory.details.reduce((sum, detail) => {
-        const price = Number(productMap.get(detail.productId)?.price || 0);
-        return sum + price * detail.quantity;
-      }, 0);
+      const totalAmount = Number(
+        inventory.details
+          .reduce((sum, detail) => {
+            const price = Number(productMap.get(detail.productId)?.price || 0);
+            return sum + price * detail.quantity;
+          }, 0)
+          .toFixed(2),
+      );
 
       const entry = await prisma.inventoryEntry.create({
         data: {
@@ -431,11 +620,24 @@ export class InventoryService {
         },
       });
 
+      /**
+       * El descuento se hace en bulk con deltas netos por producto en vez de
+       * `decrement` detalle por detalle: `decrement` es atomico pero no valida
+       * (deja la fila negativa si la salida excede el stock) y validar despues
+       * del descuento ya no sirve. La validacion va en `applyStockDeltas`, que
+       * tira para que la transaccion revierta la cabecera y los detalles ya
+       * creados.
+       *
+       * Se mantiene el criterio anterior de que todo detalle descuenta stock,
+       * sin importar su `type`.
+       */
+      const byProduct = new Map<number, number>();
+
       for (const detail of inventory.details) {
         const product = productMap.get(detail.productId);
         const unitPrice = Number(product?.price || 0);
         const unitPriceUSD = Number(product?.priceUSD || 0);
-        const subtotal = unitPrice * detail.quantity;
+        const subtotal = Number((unitPrice * detail.quantity).toFixed(2));
         const type = detail.type || 'SALE';
 
         await prisma.inventoryEntryDetail.create({
@@ -450,36 +652,39 @@ export class InventoryService {
           },
         });
 
-        const findProductInventory = await prisma.inventory.findFirst({
-          where: { productId: detail.productId },
-        });
-
-        if (!findProductInventory) {
-          badResponse.message = `El producto con ID ${detail.productId} no se encontró en el inventario.`;
-          return badResponse;
-        }
-
-        await prisma.inventory.update({
-          where: { id: findProductInventory.id },
-          data: {
-            quantity: {
-              decrement: detail.quantity,
-            },
-          },
-        });
+        byProduct.set(
+          detail.productId,
+          (byProduct.get(detail.productId) ?? 0) + Number(detail.quantity),
+        );
       }
 
-      baseResponse.message = 'Productos actualizados en inventario.';
-      return baseResponse;
+      await this.lockInventoryByProduct(prisma, productIds);
+
+      const deltas = new Map<number, number>();
+
+      for (const [productId, quantity] of byProduct) {
+        deltas.set(productId, -quantity);
+      }
+
+      await this.applyStockDeltas(prisma, deltas);
+
+      return createBaseResponse(null, 'Productos actualizados en inventario.');
+    };
+
+    try {
+      if (tx) {
+        return await run(tx);
+      }
+
+      return await this.prismaService.$transaction((prisma) => run(prisma));
     } catch (err) {
-      await this.prismaService.errorMessages.create({
-        data: {
-          message: err instanceof Error ? err.message : String(err),
-          from: 'inventoryService',
-        },
-      });
-      badResponse.message = err instanceof Error ? err.message : String(err);
-      return badResponse;
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (!(err instanceof InventoryValidationError)) {
+        await this.logError(message, 'inventoryService.updateInventoryInvoice');
+      }
+
+      return createBadResponse(message);
     }
   }
 
@@ -797,237 +1002,257 @@ export class InventoryService {
 
   async createInventoryEntry(data: CreateInventoryEntryDTO) {
     try {
-      const existingEntry = await this.prismaService.inventoryEntry.findUnique({
-        where: { controlNumber: data.controlNumber },
-      });
+      return await this.prismaService.$transaction(async (tx) => {
+        const existingEntry = await tx.inventoryEntry.findUnique({
+          where: { controlNumber: data.controlNumber },
+        });
 
-      if (existingEntry) {
-        badResponse.message =
-          'Ya existe una entrada con este número de control';
-        return badResponse;
-      }
+        if (existingEntry) {
+          throw new InventoryValidationError(
+            'Ya existe una entrada con este número de control',
+          );
+        }
 
-      const totalAmount = data.details.reduce((sum, detail) => {
-        return sum + detail.unitPrice * detail.quantity;
-      }, 0);
+        const totalAmount = Number(
+          data.details
+            .reduce((sum, detail) => {
+              return sum + detail.unitPrice * detail.quantity;
+            }, 0)
+            .toFixed(2),
+        );
 
-      const entry = await this.prismaService.inventoryEntry.create({
-        data: {
-          controlNumber: data.controlNumber,
-          movementType: 'IN',
-          totalAmount,
-          status: 'CREADA',
-          title: data.title || '',
-          description: data.description || '',
-          date: data.date,
-          supplierId: data.supplierId || null,
-        },
-      });
-
-      for (const detail of data.details) {
-        const subtotal = detail.unitPrice * detail.quantity;
-
-        await this.prismaService.inventoryEntryDetail.create({
+        const entry = await tx.inventoryEntry.create({
           data: {
-            inventoryEntryId: entry.id,
-            productId: detail.productId,
-            quantity: detail.quantity,
-            unitPrice: detail.unitPrice,
-            unitPriceUSD: detail.unitPriceUSD || detail.unitPrice,
-            subtotal,
+            controlNumber: data.controlNumber,
+            movementType: 'IN',
+            totalAmount,
+            status: 'CREADA',
+            title: data.title || '',
+            description: data.description || '',
+            date: data.date,
+            supplierId: data.supplierId || null,
           },
         });
 
-        const existingInventory = await this.prismaService.inventory.findFirst({
-          where: { productId: detail.productId },
-        });
+        for (const detail of data.details) {
+          const subtotal = Number(
+            (detail.unitPrice * detail.quantity).toFixed(2),
+          );
 
-        if (existingInventory) {
-          await this.prismaService.inventory.update({
-            where: { id: existingInventory.id },
+          await tx.inventoryEntryDetail.create({
             data: {
-              quantity:
-                Number(existingInventory.quantity) + Number(detail.quantity),
-            },
-          });
-        } else {
-          await this.prismaService.inventory.create({
-            data: {
+              inventoryEntryId: entry.id,
               productId: detail.productId,
               quantity: detail.quantity,
+              unitPrice: detail.unitPrice,
+              unitPriceUSD: detail.unitPriceUSD || detail.unitPrice,
+              subtotal,
             },
           });
         }
-      }
 
-      baseResponse.message = 'Entrada de inventario creada exitosamente';
-      baseResponse.data = { id: entry.id, controlNumber: entry.controlNumber };
-      return baseResponse;
+        const productIds = data.details.map((detail) => detail.productId);
+        await this.lockInventoryByProduct(tx, productIds);
+        await this.applyStockDeltas(
+          tx,
+          computeNetStockDeltas('IN', [], data.details),
+        );
+
+        return createBaseResponse(
+          { id: entry.id, controlNumber: entry.controlNumber },
+          'Entrada de inventario creada exitosamente',
+        );
+      });
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      badResponse.message = errMsg;
-      return badResponse;
+
+      if (!(error instanceof InventoryValidationError)) {
+        await this.logError(errMsg, 'inventoryService.createInventoryEntry');
+      }
+
+      return createBadResponse(errMsg);
     }
   }
 
   async updateInventoryEntry(id: number, data: CreateInventoryEntryDTO) {
     try {
-      const existingEntry = await this.prismaService.inventoryEntry.findUnique({
-        where: { id },
-        include: { details: true },
-      });
+      return await this.prismaService.$transaction(async (tx) => {
+        // Bloquea la cabecera para que dos ediciones concurrentes de la misma
+        // entrada no se pisen al leer y reconstruir los detalles.
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "InventoryEntry" WHERE id = ${id} FOR UPDATE`,
+        );
 
-      if (!existingEntry) {
-        badResponse.message = 'Entrada no encontrada';
-        return badResponse;
-      }
-
-      const duplicateEntry = await this.prismaService.inventoryEntry.findFirst({
-        where: {
-          controlNumber: data.controlNumber,
-          id: { not: id },
-        },
-      });
-
-      if (duplicateEntry) {
-        badResponse.message =
-          'Ya existe otra entrada con este número de control';
-        return badResponse;
-      }
-
-      for (const oldDetail of existingEntry.details) {
-        const existingInventory = await this.prismaService.inventory.findFirst({
-          where: { productId: oldDetail.productId },
+        const existingEntry = await tx.inventoryEntry.findUnique({
+          where: { id },
+          include: { details: true },
         });
 
-        if (existingInventory) {
-          await this.prismaService.inventory.update({
-            where: { id: existingInventory.id },
-            data: {
-              quantity: Math.max(
-                0,
-                Number(existingInventory.quantity) - Number(oldDetail.quantity),
-              ),
-            },
-          });
+        if (!existingEntry) {
+          throw new InventoryValidationError('Entrada no encontrada');
         }
-      }
 
-      await this.prismaService.inventoryEntryDetail.deleteMany({
-        where: { inventoryEntryId: id },
-      });
-
-      const totalAmount = data.details.reduce((sum, detail) => {
-        return sum + detail.unitPrice * detail.quantity;
-      }, 0);
-
-      await this.prismaService.inventoryEntry.update({
-        where: { id },
-        data: {
-          controlNumber: data.controlNumber,
-          totalAmount,
-          title: data.title || '',
-          description: data.description || '',
-          date: data.date,
-          supplierId: data.supplierId || null,
-        },
-      });
-
-      for (const detail of data.details) {
-        const subtotal = detail.unitPrice * detail.quantity;
-
-        await this.prismaService.inventoryEntryDetail.create({
-          data: {
-            inventoryEntryId: id,
-            productId: detail.productId,
-            quantity: detail.quantity,
-            unitPrice: detail.unitPrice,
-            unitPriceUSD: detail.unitPriceUSD || detail.unitPrice,
-            subtotal,
+        const duplicateEntry = await tx.inventoryEntry.findFirst({
+          where: {
+            controlNumber: data.controlNumber,
+            id: { not: id },
           },
         });
 
-        const existingInventory = await this.prismaService.inventory.findFirst({
-          where: { productId: detail.productId },
+        if (duplicateEntry) {
+          throw new InventoryValidationError(
+            'Ya existe otra entrada con este número de control',
+          );
+        }
+
+        const productIds = [
+          ...existingEntry.details.map((detail) => detail.productId),
+          ...data.details.map((detail) => detail.productId),
+        ];
+
+        await this.lockInventoryByProduct(tx, productIds);
+
+        /**
+         * El signo del stock sale del `movementType` de la entrada, no de
+         * "restar siempre". Antes se restaba el detalle viejo y se sumaba el
+         * nuevo sin importar el tipo, asi que editar o borrar una entrada `OUT`
+         * (que ya habia descontado stock) lo movia al reves. Ademas el
+         * `Math.max(0, ...)` escondia el faltante en vez de reportarlo.
+         *
+         * Los deltas van netos por producto: revertir y reaplicar por separado
+         * podria dar faltante en un producto que la operacion global si
+         * compensa.
+         */
+        await this.applyStockDeltas(
+          tx,
+          computeNetStockDeltas(
+            existingEntry.movementType,
+            existingEntry.details,
+            data.details,
+          ),
+        );
+
+        await tx.inventoryEntryDetail.deleteMany({
+          where: { inventoryEntryId: id },
         });
 
-        if (existingInventory) {
-          await this.prismaService.inventory.update({
-            where: { id: existingInventory.id },
+        const totalAmount = Number(
+          data.details
+            .reduce((sum, detail) => {
+              return sum + detail.unitPrice * detail.quantity;
+            }, 0)
+            .toFixed(2),
+        );
+
+        await tx.inventoryEntry.update({
+          where: { id },
+          data: {
+            controlNumber: data.controlNumber,
+            totalAmount,
+            title: data.title || '',
+            description: data.description || '',
+            date: data.date,
+            supplierId: data.supplierId || null,
+          },
+        });
+
+        for (const detail of data.details) {
+          const subtotal = Number(
+            (detail.unitPrice * detail.quantity).toFixed(2),
+          );
+
+          await tx.inventoryEntryDetail.create({
             data: {
-              quantity:
-                Number(existingInventory.quantity) + Number(detail.quantity),
-            },
-          });
-        } else {
-          await this.prismaService.inventory.create({
-            data: {
+              inventoryEntryId: id,
               productId: detail.productId,
               quantity: detail.quantity,
+              unitPrice: detail.unitPrice,
+              unitPriceUSD: detail.unitPriceUSD || detail.unitPrice,
+              subtotal,
             },
           });
         }
-      }
 
-      baseResponse.message = 'Entrada de inventario actualizada exitosamente';
-      return baseResponse;
+        return createBaseResponse(
+          null,
+          'Entrada de inventario actualizada exitosamente',
+        );
+      });
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      badResponse.message = errMsg;
-      return badResponse;
+
+      if (!(error instanceof InventoryValidationError)) {
+        await this.logError(errMsg, 'inventoryService.updateInventoryEntry');
+      }
+
+      return createBadResponse(errMsg);
     }
   }
 
   async deleteInventoryEntry(id: number) {
     try {
-      const existingEntry = await this.prismaService.inventoryEntry.findUnique({
-        where: { id },
-        include: { details: true, payments: true },
-      });
+      return await this.prismaService.$transaction(async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "InventoryEntry" WHERE id = ${id} FOR UPDATE`,
+        );
 
-      if (!existingEntry) {
-        badResponse.message = 'Entrada no encontrada';
-        return badResponse;
-      }
-
-      if (existingEntry.payments.length > 0) {
-        badResponse.message =
-          'No se puede eliminar una entrada con pagos asociados';
-        return badResponse;
-      }
-
-      for (const detail of existingEntry.details) {
-        const existingInventory = await this.prismaService.inventory.findFirst({
-          where: { productId: detail.productId },
+        const existingEntry = await tx.inventoryEntry.findUnique({
+          where: { id },
+          include: { details: true, payments: true },
         });
 
-        if (existingInventory) {
-          await this.prismaService.inventory.update({
-            where: { id: existingInventory.id },
-            data: {
-              quantity: Math.max(
-                0,
-                Number(existingInventory.quantity) - Number(detail.quantity),
-              ),
-            },
-          });
+        if (!existingEntry) {
+          throw new InventoryValidationError('Entrada no encontrada');
         }
-      }
 
-      await this.prismaService.inventoryEntryDetail.deleteMany({
-        where: { inventoryEntryId: id },
+        if (existingEntry.payments.length > 0) {
+          throw new InventoryValidationError(
+            'No se puede eliminar una entrada con pagos asociados',
+          );
+        }
+
+        const productIds = existingEntry.details.map(
+          (detail) => detail.productId,
+        );
+
+        await this.lockInventoryByProduct(tx, productIds);
+
+        /**
+         * Borrar una entrada devuelve el stock que aplico, asi que el signo es
+         * el inverso del que uso al crearla y sale del `movementType`. Antes se
+         * restaba siempre, con lo cual borrar una salida (que ya habia
+         * descontado) volvia a restar en vez de devolver.
+         */
+        await this.applyStockDeltas(
+          tx,
+          computeNetStockDeltas(
+            existingEntry.movementType,
+            existingEntry.details,
+            [],
+          ),
+        );
+
+        await tx.inventoryEntryDetail.deleteMany({
+          where: { inventoryEntryId: id },
+        });
+
+        await tx.inventoryEntry.delete({
+          where: { id },
+        });
+
+        return createBaseResponse(
+          null,
+          'Entrada de inventario eliminada exitosamente',
+        );
       });
-
-      await this.prismaService.inventoryEntry.delete({
-        where: { id },
-      });
-
-      baseResponse.message = 'Entrada de inventario eliminada exitosamente';
-      return baseResponse;
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      badResponse.message = errMsg;
-      return badResponse;
+
+      if (!(error instanceof InventoryValidationError)) {
+        await this.logError(errMsg, 'inventoryService.deleteInventoryEntry');
+      }
+
+      return createBadResponse(errMsg);
     }
   }
 
@@ -1275,9 +1500,8 @@ export class InventoryService {
         return badResponse;
       }
 
-      if (product.type.toLowerCase() !== 'queso') {
-        badResponse.message =
-          'Solo se puede registrar merma de productos tipo Queso.';
+      if (!isLossAllowedProductType(product.type)) {
+        badResponse.message = `Solo se puede registrar merma de productos de tipo: ${getLossAllowedProductTypes().join(', ')}.`;
         return badResponse;
       }
 
@@ -1290,20 +1514,49 @@ export class InventoryService {
         return badResponse;
       }
 
-      if (Number(data.quantity) > Number(inventory.quantity)) {
-        badResponse.message = `La cantidad de merma supera el inventario disponible (${Number(inventory.quantity)}).`;
-        return badResponse;
+      const lossDate = data.date ? new Date(data.date) : new Date();
+      const requestedQty = Number(data.quantity);
+
+      if (!Number.isFinite(requestedQty) || requestedQty <= 0) {
+        return createBadResponse('La cantidad de merma debe ser mayor que 0.');
       }
 
-      const unitCost = Number(product.purchasePrice);
-      const totalCost = Number((unitCost * data.quantity).toFixed(2));
-      const lossDate = data.date ? new Date(data.date) : new Date();
+      // Valoracion en USD cuando existe; el precio en Bs solo se usa como
+      // respaldo. Antes se usaba siempre `purchasePrice` (Bs) y se mezclaba
+      // con los reportes que comparan contra `purchasePriceUSD`.
+      const unitCost =
+        Number(product.purchasePriceUSD) || Number(product.purchasePrice);
+      const totalCost = Number((unitCost * requestedQty).toFixed(2));
 
       await this.prismaService.$transaction(async (tx) => {
+        /**
+         * La validacion de stock ocurre FUERA de la transaccion: dos mermas
+         * concurrentes leian el mismo saldo y ambas pasaban, dejando la fila
+         * de inventario negativa. El lock + relectura dentro de la
+         * transaccion cierran esa ventana.
+         */
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "Inventory" WHERE "productId" = ${data.productId} FOR UPDATE`,
+        );
+
+        const locked = await tx.inventory.findFirst({
+          where: { productId: data.productId },
+        });
+
+        if (!locked) {
+          throw new Error('El producto no se encontró en el inventario.');
+        }
+
+        if (requestedQty > Number(locked.quantity)) {
+          throw new Error(
+            `La cantidad de merma supera el inventario disponible (${Number(locked.quantity)}).`,
+          );
+        }
+
         await tx.inventoryLoss.create({
           data: {
             productId: data.productId,
-            quantity: data.quantity,
+            quantity: requestedQty,
             unitCost,
             totalCost,
             reason: data.reason ?? '',
@@ -1312,27 +1565,23 @@ export class InventoryService {
         });
 
         await tx.inventory.update({
-          where: { id: inventory.id },
+          where: { id: locked.id },
           data: {
             quantity: {
-              decrement: data.quantity,
+              decrement: requestedQty,
             },
           },
         });
       });
 
-      baseResponse.message = 'Merma registrada y descontada del inventario.';
-      baseResponse.data = { totalCost };
-      return baseResponse;
+      return createBaseResponse(
+        { totalCost, unitCost },
+        'Merma registrada y descontada del inventario.',
+      );
     } catch (err) {
-      await this.prismaService.errorMessages.create({
-        data: {
-          message: err instanceof Error ? err.message : String(err),
-          from: 'inventoryService',
-        },
-      });
-      badResponse.message = err instanceof Error ? err.message : String(err);
-      return badResponse;
+      const message = err instanceof Error ? err.message : String(err);
+      await this.logError(message, 'inventoryService.createInventoryLoss');
+      return createBadResponse(message);
     }
   }
 

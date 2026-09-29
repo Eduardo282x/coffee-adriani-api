@@ -386,7 +386,8 @@ export class DashboardService {
       pagosEnRango,
       paymentStatistics,
       // currentDolar,
-      inventarioMovsAntes,
+      stockRealPorProducto,
+      inventarioEntradasEnRango,
     ] = await Promise.all([
       // Productos con solo campos necesarios
       this.prismaService.product.findMany({
@@ -552,18 +553,26 @@ export class DashboardService {
         type: filter.type,
       }),
 
-      // Movimientos de inventario antes del rango (agrupados)
+      // Stock real por producto. Es la unica fuente de verdad del inventario:
+      // `Product.amount` mas la suma de movimientos NO cuadra con la realidad
+      // (ver `inventarioInicial` mas abajo), asi que el reporte se ancla en esta
+      // tabla y se camina hacia atras para obtener el saldo inicial del rango.
+      this.prismaService.inventory.findMany({
+        select: { productId: true, quantity: true },
+      }),
+
+      // Entradas IN del rango, para el recorrido diario y para el anclaje
       this.prismaService.inventoryEntryDetail.findMany({
         where: {
-          // El string crudo se coercione a medianoche UTC, que en Caracas es
-          // 20:00 del dia anterior: excluia movimientos validos del primer
-          // dia del rango.
-          inventoryEntry: { date: { lt: startOfRange } },
+          inventoryEntry: {
+            date: { gte: startOfRange, lte: endOfRange },
+            movementType: 'IN',
+          },
         },
         select: {
           productId: true,
           quantity: true,
-          inventoryEntry: { select: { movementType: true } },
+          inventoryEntry: { select: { date: true } },
         },
       }),
     ]);
@@ -584,23 +593,35 @@ export class DashboardService {
     });
     // const exchangeRateUsed = currentDolar?.dolar || 1;
 
-    // Mapear movimientos de inventario por producto
-    const inventarioInicialMap = new Map();
-    inventarioMovsAntes.forEach((mov) => {
-      const sign = mov.inventoryEntry.movementType === 'OUT' ? -1 : 1;
-      const current = inventarioInicialMap.get(mov.productId) || 0;
-      inventarioInicialMap.set(
-        mov.productId,
-        current + Number(mov.quantity) * sign,
+    // Entradas del rango agrupadas por dia y producto. Se reconstruyen con las
+    // mismas claves `yyyy-MM-dd` que usan `dias` y que usa el calculo de
+    // despachos, para que ambas series caigan en el mismo dia.
+    const entradasPorDiaYProducto = {};
+    dias.forEach((dia) => {
+      const fechaKey = format(dia, 'yyyy-MM-dd');
+      entradasPorDiaYProducto[fechaKey] = {};
+      productos.forEach((producto) => {
+        entradasPorDiaYProducto[fechaKey][producto.id] = 0;
+      });
+    });
+
+    const entradasTotalesPorProducto = new Map<number, number>();
+    inventarioEntradasEnRango.forEach((det) => {
+      const fechaKey = format(det.inventoryEntry.date, 'yyyy-MM-dd');
+      const dia = entradasPorDiaYProducto[fechaKey];
+      if (dia && dia[det.productId] !== undefined) {
+        dia[det.productId] += Number(det.quantity);
+      }
+      entradasTotalesPorProducto.set(
+        det.productId,
+        (entradasTotalesPorProducto.get(det.productId) || 0) +
+          Number(det.quantity),
       );
     });
 
-    // Calcular inventario inicial
-    const inventarioInicial = {};
-    productos.forEach((p) => {
-      inventarioInicial[p.id] =
-        (p.amount || 0) + (inventarioInicialMap.get(p.id) || 0);
-    });
+    const stockRealPorProductoId = new Map<number, number>(
+      stockRealPorProducto.map((row) => [row.productId, Number(row.quantity)]),
+    );
 
     // 3. Calcular métricas de pagos de forma eficiente
     const pagosDivisas = pagosEnRango
@@ -720,6 +741,37 @@ export class DashboardService {
           }
         });
       }
+    });
+
+    /**
+     * Inventario inicial anclado en el stock real.
+     *
+     * Antes se calculaba como `Product.amount + suma de movimientos previos al
+     * rango`, asumiendo que el historico de entradas y salidas reconstruye el
+     * stock. En produccion esa asuncion es falsa: las salidas superan a las
+     * entradas en ~24x mientras el stock real es positivo, porque el stock se
+     * ajusto directamente en `Inventory` a lo largo de los anos sin registrar
+     * las entradas correspondientes. Ese metodo producia saldos iniciales
+     * negativo y finales que no cuadraban con el deposito.
+     *
+     * Ahora se parte del stock real (fuente de verdad) y se camina hacia
+     * atras: el saldo al final del rango tiene que ser el stock real, asi que
+     * el inicial es `stock - entradas + despachos`.
+     *
+     * Solo es valido para rangos que terminan en el presente: para un rango
+     * historico el stock al final de ese rango no se puede recuperar, porque
+     * `Inventory.quantity` solo guarda el valor actual.
+     */
+    const inventarioInicial = {};
+    productos.forEach((p) => {
+      const stockReal = stockRealPorProductoId.get(p.id) || 0;
+      const entradas = entradasTotalesPorProducto.get(p.id) || 0;
+      let despachos = 0;
+      dias.forEach((dia) => {
+        despachos +=
+          despachosPorDiaYProducto[format(dia, 'yyyy-MM-dd')][p.id] || 0;
+      });
+      inventarioInicial[p.id] = stockReal - entradas + despachos;
     });
 
     // 7. Calcular métricas de centro
@@ -969,24 +1021,32 @@ export class DashboardService {
     dias.forEach((d) =>
       header.push(format(d, 'EEEE dd/MM/yyyy', { locale: es })),
     );
-    header.push('Total Despachado', 'Inventario Actual');
+    header.push('Total Entradas', 'Total Despachado', 'Inventario Actual');
     wsInv.addRow(header);
 
     productos.forEach((p) => {
       const fila = [`${p.name} ${p.presentation}`, inventarioInicial[p.id]];
       let inventarioActual = inventarioInicial[p.id];
       let totalDespachado = 0;
+      let totalEntradas = 0;
 
+      // El recorrido aplica entradas y despachos. Antes solo restaba
+      // despachos, asi que las compras del rango desaparecian del calculo y el
+      // cierre no llegaba al stock real pese a que el inicial ya venía
+      // anclado a él.
       dias.forEach((dia) => {
         const fechaKey = format(dia, 'yyyy-MM-dd');
         const cantidadDespachada: number =
           despachosPorDiaYProducto[fechaKey][p.id] || 0;
+        const cantidadEntrada: number =
+          entradasPorDiaYProducto[fechaKey][p.id] || 0;
         fila.push(cantidadDespachada);
-        inventarioActual -= Number(cantidadDespachada);
-        totalDespachado += Number(cantidadDespachada);
+        inventarioActual += cantidadEntrada - cantidadDespachada;
+        totalDespachado += cantidadDespachada;
+        totalEntradas += cantidadEntrada;
       });
 
-      fila.push(totalDespachado, inventarioActual);
+      fila.push(totalEntradas, totalDespachado, inventarioActual);
       wsInv.addRow(fila);
     });
 
