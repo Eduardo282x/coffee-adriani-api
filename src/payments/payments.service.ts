@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from 'src/generated/prisma/client';
 import {
   badResponse,
   baseResponse,
+  createBadResponse,
   DashboardExcel,
   DTODateRangeFilter,
 } from 'src/dto/base.dto';
@@ -17,10 +19,15 @@ import { BankData } from './payments.data';
 import {
   calculateInvoiceRemainingUsd,
   calculatePaymentRemaining,
+  isInvoiceSettled,
   round2,
   toNumber,
 } from 'src/common/remaining-calculator';
 import { InvoicesService } from 'src/invoices/invoices.service';
+import {
+  isPendingConfirmationMethod,
+  looksLikeLegacyExpenseAccount,
+} from 'src/common/business-rules';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 interface PaymentFilterPaginate extends PaymentFilter {
@@ -144,75 +151,65 @@ export class PaymentsService {
         }
       }
 
+      // `type` y `search` antes escribian ambos en `where.OR`, de modo que
+      // combinar los dos filtros hacia que el segundo pise al primero y el
+      // filtro por tipo de producto se perdiera en silencio. Ahora se acumulan
+      // en una lista AND.
+      const andFilters: Prisma.PaymentWhereInput[] = [];
+
       if (type) {
-        where.OR = [
-          {
-            InvoicePayment: {
-              none: {},
-            },
-          },
-          {
-            InvoicePayment: {
-              some: {
-                invoice: {
-                  invoiceItems: {
-                    some: {
-                      product: {
-                        type: type,
-                      },
-                    },
+        andFilters.push({
+          OR: [
+            { InvoicePayment: { none: {} } },
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    invoiceItems: { some: { product: { type: type } } },
                   },
                 },
               },
             },
-          },
-        ];
+          ],
+        });
       }
 
       if (search) {
         const searchAsNumber = parseFloat(search);
         const isValidNumber = !isNaN(searchAsNumber);
 
-        where.OR = [
-          {
-            account: {
-              name: {
-                contains: search,
-                mode: 'insensitive',
+        andFilters.push({
+          OR: [
+            {
+              account: {
+                name: { contains: search, mode: 'insensitive' },
               },
             },
-          },
-          {
-            InvoicePayment: {
-              some: {
-                invoice: {
-                  client: {
-                    name: {
-                      contains: search,
-                      mode: 'insensitive',
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    client: {
+                      name: { contains: search, mode: 'insensitive' },
                     },
                   },
                 },
               },
             },
-          },
-          {
-            reference: {
-              contains: search,
-              mode: 'insensitive',
+            {
+              reference: { contains: search, mode: 'insensitive' },
             },
-          },
-          ...(isValidNumber
-            ? [
-                {
-                  amount: {
-                    gte: searchAsNumber,
-                    lt: searchAsNumber + 1,
-                  },
-                },
-              ]
-            : []),
-        ];
+            // `amount` es Decimal(10,2): un rango de 1 unidad capturaba
+            // "100" junto con "100.99". Se acota a 2 decimales.
+            ...(isValidNumber
+              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 0.01 } }]
+              : []),
+          ],
+        });
+      }
+
+      if (andFilters.length > 0) {
+        where.AND = andFilters;
       }
 
       if (typeDescription) {
@@ -250,105 +247,167 @@ export class PaymentsService {
         where.type = paymentType;
       }
 
-      // Consulta principal con paginación
-      const [payments, totalCount] = await Promise.all([
-        this.prismaService.payment.findMany({
+      const paymentSelect = {
+        id: true,
+        amount: true,
+        reference: true,
+        description: true,
+        paymentDate: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        accountId: true,
+        type: true,
+        dolar: {
+          select: { id: true, dolar: true, date: true },
+        },
+        account: {
           select: {
             id: true,
-            amount: true,
-            reference: true,
-            description: true,
-            paymentDate: true,
-            status: true,
-            createdAt: true,
-            updatedAt: true,
-            accountId: true,
-            type: true,
-            dolar: {
-              select: {
-                id: true,
-                dolar: true,
-                date: true,
-              },
+            name: true,
+            bank: true,
+            method: {
+              select: { id: true, name: true, currency: true },
             },
-            account: {
+          },
+        },
+        InvoicePayment: {
+          // Si viene `type`, traer sólo las asociaciones cuyo invoice
+          // tenga items con productos de ese tipo.
+          where: type
+            ? {
+                invoice: {
+                  invoiceItems: {
+                    some: { product: { type: type } },
+                  },
+                },
+              }
+            : undefined,
+          select: {
+            id: true,
+            invoiceId: true,
+            paymentId: true,
+            amount: true,
+            createdAt: true,
+            invoice: {
               select: {
                 id: true,
-                name: true,
-                bank: true,
-                method: {
+                controlNumber: true,
+                dispatchDate: true,
+                dueDate: true,
+                totalAmount: true,
+                consignment: true,
+                status: true,
+                deleted: true,
+                client: {
                   select: {
                     id: true,
                     name: true,
-                    currency: true,
-                  },
-                },
-              },
-            },
-            InvoicePayment: {
-              // Si viene `type`, traer sólo las asociaciones cuyo invoice
-              // tenga items con productos de ese tipo.
-              where: type
-                ? {
-                    invoice: {
-                      invoiceItems: {
-                        some: {
-                          product: {
-                            type: type,
-                          },
-                        },
-                      },
-                    },
-                  }
-                : undefined,
-              select: {
-                id: true,
-                invoiceId: true,
-                paymentId: true,
-                amount: true,
-                createdAt: true,
-                invoice: {
-                  select: {
-                    id: true,
-                    controlNumber: true,
-                    dispatchDate: true,
-                    dueDate: true,
-                    totalAmount: true,
-                    consignment: true,
-                    status: true,
-                    deleted: true,
-                    client: {
-                      select: {
-                        id: true,
-                        name: true,
-                        rif: true,
-                        block: {
-                          select: {
-                            id: true,
-                            name: true,
-                          },
-                        },
-                      },
+                    rif: true,
+                    block: {
+                      select: { id: true, name: true },
                     },
                   },
                 },
               },
             },
           },
+        },
+      } satisfies Prisma.PaymentSelect;
+
+      /**
+       * `credit === 'credit'` es un filtro DERIVADO (tiene asociaciones y le
+       * queda saldo). Antes se aplicaba despues de `skip/take`, lo que
+       * devolvia paginas vacias, `totalCount` sin filtrar y `totalPages`
+       * calculado sobre el largo de la pagina (siempre 1).
+       *
+       * Prisma no puede expresar "monto - suma(asignaciones) > 0" como filtro
+       * de relacion, asi que se resuelve en dos fases: una lectura ligera de
+       * solo los campos necesarios para evaluar el predicado, y luego la
+       * carga completa unicamente de la pagina pedida.
+       */
+      let payments: Array<{
+        id: number;
+        amount: Prisma.Decimal;
+        reference: string;
+        description: string;
+        paymentDate: Date;
+        status: unknown;
+        createdAt: Date;
+        updatedAt: Date;
+        accountId: number;
+        type: unknown;
+        dolar: { id: number; dolar: Prisma.Decimal; date: Date };
+        account: {
+          id: number;
+          name: string;
+          bank: string;
+          method: { id: number; name: string; currency: string };
+        };
+        InvoicePayment: Array<{ amount: Prisma.Decimal }>;
+      }>;
+      let totalCount: number;
+
+      if (credit === 'credit') {
+        const candidates = await this.prismaService.payment.findMany({
           where,
           orderBy: { paymentDate: 'desc' },
-          skip,
-          take: limit,
-        }),
-        this.prismaService.payment.count({ where }),
-      ]);
+          select: {
+            id: true,
+            amount: true,
+            dolar: { select: { dolar: true } },
+            account: { select: { method: { select: { currency: true } } } },
+            InvoicePayment: { select: { amount: true } },
+          },
+        });
+
+        const creditedIds = candidates
+          .filter((candidate) => {
+            if (candidate.InvoicePayment.length === 0) return false;
+            const balance = calculatePaymentRemaining(
+              candidate.amount,
+              candidate.account.method.currency as 'USD' | 'BS',
+              candidate.dolar.dolar,
+              candidate.InvoicePayment,
+            );
+            return balance.remainingOriginal > 0;
+          })
+          .map((candidate) => candidate.id);
+
+        totalCount = creditedIds.length;
+        const pageIds = creditedIds.slice(skip, skip + limit);
+
+        payments =
+          pageIds.length > 0
+            ? await this.prismaService.payment.findMany({
+                where: { id: { in: pageIds } },
+                select: paymentSelect,
+              })
+            : [];
+
+        // Restaurar el orden global (paymentDate desc) de la pagina.
+        const order = new Map(pageIds.map((id, index) => [id, index]));
+        payments.sort(
+          (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
+        );
+      } else {
+        [payments, totalCount] = await Promise.all([
+          this.prismaService.payment.findMany({
+            select: paymentSelect,
+            where,
+            orderBy: { paymentDate: 'desc' },
+            skip,
+            take: limit,
+          }),
+          this.prismaService.payment.count({ where }),
+        ]);
+      }
 
       const processedPayments = payments.map((data) => {
-        // Nota: `InvoicePayment` ya viene filtrado por `type` desde Prisma.
         const filteredInvoicePayments = data.InvoicePayment;
         const paymentBalance = calculatePaymentRemaining(
           data.amount,
-          data.account.method.currency,
+          data.account.method.currency as 'USD' | 'BS',
           data.dolar.dolar,
           filteredInvoicePayments,
         );
@@ -357,15 +416,17 @@ export class PaymentsService {
           ...data,
           InvoicePayment: filteredInvoicePayments,
           associated: filteredInvoicePayments.length > 0,
-          amount: data.amount.toFixed(2),
-          amountUSD:
-            data.account.method.currency === 'USD'
-              ? data.amount.toFixed(2)
-              : (Number(data.amount) / Number(data.dolar.dolar)).toFixed(2),
-          amountBs:
-            data.account.method.currency === 'BS'
-              ? data.amount.toFixed(2)
-              : (Number(data.amount) * Number(data.dolar.dolar)).toFixed(2),
+          amount: toNumber(data.amount).toFixed(2),
+          amountUSD: (data.account.method.currency === 'USD'
+            ? toNumber(data.amount)
+            : toNumber(data.dolar.dolar) > 0
+              ? toNumber(data.amount) / toNumber(data.dolar.dolar)
+              : 0
+          ).toFixed(2),
+          amountBs: (data.account.method.currency === 'BS'
+            ? toNumber(data.amount)
+            : toNumber(data.amount) * toNumber(data.dolar.dolar)
+          ).toFixed(2),
           remaining: paymentBalance.remainingOriginal.toFixed(2),
           remainingUSD: paymentBalance.remainingUSD.toFixed(2),
           credit:
@@ -374,18 +435,12 @@ export class PaymentsService {
         };
       });
 
-      const filteredByCredit =
-        credit === 'credit'
-          ? processedPayments.filter((item) => item.credit)
-          : processedPayments;
-
-      // Calcular paginación
-      const totalPages = Math.ceil(filteredByCredit.length / limit);
+      const totalPages = Math.ceil(totalCount / limit);
       const hasNext = page < totalPages;
       const hasPrev = page > 1;
 
       return {
-        payments: filteredByCredit,
+        payments: processedPayments,
         pagination: {
           page,
           limit,
@@ -442,75 +497,65 @@ export class PaymentsService {
         }
       }
 
+      // `type` y `search` antes escribian ambos en `where.OR`, de modo que
+      // combinar los dos filtros hacia que el segundo pise al primero y el
+      // filtro por tipo de producto se perdiera en silencio. Ahora se acumulan
+      // en una lista AND.
+      const andFilters: Prisma.PaymentWhereInput[] = [];
+
       if (type) {
-        where.OR = [
-          {
-            InvoicePayment: {
-              none: {},
-            },
-          },
-          {
-            InvoicePayment: {
-              some: {
-                invoice: {
-                  invoiceItems: {
-                    some: {
-                      product: {
-                        type: type,
-                      },
-                    },
+        andFilters.push({
+          OR: [
+            { InvoicePayment: { none: {} } },
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    invoiceItems: { some: { product: { type: type } } },
                   },
                 },
               },
             },
-          },
-        ];
+          ],
+        });
       }
 
       if (search) {
         const searchAsNumber = parseFloat(search);
         const isValidNumber = !isNaN(searchAsNumber);
 
-        where.OR = [
-          {
-            account: {
-              name: {
-                contains: search,
-                mode: 'insensitive',
+        andFilters.push({
+          OR: [
+            {
+              account: {
+                name: { contains: search, mode: 'insensitive' },
               },
             },
-          },
-          {
-            InvoicePayment: {
-              some: {
-                invoice: {
-                  client: {
-                    name: {
-                      contains: search,
-                      mode: 'insensitive',
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    client: {
+                      name: { contains: search, mode: 'insensitive' },
                     },
                   },
                 },
               },
             },
-          },
-          {
-            reference: {
-              contains: search,
-              mode: 'insensitive',
+            {
+              reference: { contains: search, mode: 'insensitive' },
             },
-          },
-          ...(isValidNumber
-            ? [
-                {
-                  amount: {
-                    gte: searchAsNumber,
-                    lt: searchAsNumber + 1,
-                  },
-                },
-              ]
-            : []),
-        ];
+            // `amount` es Decimal(10,2): un rango de 1 unidad capturaba
+            // "100" junto con "100.99". Se acota a 2 decimales.
+            ...(isValidNumber
+              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 0.01 } }]
+              : []),
+          ],
+        });
+      }
+
+      if (andFilters.length > 0) {
+        where.AND = andFilters;
       }
       if (typeDescription) {
         where.description = {
@@ -1522,12 +1567,13 @@ export class PaymentsService {
           dolarId: getDolar.id,
           description: payment.description,
           paymentDate: payment.paymentDate,
-          status:
-            accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
+          status: isPendingConfirmationMethod(accountZelle.method.name)
+            ? 'PENDING'
+            : 'CONFIRMED',
           accountId: payment.accountId,
           type:
-            payment.type ||
-            (accountZelle.name.toLowerCase().includes('gastos')
+            payment.type ??
+            (looksLikeLegacyExpenseAccount(accountZelle.name)
               ? 'EXPENSE'
               : 'INCOME'),
         },
@@ -1561,12 +1607,13 @@ export class PaymentsService {
           dolarId: getDolar.id,
           description: payment.description,
           paymentDate: payment.paymentDate,
-          status:
-            accountZelle.method.name !== 'Zelle' ? 'CONFIRMED' : 'PENDING',
+          status: isPendingConfirmationMethod(accountZelle.method.name)
+            ? 'PENDING'
+            : 'CONFIRMED',
           accountId: payment.accountId,
           ...(payment.type
             ? { type: payment.type }
-            : accountZelle.name.toLowerCase().includes('gastos')
+            : looksLikeLegacyExpenseAccount(accountZelle.name)
               ? { type: 'EXPENSE' }
               : {}),
         },
@@ -1600,9 +1647,28 @@ export class PaymentsService {
 
   async payInvoice(pay: PayInvoiceDTO) {
     try {
-      const totalInvoices = pay.details.reduce(
-        (acc, payments) => acc + payments.amount,
-        0,
+      /**
+       * `amount` llega en USD (ver `PayInvoiceDetailsDTO`). Se redondea a 2
+       * decimales aqui para que la comparacion contra los saldos no dependa
+       * de error de coma flotante de JavaScript.
+       */
+      const details = pay.details.map((detail) => ({
+        invoiceId: detail.invoiceId,
+        amount: round2(detail.amount),
+      }));
+
+      const seenInvoiceIds = new Set<number>();
+      for (const detail of details) {
+        if (seenInvoiceIds.has(detail.invoiceId)) {
+          return createBadResponse(
+            `La factura ${detail.invoiceId} aparece mas de una vez en la misma solicitud.`,
+          );
+        }
+        seenInvoiceIds.add(detail.invoiceId);
+      }
+
+      const totalInvoices = round2(
+        details.reduce((acc, item) => acc + item.amount, 0),
       );
 
       const findPayment = await this.prismaService.payment.findFirst({
@@ -1617,20 +1683,19 @@ export class PaymentsService {
       });
 
       if (!findPayment) {
-        badResponse.message = 'Pago no encontrado.';
-        return badResponse;
+        return createBadResponse('Pago no encontrado.');
       }
 
       if (findPayment.type === 'SUPPLIER') {
-        badResponse.message =
-          'Este pago es de un Proveedor y no puede ser asociado a facturas.';
-        return badResponse;
+        return createBadResponse(
+          'Este pago es de un Proveedor y no puede ser asociado a facturas.',
+        );
       }
 
       if (findPayment.type === 'PERSONAL_EXPENSES') {
-        badResponse.message =
-          'Este pago es de un Gastos personal y no puede ser asociado a facturas.';
-        return badResponse;
+        return createBadResponse(
+          'Este pago es de un Gastos personal y no puede ser asociado a facturas.',
+        );
       }
 
       const paymentBalance = calculatePaymentRemaining(
@@ -1640,10 +1705,10 @@ export class PaymentsService {
         findPayment.InvoicePayment,
       );
 
-      if (Number(totalInvoices) > paymentBalance.remainingUSD) {
-        badResponse.message =
-          'La cantidad a pagar excede la cantidad del pago.';
-        return badResponse;
+      if (totalInvoices > paymentBalance.remainingUSD) {
+        return createBadResponse(
+          'La cantidad a pagar excede la cantidad del pago.',
+        );
       }
 
       let paymentUpdated;
@@ -1656,7 +1721,62 @@ export class PaymentsService {
 
       // Usar transacción Prisma para atomicidad
       await this.prismaService.$transaction(async (prisma) => {
-        for (const payDetail of pay.details) {
+        /**
+         * Orden de locks: Invoice -> Payment. `payDisassociate` usa el mismo
+         * orden; cambiarlo en uno solo abre la posibilidad de deadlock.
+         *
+         * Sobre las facturas: esto NO impide que una factura reciba varios
+         * pagos. El lock se libera al confirmar la transaccion, asi que
+         * solicitudes sucesivas con pagos distintos se asocian sin problema (lo
+         * unico que prohibits es repetir la misma pareja factura/pago, via
+         * `@@unique([invoiceId, paymentId])` y el chequeo de `invoiceId`
+         * repetido de esta misma peticion).
+         *
+         * Lo que si evita es la carrera: dos `payInvoice` concurrentes sobre la
+         * misma factura leian el mismo saldo y ambas asignaban su monto,
+         * dejando la factura pagada por mas de lo que vale. `FOR UPDATE`
+         * serializa el acceso, el segundo espera al primero y vuelve a leer el
+         * saldo ya actualizado.
+         */
+        await prisma.$queryRaw(
+          Prisma.sql`SELECT id FROM "Invoice" WHERE id IN (${Prisma.join(
+            details.map((d) => d.invoiceId),
+          )}) FOR UPDATE`,
+        );
+
+        /**
+         * El mismo problema del lado del pago: el saldo se calculaba FUERA de
+         * la transaccion (arriba), asi que dos asociaciones simultaneas del
+         * mismo pago a facturas distintas pasaban ambas la validacion y el
+         * pago quedaba sobreasignado. Se bloquea la fila del pago y se
+         * recalcula el disponible con las asignaciones ya confirmadas.
+         *
+         * El lock de facturas de arriba no cubre este caso, porque dos facturas
+         * distintas son filas distintas y no se bloquean entre si.
+         */
+        await prisma.$queryRaw(
+          Prisma.sql`SELECT id FROM "Payment" WHERE id = ${findPayment.id} FOR UPDATE`,
+        );
+
+        const lockedAllocations = await prisma.invoicePayment.findMany({
+          where: { paymentId: findPayment.id },
+          select: { amount: true },
+        });
+
+        const lockedBalance = calculatePaymentRemaining(
+          findPayment.amount,
+          findPayment.account.method.currency,
+          findPayment.dolar.dolar,
+          lockedAllocations,
+        );
+
+        if (totalInvoices > lockedBalance.remainingUSD) {
+          throw new Error(
+            'La cantidad a pagar excede la cantidad disponible del pago.',
+          );
+        }
+
+        for (const payDetail of details) {
           const findInvoice = await prisma.invoice.findFirst({
             where: { id: payDetail.invoiceId },
             include: {
@@ -1673,12 +1793,21 @@ export class PaymentsService {
             );
           }
 
+          if (findInvoice.deleted) {
+            throw new Error(
+              `La factura #${findInvoice.controlNumber} esta eliminada y no admite pagos.`,
+            );
+          }
+
           const currentInvoiceRemaining = calculateInvoiceRemainingUsd(
             findInvoice.totalAmount,
             findInvoice.InvoicePayment,
           );
 
-          if (findInvoice.status === 'Pagado' || currentInvoiceRemaining <= 0) {
+          if (
+            findInvoice.status === 'Pagado' ||
+            isInvoiceSettled(currentInvoiceRemaining)
+          ) {
             throw new Error(
               `La factura #${findInvoice.controlNumber} ya está pagada.`,
             );
@@ -1709,8 +1838,12 @@ export class PaymentsService {
             invoicePaymentsAfter,
           );
 
-          const statusInvoice: InvoiceStatus =
-            remainingAfter <= 2 ? 'Pagado' : 'Pendiente';
+          // Regla de negocio centralizada: tolerancia configurable
+          // (PAYMENT_TOLERANCE_USD, default 2). Antes la misma comparacion
+          // `remainingAfter <= 2` vivia duplicada en dos servicios.
+          const statusInvoice: InvoiceStatus = isInvoiceSettled(remainingAfter)
+            ? 'Pagado'
+            : 'Pendiente';
 
           await prisma.invoice.update({
             where: { id: findInvoice.id },
@@ -1860,22 +1993,39 @@ export class PaymentsService {
 
   async payDisassociate(pay: PayDisassociateDTO) {
     try {
-      const findPaymentAssociate =
-        await this.prismaService.invoicePayment.findFirst({
+      await this.prismaService.$transaction(async (tx) => {
+        /**
+         * `invoiceId` y `paymentId` se leen de la asociacion, no del DTO. El
+         * DTO los manda el cliente y no se verificaban contra la fila, asi que
+         * un `invoiceId` equivocado reparaba el status de la factura que
+         * mandaba el cliente y dejaba la realmente afectada con el viejo.
+         */
+        const association = await tx.invoicePayment.findFirst({
           where: { id: pay.id },
+          select: { invoiceId: true, paymentId: true },
         });
 
-      if (!findPaymentAssociate) {
-        throw new Error(
-          `No se encontró la asociación de pago con ID ${pay.id}`,
-        );
-      }
+        if (!association) {
+          throw new Error(
+            `No se encontró la asociación de pago con ID ${pay.id}`,
+          );
+        }
 
-      await this.prismaService.$transaction(async (tx) => {
+        /**
+         * Mismo orden que `payInvoice` (Invoice -> Payment) para que un
+         * desasociar concurrente con un asociar no se deadlockeen.
+         */
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "Invoice" WHERE id = ${association.invoiceId} FOR UPDATE`,
+        );
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "Payment" WHERE id = ${association.paymentId} FOR UPDATE`,
+        );
+
         await tx.invoicePayment.delete({ where: { id: pay.id } });
 
         const invoice = await tx.invoice.findUnique({
-          where: { id: pay.invoiceId },
+          where: { id: association.invoiceId },
           include: { InvoicePayment: { select: { amount: true } } },
         });
 
@@ -1884,13 +2034,14 @@ export class PaymentsService {
             invoice.totalAmount,
             invoice.InvoicePayment,
           );
+
           await tx.invoice.update({
             where: { id: invoice.id },
-            data: { status: remaining <= 2 ? 'Pagado' : 'Pendiente' },
+            data: {
+              status: isInvoiceSettled(remaining) ? 'Pagado' : 'Pendiente',
+            },
           });
         }
-
-        return invoice;
       });
 
       return {
