@@ -50,15 +50,25 @@ export function calculateInvoicePaidUsd(
  * pagadas con muy poco dinero realmente cobrado, asi que toda conversion se
  * hace en el borde de la API, nunca al sumar saldos.
  */
-export function calculateInvoiceRemainingUsd(
+export function calculateInvoiceRemainingUsdRaw(
   totalAmountUsd: DecimalLike,
   invoicePayments: Array<{ amount: DecimalLike }>,
-  tolerance: number = getPaymentTolerance(),
 ): number {
   const total = toNumber(totalAmountUsd);
   const paid = calculateInvoicePaidUsd(invoicePayments);
-  const remaining = round2(total - paid);
-  return remaining <= tolerance ? 0 : remaining;
+  return round2(total - paid);
+}
+
+export function calculateInvoiceRemainingUsd(
+  totalAmountUsd: DecimalLike,
+  invoicePayments: Array<{ amount: DecimalLike }>,
+  // tolerance: number = getPaymentTolerance(),
+): number {
+  const remaining = calculateInvoiceRemainingUsdRaw(
+    totalAmountUsd,
+    invoicePayments,
+  );
+  return remaining;
 }
 
 /** Un saldo esta saldado cuando no supera la tolerancia configurada. */

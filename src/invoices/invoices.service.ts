@@ -23,6 +23,7 @@ import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import {
   calculateInvoiceRemainingUsd,
+  calculateInvoiceRemainingUsdRaw,
   isInvoiceSettled,
 } from 'src/common/remaining-calculator';
 import { endOfDayUtc, startOfDayUtc } from 'src/common/date-utils';
@@ -338,7 +339,7 @@ export class InvoicesService {
       const formattedInvoices = invoices.map((invoice) => {
         const totalItems = this.calculateInvoiceItems(invoice.invoiceItems);
         const remaining = Number(
-          calculateInvoiceRemainingUsd(
+          calculateInvoiceRemainingUsdRaw(
             invoice.totalAmount,
             invoice.InvoicePayment,
           ),
@@ -363,7 +364,7 @@ export class InvoicesService {
       const summaryPendingItems = allMatchingInvoices.reduce((sum, inv) => {
         const totalItems = itemsWeight(inv.invoiceItems);
         const remaining = Number(
-          calculateInvoiceRemainingUsd(inv.totalAmount, inv.InvoicePayment),
+          calculateInvoiceRemainingUsdRaw(inv.totalAmount, inv.InvoicePayment),
         );
         const totalAmount = Number(inv.totalAmount);
         return (
@@ -607,7 +608,7 @@ export class InvoicesService {
         const invoiceRemaining =
           invoice.status == 'Pagado'
             ? 0
-            : calculateInvoiceRemainingUsd(
+            : calculateInvoiceRemainingUsdRaw(
                 invoice.totalAmount,
                 invoice.InvoicePayment,
               );
@@ -1013,7 +1014,7 @@ export class InvoicesService {
       }
 
       const totalAmount = Number(invoice.totalAmount);
-      const remaining = calculateInvoiceRemainingUsd(
+      const remaining = calculateInvoiceRemainingUsdRaw(
         invoice.totalAmount,
         invoice.InvoicePayment,
       );
@@ -1075,7 +1076,7 @@ export class InvoicesService {
       const invoices = rawInvoices.map((data) => ({
         ...data,
         totalAmount: data.totalAmount.toFixed(2),
-        remaining: calculateInvoiceRemainingUsd(
+        remaining: calculateInvoiceRemainingUsdRaw(
           data.totalAmount,
           data.InvoicePayment,
         ).toFixed(2),
@@ -1184,7 +1185,7 @@ export class InvoicesService {
             return {
               ...data,
               totalAmount: data.totalAmount.toFixed(2),
-              remaining: calculateInvoiceRemainingUsd(
+              remaining: calculateInvoiceRemainingUsdRaw(
                 data.totalAmount,
                 data.InvoicePayment,
               ).toFixed(2),
@@ -1320,7 +1321,7 @@ export class InvoicesService {
                     acc + Number(det.unitPriceUSD) * Number(det.quantity),
                   0,
                 ),
-              remaining: calculateInvoiceRemainingUsd(
+              remaining: calculateInvoiceRemainingUsdRaw(
                 data.totalAmount,
                 data.InvoicePayment,
               ),
