@@ -28,6 +28,12 @@ import {
   isPendingConfirmationMethod,
   looksLikeLegacyExpenseAccount,
 } from 'src/common/business-rules';
+import {
+  getAmountSearchRange,
+  isAmountInSearchRange,
+  parseAmountSearch,
+  AmountSearchRange,
+} from 'src/common/amount-search';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 interface PaymentFilterPaginate extends PaymentFilter {
@@ -57,6 +63,16 @@ const SPANISH_WEEKDAYS = [
   'Jueves',
   'Viernes',
   'Sábado',
+];
+
+/**
+ * Orden de las listas de pagos. `id` desempata: sin el, dos pagos de la misma
+ * fecha pueden repetirse o perderse entre paginas segun el plan de ejecucion
+ * que elija la base.
+ */
+const PAYMENT_PAGE_ORDER: Prisma.PaymentOrderByWithRelationInput[] = [
+  { paymentDate: 'desc' },
+  { id: 'desc' },
 ];
 
 interface InvoiceAnalysisRow {
@@ -99,6 +115,120 @@ export class PaymentsService {
     return `${y}-${m}-${d}`;
   }
 
+  /**
+   * Parte textual de `search`: cuenta, cliente y referencia.
+   *
+   * El monto NO se resuelve aqui. Compararlo exige convertir con la tasa del
+   * pago (`amount * dolar.dolar`), producto de dos columnas que Prisma no
+   * acepta en un `where`, asi que se evalua pago por pago en
+   * `isAmountInSearchRange`.
+   */
+  private buildPaymentSearchWhere(search: string): Prisma.PaymentWhereInput {
+    return {
+      OR: [
+        {
+          account: {
+            name: { contains: search, mode: 'insensitive' },
+          },
+        },
+        {
+          InvoicePayment: {
+            some: {
+              invoice: {
+                client: {
+                  name: { contains: search, mode: 'insensitive' },
+                },
+              },
+            },
+          },
+        },
+        {
+          reference: { contains: search, mode: 'insensitive' },
+        },
+      ],
+    };
+  }
+
+  /** Rango de monto derivado del termino de busqueda, o `undefined` si es texto. */
+  private getAmountSearchRangeFromSearch(
+    search?: string,
+  ): AmountSearchRange | undefined {
+    const value = search ? parseAmountSearch(search) : undefined;
+    return value === undefined ? undefined : getAmountSearchRange(value);
+  }
+
+  /**
+   * Ids de los pagos cuyo monto cae en el rango, en cualquiera de sus tres
+   * representaciones (original, Bs y USD).
+   *
+   * No puede resolverse en el `where`: comparar el monto convertido exige
+   * `amount * dolar.dolar`, producto de dos columnas. Se lee lo justo para
+   * convertir (monto, tasa y moneda de la cuenta) y se filtra en memoria; los
+   * ids vuelven al `where` como una rama mas del `OR` de la busqueda.
+   *
+   * La lista no esta acotada mas que por el rango: con la tolerancia por
+   * defecto "200" trae ~1.500 ids de 10.058 pagos. Es el mismo volumen que ya
+   * maneja la fase de `credit === 'credit'`.
+   */
+  private async getPaymentIdsInAmountRange(
+    where: Prisma.PaymentWhereInput,
+    range: AmountSearchRange,
+  ): Promise<number[]> {
+    const candidates = await this.prismaService.payment.findMany({
+      where,
+      select: {
+        id: true,
+        amount: true,
+        dolar: { select: { dolar: true } },
+        account: { select: { method: { select: { currency: true } } } },
+      },
+    });
+
+    return candidates
+      .filter((candidate) =>
+        isAmountInSearchRange(
+          {
+            amount: candidate.amount,
+            currency: candidate.account.method.currency as 'USD' | 'BS',
+            dolarRate: candidate.dolar.dolar,
+          },
+          range,
+        ),
+      )
+      .map((candidate) => candidate.id);
+  }
+
+  /**
+   * Agrega la busqueda al filtro. El monto es una rama MAS del mismo `OR` que
+   * el texto, no un filtro encima: buscar "200" tiene que seguir encontrando
+   * una referencia o un cliente que contengan "200", y ademas los pagos cuyo
+   * monto cae en el rango.
+   *
+   * El `amount BETWEEN` que se usaba antes solo comparaba contra la moneda
+   * original de cada pago: en produccion, "200" devolvia 56 resultados (pagos
+   * de 200 Bs, que valen ~0,23 USD) y perdia los ~1.400 pagos en Bs que si
+   * valen 200 USD.
+   */
+  private async pushPaymentSearchFilter(
+    andFilters: Prisma.PaymentWhereInput[],
+    search: string | undefined,
+    amountRange: AmountSearchRange | undefined,
+    where: Prisma.PaymentWhereInput,
+  ): Promise<void> {
+    if (!search) return;
+
+    if (!amountRange) {
+      andFilters.push(this.buildPaymentSearchWhere(search));
+      return;
+    }
+
+    const amountIds = await this.getPaymentIdsInAmountRange(where, amountRange);
+
+    andFilters.push({
+      OR: [this.buildPaymentSearchWhere(search), { id: { in: amountIds } }],
+    });
+  }
+
   // NUEVOS MÉTODOS OPTIMIZADOS EN PaymentsService
 
   async getPaymentsPaginated(filters: PaymentFilterPaginate) {
@@ -119,6 +249,13 @@ export class PaymentsService {
         search,
       } = filters;
       const skip = (page - 1) * limit;
+
+      /**
+       * `search` numerico no se puede filtrar en el `where` (ver
+       * `pushPaymentSearchFilter`): el rango se calcula aparte y vuelve como
+       * una rama del mismo `OR` textual.
+       */
+      const amountRange = this.getAmountSearchRangeFromSearch(search);
 
       // Construir where clause dinámicamente
       const where: any = {
@@ -174,44 +311,6 @@ export class PaymentsService {
         });
       }
 
-      if (search) {
-        const searchAsNumber = parseFloat(search);
-        const isValidNumber = !isNaN(searchAsNumber);
-
-        andFilters.push({
-          OR: [
-            {
-              account: {
-                name: { contains: search, mode: 'insensitive' },
-              },
-            },
-            {
-              InvoicePayment: {
-                some: {
-                  invoice: {
-                    client: {
-                      name: { contains: search, mode: 'insensitive' },
-                    },
-                  },
-                },
-              },
-            },
-            {
-              reference: { contains: search, mode: 'insensitive' },
-            },
-            // `amount` es Decimal(10,2): un rango de 1 unidad capturaba
-            // "100" junto con "100.99". Se acota a 2 decimales.
-            ...(isValidNumber
-              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 1 } }]
-              : []),
-          ],
-        });
-      }
-
-      if (andFilters.length > 0) {
-        where.AND = andFilters;
-      }
-
       if (typeDescription) {
         where.description = {
           contains: typeDescription,
@@ -245,6 +344,23 @@ export class PaymentsService {
 
       if (paymentType) {
         where.type = paymentType;
+      }
+
+      /**
+       * `search` se resuelve al final, con fechas, cuenta, metodo y tipo ya
+       * armados. Queda fuera el filtro de tipo de producto, que sigue en
+       * `andFilters`: la lista de ids puede traer de mas, y esa misma lista
+       * AND lo descarta en la consulta final.
+       */
+      await this.pushPaymentSearchFilter(
+        andFilters,
+        search,
+        amountRange,
+        where,
+      );
+
+      if (andFilters.length > 0) {
+        where.AND = andFilters;
       }
 
       const paymentSelect = {
@@ -351,7 +467,7 @@ export class PaymentsService {
       if (credit === 'credit') {
         const candidates = await this.prismaService.payment.findMany({
           where,
-          orderBy: { paymentDate: 'desc' },
+          orderBy: PAYMENT_PAGE_ORDER,
           select: {
             id: true,
             amount: true,
@@ -385,7 +501,7 @@ export class PaymentsService {
               })
             : [];
 
-        // Restaurar el orden global (paymentDate desc) de la pagina.
+        // Restaurar el orden global (paymentDate desc, id desc) de la pagina.
         const order = new Map(pageIds.map((id, index) => [id, index]));
         payments.sort(
           (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
@@ -395,7 +511,7 @@ export class PaymentsService {
           this.prismaService.payment.findMany({
             select: paymentSelect,
             where,
-            orderBy: { paymentDate: 'desc' },
+            orderBy: PAYMENT_PAGE_ORDER,
             skip,
             take: limit,
           }),
@@ -470,6 +586,13 @@ export class PaymentsService {
         search,
       } = filters;
 
+      /**
+       * `search` numerico se resuelve fuera del `where`: el rango se compara
+       * contra las tres representaciones del monto (original, Bs y USD), lo
+       * que exige `amount * dolar.dolar`.
+       */
+      const amountRange = this.getAmountSearchRangeFromSearch(search);
+
       // Construir where clause dinámicamente
       const where: any = {
         // Las estadísticas de ingresos solo consideran pagos INCOME
@@ -520,43 +643,6 @@ export class PaymentsService {
         });
       }
 
-      if (search) {
-        const searchAsNumber = parseFloat(search);
-        const isValidNumber = !isNaN(searchAsNumber);
-
-        andFilters.push({
-          OR: [
-            {
-              account: {
-                name: { contains: search, mode: 'insensitive' },
-              },
-            },
-            {
-              InvoicePayment: {
-                some: {
-                  invoice: {
-                    client: {
-                      name: { contains: search, mode: 'insensitive' },
-                    },
-                  },
-                },
-              },
-            },
-            {
-              reference: { contains: search, mode: 'insensitive' },
-            },
-            // `amount` es Decimal(10,2): un rango de 1 unidad capturaba
-            // "100" junto con "100.99". Se acota a 2 decimales.
-            ...(isValidNumber
-              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 1 } }]
-              : []),
-          ],
-        });
-      }
-
-      if (andFilters.length > 0) {
-        where.AND = andFilters;
-      }
       if (typeDescription) {
         where.description = {
           contains: typeDescription,
@@ -585,6 +671,23 @@ export class PaymentsService {
           // Los pagos sin asociar a facturas se filtran por type INCOME
           where.type = 'INCOME';
         }
+      }
+
+      /**
+       * `search` se resuelve al final, con el resto de los filtros ya armados.
+       * Queda fuera el filtro de tipo de producto, que sigue en `andFilters`:
+       * la lista de ids puede traer de mas, y esa misma lista AND lo descarta
+       * en la consulta final.
+       */
+      await this.pushPaymentSearchFilter(
+        andFilters,
+        search,
+        amountRange,
+        where,
+      );
+
+      if (andFilters.length > 0) {
+        where.AND = andFilters;
       }
 
       const payments = await this.prismaService.payment.findMany({
