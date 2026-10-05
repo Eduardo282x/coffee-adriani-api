@@ -202,7 +202,7 @@ export class PaymentsService {
             // `amount` es Decimal(10,2): un rango de 1 unidad capturaba
             // "100" junto con "100.99". Se acota a 2 decimales.
             ...(isValidNumber
-              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 0.01 } }]
+              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 1 } }]
               : []),
           ],
         });
@@ -548,7 +548,7 @@ export class PaymentsService {
             // `amount` es Decimal(10,2): un rango de 1 unidad capturaba
             // "100" junto con "100.99". Se acota a 2 decimales.
             ...(isValidNumber
-              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 0.01 } }]
+              ? [{ amount: { gte: searchAsNumber, lt: searchAsNumber + 1 } }]
               : []),
           ],
         });
