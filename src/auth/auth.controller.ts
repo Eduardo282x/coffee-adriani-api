@@ -31,7 +31,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ auth: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post()
   async authLogin(@Body() credentials: DTOLogin, @Req() req: RequestWithMeta) {
     return (await this.authService.login(credentials, this.meta(req))) as
@@ -43,7 +43,7 @@ export class AuthController {
    * cuerpo, no en el header Authorization.
    */
   @Public()
-  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(200)
   @Post('/refresh')
   async authRefresh(
@@ -71,7 +71,7 @@ export class AuthController {
   }
 
   @Roles('Administrador')
-  @Throttle({ auth: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('/recover')
   async authRecover(
     @Body() credentials: DTORecover,

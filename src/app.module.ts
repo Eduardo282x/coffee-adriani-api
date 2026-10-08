@@ -66,11 +66,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     EntryPaymentsModule,
     TestCronModule,
     ThrottlerModule.forRoot({
-      throttlers: [
-        { name: 'default', ttl: 60_000, limit: 100 },
-        { name: 'auth', ttl: 60_000, limit: 10 },
-        { name: 'writes', ttl: 60_000, limit: 30 },
-      ],
+      throttlers: [{ name: 'default', ttl: 60_000, limit: 100 }],
     }),
   ],
   controllers: [AppController],
