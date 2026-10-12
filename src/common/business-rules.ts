@@ -70,3 +70,27 @@ export function looksLikeLegacyExpenseAccount(accountName: string): boolean {
     .toLowerCase();
   return getLegacyExpenseAccountNames().some((needle) => name.includes(needle));
 }
+
+/**
+ * Productos de ajuste ("Bultos Viejos - perdidos") cuya cantidad se cuenta
+ * COMPLETA en las estadisticas de facturas, sin netearse contra los pagos.
+ *
+ * Motivo: son bultos de periodos anteriores que no estan contemplados en el
+ * inventario. Netearlos contra los pagos EXPENSE descuadra la conciliacion
+ * `inventario + bultos pendientes` contra la deuda de la plantilla.
+ *
+ * Configurable con `NON_NETTABLE_PRODUCT_IDS` (lista CSV de IDs). Default: 23.
+ * Para DESHABILITAR la funcion sin tocar codigo: poner un ID inexistente
+ * (p. ej. `NON_NETTABLE_PRODUCT_IDS=-1`) en el entorno. Tambien se puede
+ * comentar el uso de `isNonNettableProduct` en `invoices.service.ts`
+ * (metodo `getInvoiceStatistics`).
+ */
+export function getNonNettableProductIds(): number[] {
+  return csvEnv('NON_NETTABLE_PRODUCT_IDS', ['23'])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
+export function isNonNettableProduct(productId: number): boolean {
+  return getNonNettableProductIds().includes(Number(productId));
+}

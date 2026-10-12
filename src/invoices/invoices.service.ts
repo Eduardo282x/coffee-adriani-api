@@ -27,6 +27,7 @@ import {
   isInvoiceSettled,
 } from 'src/common/remaining-calculator';
 import { endOfDayUtc, startOfDayUtc } from 'src/common/date-utils';
+import { isNonNettableProduct } from 'src/common/business-rules';
 import { N8nService } from 'src/n8n/n8n.service';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
 
@@ -639,12 +640,28 @@ export class InvoicesService {
           const productKey = item.productId;
           const productName = `${product.name} ${product.presentation}`;
 
+          /**
+           * Productos de ajuste ("Bultos Viejos - perdidos"): su cantidad se
+           * cuenta COMPLETA como pendiente en la estadistica, sin netearse
+           * contra los pagos. Son bultos de periodos anteriores que no estan en
+           * inventario, y descontarlos contra los pagos descuadra la
+           * conciliacion `inventario + pendiente` vs. la deuda de la plantilla.
+           *
+           * DESHABILITAR: comentar este bloque / la variable
+           * `effectiveInvoicePaid`, o definir `NON_NETTABLE_PRODUCT_IDS` con un
+           * ID inexistente en el entorno (ver `business-rules.ts`).
+           */
+          const effectiveInvoicePaid =
+            product.type === 'Cafe' && isNonNettableProduct(item.productId)
+              ? 0
+              : invoicePaid;
+
           const itemStats = this.computeItemStatistics(
             item,
             product,
             exchangeRateUsed,
             invoiceTotal,
-            invoicePaid,
+            effectiveInvoicePaid,
             wasInvoiceInUSD,
             paymentsByCurrency,
           );
