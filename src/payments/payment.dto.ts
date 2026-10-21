@@ -81,6 +81,57 @@ export class PayDisassociateDTO {
   id: number;
 }
 
+export interface PaymentReportFilters {
+  type?: string;
+  startDate: string | Date;
+  endDate: string | Date;
+}
+
+export interface PaymentReportInvoiceItem {
+  quantity: number;
+  unitPrice: number;
+  unitPriceUSD: number | null;
+  product: {
+    name: string;
+    presentation: string;
+    type: string;
+  };
+}
+
+export interface PaymentReportInvoice {
+  id: number;
+  controlNumber: string;
+  totalAmount: number;
+  client: {
+    block: { name: string };
+  };
+  invoiceItems: PaymentReportInvoiceItem[];
+}
+
+export interface PaymentReportRow {
+  id: number;
+  paymentDate: Date;
+  reference: string;
+  amount: number;
+  description: string | null;
+  account: {
+    name: string;
+    method: {
+      name: string;
+      currency: string;
+    };
+  };
+  dolar: { dolar: number };
+  InvoicePayment: Array<{
+    amount: number;
+    invoice: PaymentReportInvoice;
+  }>;
+}
+
+export interface PaymentsReport {
+  payments: PaymentReportRow[];
+}
+
 export class AccountsDTO {
   @IsString()
   name: string;

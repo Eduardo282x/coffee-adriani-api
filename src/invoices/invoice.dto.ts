@@ -213,6 +213,42 @@ export interface Summary {
   paymentPercentage: number;
 }
 
+export interface InvoiceReportFilters {
+  type?: string;
+  startDate?: string | Date;
+  endDate: string | Date;
+}
+
+export interface InvoiceReportItem {
+  productId: number;
+  quantity: number;
+  unitPrice: number;
+  unitPriceUSD: number | null;
+  product: {
+    id: number;
+    name: string;
+    presentation: string;
+    type: string;
+  };
+}
+
+export interface InvoiceReportRow {
+  id: number;
+  controlNumber: string;
+  dispatchDate: Date;
+  dueDate: Date;
+  totalAmount: number;
+  status: string;
+  remaining: number;
+  client: {
+    name: string;
+    zone: string;
+    block: { name: string };
+  };
+  invoiceItems: InvoiceReportItem[];
+  InvoicePayment: Array<{ amount: number }>;
+}
+
 export class DTOQueryFilterExport extends DashboardExcel {
   @IsString()
   @IsOptional()

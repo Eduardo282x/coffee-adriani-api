@@ -13,6 +13,9 @@ import {
   PayDisassociateDTO,
   PayInvoiceDTO,
   PaymentDTO,
+  PaymentReportFilters,
+  PaymentReportRow,
+  PaymentsReport,
 } from './payment.dto';
 import { ProductsService } from 'src/products/products.service';
 import { BankData } from './payments.data';
@@ -35,6 +38,12 @@ import {
   AmountSearchRange,
 } from 'src/common/amount-search';
 import { InvoiceStatus } from 'src/generated/prisma/enums';
+import {
+  endOfDayUtc,
+  formatDateInTz,
+  getBusinessTimeZone,
+  startOfDayUtc,
+} from 'src/common/date-utils';
 
 interface PaymentFilterPaginate extends PaymentFilter {
   page: number;
@@ -100,12 +109,19 @@ export class PaymentsService {
     private readonly invoicesService: InvoicesService,
   ) {}
 
-  private getStartOfDayUtc(date: string) {
-    return new Date(`${date}T00:00:00.000Z`);
+  /**
+   * Delegado en `src/common/date-utils.ts`, igual que `InvoicesService`.
+   *
+   * Antes se anexaba `T00:00:00.000Z`, es decir medianoche UTC, que en Caracas
+   * es 20:00 del dia anterior. Los rangos de pagos quedaban corridos 4 horas
+   * respecto de facturas, dashboard y reportes.
+   */
+  private getStartOfDayUtc(date: string | Date) {
+    return startOfDayUtc(date);
   }
 
-  private getEndOfDayUtc(date: string) {
-    return new Date(`${date}T23:59:59.999Z`);
+  private getEndOfDayUtc(date: string | Date) {
+    return endOfDayUtc(date);
   }
 
   private toDateKeyUTC(date: Date): string {
@@ -1057,6 +1073,166 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Filas de pagos INCOME listas para los reportes (Excel del dashboard).
+   *
+   * Aplica el mismo filtro por tipo que `getPaymentsStatistics`: los pagos sin
+   * factura asociada se conservan y, si hay `type`, solo se devuelven las
+   * facturas asociadas que contengan al menos un item de ese tipo.
+   *
+   * Los totales de divisas y transferencias NO se calculan aqui: el dashboard
+   * reutiliza `getPaymentsStatistics().totals`, que es la misma fuente que la
+   * seccion de pagos. Asi ambos numeros no pueden divergir.
+   */
+  async getPaymentsForReport(
+    filters: PaymentReportFilters,
+  ): Promise<PaymentsReport> {
+    const { type, startDate, endDate } = filters;
+
+    const where: any = {
+      deleted: false,
+      type: 'INCOME',
+      paymentDate: {
+        gte: startOfDayUtc(startDate),
+        lte: endOfDayUtc(endDate),
+      },
+    };
+
+    if (type) {
+      where.AND = [
+        {
+          OR: [
+            { InvoicePayment: { none: {} } },
+            {
+              InvoicePayment: {
+                some: {
+                  invoice: {
+                    invoiceItems: {
+                      some: {
+                        product: {
+                          type: type,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ];
+    }
+
+    const payments = await this.prismaService.payment.findMany({
+      where,
+      select: {
+        id: true,
+        paymentDate: true,
+        reference: true,
+        amount: true,
+        description: true,
+        account: {
+          select: {
+            name: true,
+            method: {
+              select: {
+                name: true,
+                currency: true,
+              },
+            },
+          },
+        },
+        dolar: {
+          select: { dolar: true },
+        },
+        InvoicePayment: {
+          select: {
+            amount: true,
+            invoice: {
+              select: {
+                id: true,
+                controlNumber: true,
+                totalAmount: true,
+                client: {
+                  select: {
+                    block: {
+                      select: { name: true },
+                    },
+                  },
+                },
+                invoiceItems: {
+                  select: {
+                    quantity: true,
+                    unitPrice: true,
+                    unitPriceUSD: true,
+                    product: {
+                      select: {
+                        name: true,
+                        presentation: true,
+                        type: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { paymentDate: 'asc' },
+    });
+
+    const reportPayments: PaymentReportRow[] = payments.map((payment) => {
+      const invoicePayments = type
+        ? payment.InvoicePayment.filter(
+            (invoicePayment) =>
+              !!invoicePayment.invoice &&
+              invoicePayment.invoice.invoiceItems.some(
+                (item) => item.product?.type === type,
+              ),
+          )
+        : payment.InvoicePayment;
+
+      return {
+        id: payment.id,
+        paymentDate: payment.paymentDate,
+        reference: payment.reference,
+        amount: Number(payment.amount),
+        description: payment.description ?? null,
+        account: {
+          name: payment.account.name,
+          method: {
+            name: payment.account.method.name,
+            currency: payment.account.method.currency,
+          },
+        },
+        dolar: {
+          dolar: Number(payment.dolar?.dolar ?? 0),
+        },
+        InvoicePayment: invoicePayments.map((invoicePayment) => ({
+          amount: Number(invoicePayment.amount),
+          invoice: {
+            id: invoicePayment.invoice.id,
+            controlNumber: invoicePayment.invoice.controlNumber,
+            totalAmount: Number(invoicePayment.invoice.totalAmount),
+            client: invoicePayment.invoice.client,
+            invoiceItems: invoicePayment.invoice.invoiceItems.map((item) => ({
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+              unitPriceUSD:
+                item.unitPriceUSD !== null && item.unitPriceUSD !== undefined
+                  ? Number(item.unitPriceUSD)
+                  : null,
+              product: item.product,
+            })),
+          },
+        })),
+      };
+    });
+
+    return { payments: reportPayments };
+  }
+
   async getPaymentItemsAnalysis(filter: DashboardExcel) {
     const { type, startDate, endDate } = filter;
     const startDateStr = this.toDateKeyUTC(new Date(startDate));
@@ -1175,8 +1351,11 @@ export class PaymentsService {
     for (const payment of payments) {
       totalPayments += 1;
 
+      // La fecha del pago se agrupa por dia de calendario en la zona de
+      // negocio: antes se usaba el dia UTC y los pagos de la noche caian en el
+      // dia siguiente, fuera del rango que los trajo.
       const dayEntry = dailyMap.get(
-        this.toDateKeyUTC(new Date(payment.paymentDate)),
+        formatDateInTz(new Date(payment.paymentDate), getBusinessTimeZone()),
       );
 
       for (const ip of payment.InvoicePayment) {

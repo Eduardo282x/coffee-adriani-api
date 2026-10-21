@@ -11,6 +11,8 @@ import {
   DetProducts,
   DTOInvoice,
   DTOQueryFilterExport,
+  InvoiceReportFilters,
+  InvoiceReportRow,
   InvoiceStatistics,
   OptionalFilterInvoices,
   ResponseInvoice,
@@ -830,6 +832,115 @@ export class InvoicesService {
       badResponse.message = errMsg || 'Error calculating invoice statistics';
       return badResponse;
     }
+  }
+
+  /**
+   * Filas de facturas listas para los reportes (Excel del dashboard).
+   *
+   * Centraliza el mismo criterio de filtrado que `getInvoiceStatistics`:
+   * `type` compara exacto y el rango se interpreta como dias calendario en la
+   * zona de negocio. Cuando `startDate` se omite se devuelve todo el historico
+   * hasta `endDate`, que es lo que necesita el acumulado de centros.
+   */
+  async getInvoicesForReport(
+    filters: InvoiceReportFilters,
+  ): Promise<InvoiceReportRow[]> {
+    const { type, startDate, endDate } = filters;
+
+    const where: any = { deleted: false };
+
+    if (startDate) {
+      where.dispatchDate = {
+        ...(where.dispatchDate || {}),
+        gte: this.getStartOfDayUtc(startDate),
+      };
+    }
+    if (endDate) {
+      where.dispatchDate = {
+        ...(where.dispatchDate || {}),
+        lte: this.getEndOfDayUtc(endDate),
+      };
+    }
+
+    if (type) {
+      where.invoiceItems = {
+        some: {
+          product: {
+            type: type,
+          },
+        },
+      };
+    }
+
+    const invoices = await this.prismaService.invoice.findMany({
+      where,
+      select: {
+        id: true,
+        controlNumber: true,
+        dispatchDate: true,
+        dueDate: true,
+        totalAmount: true,
+        status: true,
+        client: {
+          select: {
+            name: true,
+            zone: true,
+            block: {
+              select: { name: true },
+            },
+          },
+        },
+        invoiceItems: {
+          select: {
+            productId: true,
+            quantity: true,
+            unitPrice: true,
+            unitPriceUSD: true,
+            product: {
+              select: {
+                id: true,
+                name: true,
+                presentation: true,
+                type: true,
+              },
+            },
+          },
+        },
+        InvoicePayment: {
+          select: {
+            amount: true,
+          },
+        },
+      },
+      orderBy: { dispatchDate: 'asc' },
+    });
+
+    return invoices.map((invoice) => ({
+      id: invoice.id,
+      controlNumber: invoice.controlNumber,
+      dispatchDate: invoice.dispatchDate,
+      dueDate: invoice.dueDate,
+      totalAmount: Number(invoice.totalAmount),
+      status: invoice.status,
+      remaining: calculateInvoiceRemainingUsd(
+        invoice.totalAmount,
+        invoice.InvoicePayment,
+      ),
+      client: invoice.client,
+      invoiceItems: invoice.invoiceItems.map((item) => ({
+        productId: item.productId,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unitPrice),
+        unitPriceUSD:
+          item.unitPriceUSD !== null && item.unitPriceUSD !== undefined
+            ? Number(item.unitPriceUSD)
+            : null,
+        product: item.product,
+      })),
+      InvoicePayment: invoice.InvoicePayment.map((payment) => ({
+        amount: Number(payment.amount),
+      })),
+    }));
   }
 
   // NUEVO MÉTODO AUXILIAR: Analizar pagos por moneda

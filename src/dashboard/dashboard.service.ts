@@ -15,7 +15,6 @@ import { es } from 'date-fns/locale';
 import { InvoicesService } from 'src/invoices/invoices.service';
 import { InvoiceStatistics } from 'src/invoices/invoice.dto';
 import { PaymentsService } from 'src/payments/payments.service';
-import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
 import {
   endOfDayUtc,
   formatDateInTz,
@@ -167,11 +166,11 @@ export class DashboardService {
 
   async getDashboardData(filter: DashboardExcel) {
     try {
-      // Formatear fechas como YYYY-MM-DD para compatibilidad con los servicios
-      const formatDateStr = (date: Date | string): string => {
-        const d = date instanceof Date ? date : new Date(date);
-        return format(d, 'yyyy-MM-dd');
-      };
+      // Formatear fechas como YYYY-MM-DD en la zona de negocio. `format` de
+      // date-fns usa la TZ del runtime y puede desplazar el dia si el servidor
+      // no corre en `BUSINESS_TZ`.
+      const formatDateStr = (date: Date | string): string =>
+        formatDateInTz(startOfDayUtc(date), getBusinessTimeZone());
       const startDateStr = formatDateStr(filter.startDate);
       const endDateStr = formatDateStr(filter.endDate);
 
@@ -373,21 +372,37 @@ export class DashboardService {
   async generateInventoryAndInvoicesExcelV2(
     filter: DashboardExcel,
   ): Promise<Buffer> {
-    // `endDatePlusOne` sumaba un dia en hora local y luego se tomaba el
-    // "fin de dia" de ese dia siguiente, dejando entrar 24 horas extra de pagos
-    // en cada export. El rango ya esta definido por `endOfRange`.
-    const startOfRange = this.getStartOfDayUtc(filter.startDate);
-    const endOfRange = this.getEndOfDayUtc(filter.endDate);
+    // Normalizar una sola vez: los servicios reciben dias de calendario
+    // (`YYYY-MM-DD`) y el Excel usa el mismo rango en UTC.
+    const startYmd = formatDateInTz(
+      filter.startDate instanceof Date
+        ? filter.startDate
+        : new Date(filter.startDate),
+      getBusinessTimeZone(),
+    );
+    const endYmd = formatDateInTz(
+      filter.endDate instanceof Date
+        ? filter.endDate
+        : new Date(filter.endDate),
+      getBusinessTimeZone(),
+    );
 
-    // 1. Ejecutar todas las consultas en paralelo con selects optimizados
+    const startOfRange = this.getStartOfDayUtc(startYmd);
+    const endOfRange = this.getEndOfDayUtc(endYmd);
+
+    // 1. Ejecutar todas las consultas en paralelo. Facturas y pagos se
+    // obtienen de sus servicios; el dashboard solo conserva las consultas de
+    // productos/inventario, que no pertenecen a esos dominios.
     const [
       productos,
       facturasCompletas,
-      pagosEnRango,
-      paymentStatistics,
-      // currentDolar,
+      paymentsReport,
+      paymentStatisticsCumulative,
+      paymentStatisticsWeek,
       stockRealPorProducto,
       inventarioEntradasEnRango,
+      invoiceStatisticsWeek,
+      invoiceStatistics,
     ] = await Promise.all([
       // Productos con solo campos necesarios
       this.prismaService.product.findMany({
@@ -406,150 +421,30 @@ export class DashboardService {
       }),
 
       // Facturas del tipo hasta el cierre (cubre rango + centros en una sola consulta)
-      this.prismaService.invoice.findMany({
-        where: {
-          deleted: false,
-          dispatchDate: {
-            lte: endOfRange,
-          },
-          // Igual que en `getDashboardData`: basta con que la factura
-          // contenga el tipo, no con que todos sus items sean del tipo.
-          invoiceItems: {
-            some: {
-              product: {
-                type: {
-                  contains: filter.type,
-                  mode: 'insensitive',
-                },
-              },
-            },
-          },
-        },
-        select: {
-          id: true,
-          controlNumber: true,
-          dispatchDate: true,
-          dueDate: true,
-          totalAmount: true,
-          status: true,
-          client: {
-            select: {
-              name: true,
-              zone: true,
-              block: {
-                select: { name: true },
-              },
-            },
-          },
-          invoiceItems: {
-            select: {
-              quantity: true,
-              unitPrice: true,
-              unitPriceUSD: true,
-              productId: true,
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  presentation: true,
-                },
-              },
-            },
-          },
-          InvoicePayment: {
-            select: {
-              amount: true,
-              payment: {
-                select: {
-                  account: {
-                    select: {
-                      method: {
-                        select: { currency: true },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        orderBy: { dispatchDate: 'asc' },
+      this.invoicesService.getInvoicesForReport({
+        type: filter.type,
+        endDate: endYmd,
       }),
 
-      // Pagos en rango
-      this.prismaService.payment.findMany({
-        where: {
-          deleted: false,
-          paymentDate: {
-            gte: this.getStartOfDayUtc(filter.startDate),
-            lte: this.getEndOfDayUtc(filter.endDate),
-          },
-          type: 'INCOME',
-        },
-        select: {
-          paymentDate: true,
-          reference: true,
-          amount: true,
-          description: true,
-          account: {
-            select: {
-              name: true,
-              method: {
-                select: {
-                  name: true,
-                  currency: true,
-                },
-              },
-            },
-          },
-          dolar: {
-            select: { dolar: true },
-          },
-          InvoicePayment: {
-            select: {
-              amount: true,
-              invoice: {
-                select: {
-                  id: true,
-                  controlNumber: true,
-                  totalAmount: true,
-                  invoiceItems: {
-                    select: {
-                      quantity: true,
-                      unitPrice: true,
-                      product: {
-                        select: {
-                          name: true,
-                          presentation: true,
-                        },
-                      },
-                    },
-                  },
-                  client: {
-                    select: {
-                      block: {
-                        select: { name: true },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        orderBy: { paymentDate: 'asc' },
+      // Filas de pagos del rango para la hoja "Analisis de Pagos"
+      this.paymentsService.getPaymentsForReport({
+        type: filter.type,
+        startDate: startYmd,
+        endDate: endYmd,
       }),
 
-      // Estadísticas de pagos (incluye unassociatedAmount)
+      // Estadísticas de pagos acumuladas: `unassociatedAmount` es histórico
+      // (desde 2000), igual que antes en el reporte semanal.
       this.paymentsService.getPaymentsStatistics({
-        // `new Date(2000, 1, 1)` depende de la zona local del contenedor y
-        // `format(new Date(filter.endDate))` puede desplazar el dia; ambos
-        // se pasan como cadenas de calendario ya resueltas.
         startDate: '2000-01-01',
-        endDate: formatDateInTz(
-          new Date(filter.endDate),
-          getBusinessTimeZone(),
-        ),
+        endDate: endYmd,
+        type: filter.type,
+      }),
+
+      // Estadísticas de pagos del rango: gastos y totales semanales.
+      this.paymentsService.getPaymentsStatistics({
+        startDate: startYmd,
+        endDate: endYmd,
         type: filter.type,
       }),
 
@@ -575,21 +470,37 @@ export class DashboardService {
           inventoryEntry: { select: { date: true } },
         },
       }),
+
+      // Estadísticas de la semana (rango del filtro)
+      this.invoicesService.getInvoiceStatistics({
+        type: filter.type,
+        startDate: startYmd,
+        endDate: endYmd,
+      }) as Promise<InvoiceStatistics>,
+
+      // Estadísticas acumuladas (desde 2020 hasta endDate) para bultosPorCobrar
+      this.invoicesService.getInvoiceStatistics({
+        type: filter.type,
+        startDate: '2020-01-01',
+        endDate: endYmd,
+      }) as Promise<InvoiceStatistics>,
     ]);
 
     // Derivar facturas del rango y facturas de centros a partir de la consulta única
-    const facturas = facturasCompletas.filter((f: any) => {
+    const facturas = facturasCompletas.filter((f) => {
       const d = new Date(f.dispatchDate);
       return d >= startOfRange && d <= endOfRange;
     });
-    const facturasCentros = facturasCompletas.filter((f: any) =>
+    const facturasCentros = facturasCompletas.filter((f) =>
       f.client.block.name.toLowerCase().includes('centro'),
     );
 
+    const pagosEnRango = paymentsReport.payments;
+
     // 2. Preparar estructuras de datos optimizadas
     const dias = eachDayOfInterval({
-      start: this.getStartOfDayUtc(filter.startDate),
-      end: this.getEndOfDayUtc(filter.endDate),
+      start: startOfRange,
+      end: endOfRange,
     });
     // const exchangeRateUsed = currentDolar?.dolar || 1;
 
@@ -623,77 +534,18 @@ export class DashboardService {
       stockRealPorProducto.map((row) => [row.productId, Number(row.quantity)]),
     );
 
-    // 3. Calcular métricas de pagos de forma eficiente
-    const pagosDivisas = pagosEnRango
-      .filter(
-        (p) =>
-          p.account.method.name.toLowerCase().includes('efectivo') &&
-          p.account.method.currency.toLowerCase().includes('usd'),
-      )
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    // 3. Métricas de pagos: se reutilizan los totales de `getPaymentsStatistics`,
+    // que es la misma fuente de la seccion de pagos. Antes "Divisas" y
+    // "Transferencia" se recalculaban aqui con heurísticas por nombre de
+    // método y no coincidian con la pagina.
+    const pagosDivisas = paymentStatisticsWeek.totals.totalUSD;
+    const pagosTransferencias = paymentStatisticsWeek.totals.totalBsInUSD;
+    const totalPagosSinAsociar =
+      paymentStatisticsCumulative.totals.unassociatedAmount;
 
-    const pagosTransferencias = pagosEnRango
-      .filter(
-        (p) =>
-          p.account.method.name.toLowerCase().includes('transferencia') ||
-          p.account.method.name.toLowerCase().includes('pago movil') ||
-          p.account.method.name.toLowerCase().includes('bs'),
-      )
-      .reduce((sum, p) => sum + Number(p.amount) / Number(p.dolar.dolar), 0);
-
-    const totalPagosSinAsociar = paymentStatistics.totals.unassociatedAmount;
-
-    // 4. Estadísticas de facturas usando el servicio para consistencia
-    // Se pasan las fechas como `YYYY-MM-DD`: el servicio las interpreta como
-    // dias de calendario de la zona de negocio. Con `toISOString()` un
-    // `2026-09-28` se convertia en `2026-09-28T00:00:00.000Z` y el servicio
-    // la reconvertia a ese mismo instante, corrimiento el rango 4 horas.
-    const startYmd = formatDateInTz(
-      filter.startDate instanceof Date
-        ? filter.startDate
-        : new Date(filter.startDate),
-      getBusinessTimeZone(),
-    );
-    const endYmd = formatDateInTz(
-      filter.endDate instanceof Date
-        ? filter.endDate
-        : new Date(filter.endDate),
-      getBusinessTimeZone(),
-    );
-    const [invoiceStatisticsWeek, invoiceStatistics] = await Promise.all([
-      // Estadísticas de la semana (rango del filtro)
-      this.invoicesService.getInvoiceStatistics({
-        type: filter.type,
-        startDate: startYmd,
-        endDate: endYmd,
-      }) as Promise<InvoiceStatistics>,
-      // Estadísticas acumuladas (desde 2020 hasta endDate) para bultosPorCobrar
-      this.invoicesService.getInvoiceStatistics({
-        type: filter.type,
-        startDate: '2020-01-01',
-        endDate: endYmd,
-      }) as Promise<InvoiceStatistics>,
-    ]);
-
+    // 4. Estadísticas de facturas
     const bultosPagados = invoiceStatisticsWeek.packagePaid;
     const bultosPorCobrar = invoiceStatistics.packagePending;
-
-    // Cache para totales de facturas (mantenido para métricas de centro)
-    const facturaTotalesCache = new Map();
-    facturas.forEach((f) => {
-      const totalBultos = f.invoiceItems.reduce(
-        (sum, item) => sum + Number(item.quantity),
-        0,
-      );
-      facturaTotalesCache.set(f.id, {
-        totalBultos,
-        totalAmount: Number(f.totalAmount),
-        remaining: calculateInvoiceRemainingUsd(
-          f.totalAmount,
-          f.InvoicePayment,
-        ),
-      });
-    });
 
     // 5. Calcular despachados agrupados usando detPackage del servicio (aplica factor de conversión)
     // detPackage[].product tiene formato "Cafe Gourmet Gourmet 100 y 200" (nombre + presentación)
@@ -833,10 +685,7 @@ export class DashboardService {
         return;
       }
 
-      const pendiente = calculateInvoiceRemainingUsd(
-        facturaCentro.totalAmount,
-        facturaCentro.InvoicePayment,
-      );
+      const pendiente = facturaCentro.remaining;
       if (centroFactura.totalFactura > 0) {
         const porcentajePendiente = Math.min(
           Math.max(pendiente / centroFactura.totalFactura, 0),
@@ -969,7 +818,7 @@ export class DashboardService {
     wsReporte.getCell('B24').value = 'Gastos:';
     wsReporte.getCell('B24').font = { bold: true };
     const cellC24 = wsReporte.getCell('C24');
-    cellC24.value = paymentStatistics.expensesGroup.total;
+    cellC24.value = paymentStatisticsWeek.expensesGroup.total;
     cellC24.numFmt = '#,##0.00';
 
     // Detalle por producto (datos de getInvoiceStatistics)
@@ -1067,10 +916,7 @@ export class DashboardService {
     ]);
 
     facturas.forEach((f) => {
-      const invoiceRemaining = calculateInvoiceRemainingUsd(
-        f.totalAmount,
-        f.InvoicePayment,
-      );
+      const invoiceRemaining = f.remaining;
       const prodMap = {};
       f.invoiceItems.forEach((item) => {
         prodMap[item.product.name] = item.unitPriceUSD
