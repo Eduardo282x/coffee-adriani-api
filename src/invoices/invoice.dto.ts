@@ -217,6 +217,8 @@ export interface InvoiceReportFilters {
   type?: string;
   startDate?: string | Date;
   endDate: string | Date;
+  /** Filtra por nombre de bloque (p. ej. "centro"). */
+  blockNameContains?: string;
 }
 
 export interface InvoiceReportItem {

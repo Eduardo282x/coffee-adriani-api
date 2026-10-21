@@ -390,14 +390,28 @@ export class DashboardService {
     const startOfRange = this.getStartOfDayUtc(startYmd);
     const endOfRange = this.getEndOfDayUtc(endYmd);
 
+    const timings: Array<{ step: string; ms: number }> = [];
+    const timed = async <T>(step: string, fn: () => Promise<T>): Promise<T> => {
+      const startedAt = performance.now();
+      try {
+        return await fn();
+      } finally {
+        timings.push({
+          step,
+          ms: Math.round(performance.now() - startedAt),
+        });
+      }
+    };
+
     // 1. Ejecutar todas las consultas en paralelo. Facturas y pagos se
     // obtienen de sus servicios; el dashboard solo conserva las consultas de
     // productos/inventario, que no pertenecen a esos dominios.
     const [
       productos,
-      facturasCompletas,
+      facturas,
+      facturasCentros,
       paymentsReport,
-      paymentStatisticsCumulative,
+      totalPagosSinAsociar,
       paymentStatisticsWeek,
       stockRealPorProducto,
       inventarioEntradasEnRango,
@@ -420,33 +434,50 @@ export class DashboardService {
         },
       }),
 
-      // Facturas del tipo hasta el cierre (cubre rango + centros en una sola consulta)
-      this.invoicesService.getInvoicesForReport({
-        type: filter.type,
-        endDate: endYmd,
-      }),
+      // Facturas del rango. Antes se traia todo el historico y se filtraba en
+      // memoria; ahora la base acota por fecha.
+      timed('facturas-rango', () =>
+        this.invoicesService.getInvoicesForReport({
+          type: filter.type,
+          startDate: startYmd,
+          endDate: endYmd,
+        }),
+      ),
+
+      // Solo las facturas de centros, que son las unicas que necesitan el
+      // acumulado historico para "Bultos del centro - Pendientes".
+      timed('facturas-centros', () =>
+        this.invoicesService.getInvoicesForReport({
+          type: filter.type,
+          endDate: endYmd,
+          blockNameContains: 'centro',
+        }),
+      ),
 
       // Filas de pagos del rango para la hoja "Analisis de Pagos"
-      this.paymentsService.getPaymentsForReport({
-        type: filter.type,
-        startDate: startYmd,
-        endDate: endYmd,
-      }),
+      timed('pagos-report', () =>
+        this.paymentsService.getPaymentsForReport({
+          type: filter.type,
+          startDate: startYmd,
+          endDate: endYmd,
+        }),
+      ),
 
-      // Estadísticas de pagos acumuladas: `unassociatedAmount` es histórico
-      // (desde 2000), igual que antes en el reporte semanal.
-      this.paymentsService.getPaymentsStatistics({
-        startDate: '2000-01-01',
-        endDate: endYmd,
-        type: filter.type,
-      }),
+      // "Sin asociar" histórico: consulta ligera de solo pagos sin factura.
+      timed('sin-asociar-historico', () =>
+        this.paymentsService.getHistoricalUnassociatedAmount({
+          endDate: endYmd,
+        }),
+      ),
 
       // Estadísticas de pagos del rango: gastos y totales semanales.
-      this.paymentsService.getPaymentsStatistics({
-        startDate: startYmd,
-        endDate: endYmd,
-        type: filter.type,
-      }),
+      timed('pagos-stats-semana', () =>
+        this.paymentsService.getPaymentsStatistics({
+          startDate: startYmd,
+          endDate: endYmd,
+          type: filter.type,
+        }),
+      ),
 
       // Stock real por producto. Es la unica fuente de verdad del inventario:
       // `Product.amount` mas la suma de movimientos NO cuadra con la realidad
@@ -472,28 +503,39 @@ export class DashboardService {
       }),
 
       // Estadísticas de la semana (rango del filtro)
-      this.invoicesService.getInvoiceStatistics({
-        type: filter.type,
-        startDate: startYmd,
-        endDate: endYmd,
-      }) as Promise<InvoiceStatistics>,
+      timed('facturas-stats-semana', () =>
+        this.invoicesService
+          .getInvoiceStatistics({
+            type: filter.type,
+            startDate: startYmd,
+            endDate: endYmd,
+          })
+          .then((stats) => stats as InvoiceStatistics),
+      ),
 
-      // Estadísticas acumuladas (desde 2020 hasta endDate) para bultosPorCobrar
-      this.invoicesService.getInvoiceStatistics({
-        type: filter.type,
-        startDate: '2020-01-01',
-        endDate: endYmd,
-      }) as Promise<InvoiceStatistics>,
+      // Estadísticas acumuladas (desde 2020 hasta endDate) para bultosPorCobrar.
+      // Solo se necesitan los totales, no los desgloses por producto.
+      timed('facturas-stats-acumulado', () =>
+        this.invoicesService
+          .getInvoiceStatistics(
+            {
+              type: filter.type,
+              startDate: '2020-01-01',
+              endDate: endYmd,
+            },
+            { includeDetails: false },
+          )
+          .then((stats) => stats as InvoiceStatistics),
+      ),
     ]);
 
-    // Derivar facturas del rango y facturas de centros a partir de la consulta única
-    const facturas = facturasCompletas.filter((f) => {
-      const d = new Date(f.dispatchDate);
-      return d >= startOfRange && d <= endOfRange;
-    });
-    const facturasCentros = facturasCompletas.filter((f) =>
-      f.client.block.name.toLowerCase().includes('centro'),
-    );
+    if (process.env.REPORT_TIMING === 'true') {
+      this.logger.debug(
+        `[report] ${timings
+          .map((timing) => `${timing.step}=${timing.ms}ms`)
+          .join(', ')}`,
+      );
+    }
 
     const pagosEnRango = paymentsReport.payments;
 
@@ -540,8 +582,6 @@ export class DashboardService {
     // método y no coincidian con la pagina.
     const pagosDivisas = paymentStatisticsWeek.totals.totalUSD;
     const pagosTransferencias = paymentStatisticsWeek.totals.totalBsInUSD;
-    const totalPagosSinAsociar =
-      paymentStatisticsCumulative.totals.unassociatedAmount;
 
     // 4. Estadísticas de facturas
     const bultosPagados = invoiceStatisticsWeek.packagePaid;
@@ -1138,7 +1178,13 @@ export class DashboardService {
     });
 
     // Exportar
+    const excelStartedAt = performance.now();
     const arrayBuffer = await workbook.xlsx.writeBuffer();
+    if (process.env.REPORT_TIMING === 'true') {
+      this.logger.debug(
+        `[report] excel=${Math.round(performance.now() - excelStartedAt)}ms`,
+      );
+    }
     return Buffer.from(arrayBuffer);
   }
 

@@ -424,10 +424,17 @@ export class InvoicesService {
   }
 
   // 2. Endpoint separado para estadísticas (solo cuando se necesite)
+  /**
+   * `includeDetails: false` evita construir los desgloses por producto
+   * (`detPackage`, `detPackageLost`) cuando el consumidor solo necesita los
+   * totales acumulados, como el "hasta fecha" del reporte del dashboard.
+   */
   async getInvoiceStatistics(
     filters: FilterInvoice,
+    options?: { includeDetails?: boolean },
   ): Promise<InvoiceStatistics | DTOBaseResponse> {
     try {
+      const includeDetails = options?.includeDetails ?? true;
       const { type, zone, startDate, endDate, search, blockId, status } =
         filters;
 
@@ -511,46 +518,45 @@ export class InvoicesService {
         };
       }
 
-      // Obtener productos y tasa de cambio actual
-      const [products, currentDolar] = await Promise.all([
-        this.prismaService.product.findMany(),
-        this.productService.getDolar(), // Asumiendo que tienes este método
-      ]);
-
-      // Consulta completa de facturas con todos los datos necesarios
-      const invoicesWithDetails = await this.prismaService.invoice.findMany({
-        where,
-        select: {
-          id: true,
-          totalAmount: true,
-          status: true,
-          exchangeRate: true, // Para saber si fue pagada en USD
-          invoiceItems: {
-            select: {
-              productId: true,
-              quantity: true,
-              unitPrice: true, // Precio en BS
-              unitPriceUSD: true, // Precio en USD
-              subtotal: true,
-              type: true,
-            },
+      // Productos, tasa y facturas en paralelo: son independientes.
+      const [products, currentDolar, invoicesWithDetails] = await Promise.all([
+        this.prismaService.product.findMany({
+          select: {
+            id: true,
+            name: true,
+            presentation: true,
+            type: true,
           },
-          InvoicePayment: {
-            select: {
-              amount: true,
-              payment: {
-                select: {
-                  amount: true,
-                  dolar: {
-                    select: {
-                      dolar: true,
-                    },
-                  },
-                  account: {
-                    select: {
-                      method: {
-                        select: {
-                          currency: true,
+        }),
+        this.productService.getDolar(), // Asumiendo que tienes este método
+        this.prismaService.invoice.findMany({
+          where,
+          select: {
+            id: true,
+            totalAmount: true,
+            status: true,
+            exchangeRate: true, // Para saber si fue pagada en USD
+            invoiceItems: {
+              select: {
+                productId: true,
+                quantity: true,
+                unitPrice: true, // Precio en BS
+                unitPriceUSD: true, // Precio en USD
+                subtotal: true,
+                type: true,
+              },
+            },
+            InvoicePayment: {
+              select: {
+                amount: true,
+                payment: {
+                  select: {
+                    account: {
+                      select: {
+                        method: {
+                          select: {
+                            currency: true,
+                          },
                         },
                       },
                     },
@@ -559,8 +565,8 @@ export class InvoicesService {
               },
             },
           },
-        },
-      });
+        }),
+      ]);
 
       // Calcular estadísticas por producto con separación de monedas
       const productStatsMap = new Map<
@@ -587,6 +593,9 @@ export class InvoicesService {
       let totalPaidPackagesBS = 0;
       let totalPendingPackagesUSD = 0;
       let totalPendingPackagesBS = 0;
+      // Totales generales, independientes de que se construyan los desgloses.
+      let totalPaidPackagesTotal = 0;
+      let totalPendingPackagesTotal = 0;
 
       // Variables para estadísticas de facturas perdidas
       // let totalLostPackages = 0;
@@ -640,7 +649,9 @@ export class InvoicesService {
           if (!product) continue;
 
           const productKey = item.productId;
-          const productName = `${product.name} ${product.presentation}`;
+          const productName = includeDetails
+            ? `${product.name} ${product.presentation}`
+            : '';
 
           /**
            * Productos de ajuste ("Bultos Viejos - perdidos"): su cantidad se
@@ -681,35 +692,39 @@ export class InvoicesService {
           totalPaidPackagesBS += paidQuantityBS;
           totalPendingPackagesUSD += pendingQuantityUSD;
           totalPendingPackagesBS += pendingQuantityBS;
+          totalPaidPackagesTotal += paidQuantity;
+          totalPendingPackagesTotal += pendingQuantity;
 
-          // Actualizar o crear estadísticas del producto
-          const existing = productStatsMap.get(productKey);
-          if (existing) {
-            existing.totalQuantity += effectiveQuantity;
-            existing.paidQuantity += paidQuantity;
-            existing.pendingQuantity += pendingQuantity;
-            existing.paidQuantityUSD += paidQuantityUSD;
-            existing.paidQuantityBS += paidQuantityBS;
-            existing.pendingQuantityUSD += pendingQuantityUSD;
-            existing.pendingQuantityBS += pendingQuantityBS;
-          } else {
-            productStatsMap.set(productKey, {
-              productId: item.productId,
-              totalQuantity: effectiveQuantity,
-              paidQuantity: paidQuantity,
-              pendingQuantity: pendingQuantity,
-              paidQuantityUSD: paidQuantityUSD,
-              paidQuantityBS: paidQuantityBS,
-              pendingQuantityUSD: pendingQuantityUSD,
-              pendingQuantityBS: pendingQuantityBS,
-              product: productName,
-            });
+          if (includeDetails) {
+            // Actualizar o crear estadísticas del producto
+            const existing = productStatsMap.get(productKey);
+            if (existing) {
+              existing.totalQuantity += effectiveQuantity;
+              existing.paidQuantity += paidQuantity;
+              existing.pendingQuantity += pendingQuantity;
+              existing.paidQuantityUSD += paidQuantityUSD;
+              existing.paidQuantityBS += paidQuantityBS;
+              existing.pendingQuantityUSD += pendingQuantityUSD;
+              existing.pendingQuantityBS += pendingQuantityBS;
+            } else {
+              productStatsMap.set(productKey, {
+                productId: item.productId,
+                totalQuantity: effectiveQuantity,
+                paidQuantity: paidQuantity,
+                pendingQuantity: pendingQuantity,
+                paidQuantityUSD: paidQuantityUSD,
+                paidQuantityBS: paidQuantityBS,
+                pendingQuantityUSD: pendingQuantityUSD,
+                pendingQuantityBS: pendingQuantityBS,
+                product: productName,
+              });
+            }
           }
 
           totalPackages += effectiveQuantity;
 
           // Acumular también en las estadísticas de facturas perdidas
-          if (isLostInvoice) {
+          if (includeDetails && isLostInvoice) {
             const lostExisting = lostProductStatsMap.get(productKey);
             if (lostExisting) {
               lostExisting.totalQuantity += effectiveQuantity;
@@ -739,43 +754,35 @@ export class InvoicesService {
       }
 
       // Convertir Map a Array y formatear decimales
-      const detPackage = Array.from(productStatsMap.values()).map((stats) => ({
-        productId: stats.productId,
-        product: stats.product,
-        totalQuantity: stats.totalQuantity,
-        paidQuantity: stats.paidQuantity,
-        pendingQuantity: stats.pendingQuantity,
-        // NUEVOS CAMPOS: Separación por moneda
-        paidQuantityUSD: stats.paidQuantityUSD,
-        paidQuantityBS: stats.paidQuantityBS,
-        pendingQuantityUSD: stats.pendingQuantityUSD,
-        pendingQuantityBS: stats.pendingQuantityBS,
-      }));
+      const detPackage = includeDetails
+        ? Array.from(productStatsMap.values()).map((stats) => ({
+            productId: stats.productId,
+            product: stats.product,
+            totalQuantity: stats.totalQuantity,
+            paidQuantity: stats.paidQuantity,
+            pendingQuantity: stats.pendingQuantity,
+            // NUEVOS CAMPOS: Separación por moneda
+            paidQuantityUSD: stats.paidQuantityUSD,
+            paidQuantityBS: stats.paidQuantityBS,
+            pendingQuantityUSD: stats.pendingQuantityUSD,
+            pendingQuantityBS: stats.pendingQuantityBS,
+          }))
+        : [];
 
       // Convertir Map de facturas perdidas a Array y formatear decimales
-      const detPackageLost = Array.from(lostProductStatsMap.values()).map(
-        (stats) => ({
-          productId: stats.productId,
-          product: stats.product,
-          totalQuantity: stats.totalQuantity,
-          paidQuantity: stats.paidQuantity,
-          pendingQuantity: stats.pendingQuantity,
-          paidQuantityUSD: stats.paidQuantityUSD,
-          paidQuantityBS: stats.paidQuantityBS,
-          pendingQuantityUSD: stats.pendingQuantityUSD,
-          pendingQuantityBS: stats.pendingQuantityBS,
-        }),
-      );
-
-      // Calcular totales de paquetes pagados y pendientes
-      const totalPaidPackages = detPackage.reduce(
-        (sum, item) => sum + item.paidQuantity,
-        0,
-      );
-      const totalPendingPackages = detPackage.reduce(
-        (sum, item) => sum + item.pendingQuantity,
-        0,
-      );
+      const detPackageLost = includeDetails
+        ? Array.from(lostProductStatsMap.values()).map((stats) => ({
+            productId: stats.productId,
+            product: stats.product,
+            totalQuantity: stats.totalQuantity,
+            paidQuantity: stats.paidQuantity,
+            pendingQuantity: stats.pendingQuantity,
+            paidQuantityUSD: stats.paidQuantityUSD,
+            paidQuantityBS: stats.paidQuantityBS,
+            pendingQuantityUSD: stats.pendingQuantityUSD,
+            pendingQuantityBS: stats.pendingQuantityBS,
+          }))
+        : [];
 
       // Total de paquetes perdidos: sumatoria de todos los elementos
       const packageLostTotal = detPackageLost.reduce(
@@ -785,8 +792,8 @@ export class InvoicesService {
 
       return {
         package: totalPackages,
-        packagePaid: totalPaidPackages,
-        packagePending: totalPendingPackages,
+        packagePaid: totalPaidPackagesTotal,
+        packagePending: totalPendingPackagesTotal,
         // NUEVOS TOTALES POR MONEDA
         packagePaidUSD: totalPaidPackagesUSD,
         packagePaidBS: totalPaidPackagesBS,
@@ -840,12 +847,13 @@ export class InvoicesService {
    * Centraliza el mismo criterio de filtrado que `getInvoiceStatistics`:
    * `type` compara exacto y el rango se interpreta como dias calendario en la
    * zona de negocio. Cuando `startDate` se omite se devuelve todo el historico
-   * hasta `endDate`, que es lo que necesita el acumulado de centros.
+   * hasta `endDate`. `blockNameContains` acota la consulta a un bloque (por
+   * ejemplo "centro") sin traer el resto de facturas historicas.
    */
   async getInvoicesForReport(
     filters: InvoiceReportFilters,
   ): Promise<InvoiceReportRow[]> {
-    const { type, startDate, endDate } = filters;
+    const { type, startDate, endDate, blockNameContains } = filters;
 
     const where: any = { deleted: false };
 
@@ -867,6 +875,17 @@ export class InvoicesService {
         some: {
           product: {
             type: type,
+          },
+        },
+      };
+    }
+
+    if (blockNameContains) {
+      where.client = {
+        block: {
+          name: {
+            contains: blockNameContains,
+            mode: 'insensitive',
           },
         },
       };

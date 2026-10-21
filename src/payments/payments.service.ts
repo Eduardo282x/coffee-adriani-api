@@ -706,24 +706,39 @@ export class PaymentsService {
         where.AND = andFilters;
       }
 
+      /**
+       * Solo las columnas que participan en los totales. Antes se usaba
+       * `include`, que traia clientes, bloques y productos completos (nombre,
+       * precios, etc.) para luego no leerlos. El unico dato de la factura que
+       * se necesita es `id` y, cuando hay `type`, el tipo de sus items.
+       */
       const payments = await this.prismaService.payment.findMany({
-        include: {
-          dolar: true,
-          account: {
-            include: { method: true },
-          },
+        where,
+        select: {
+          id: true,
+          amount: true,
+          dolar: { select: { dolar: true } },
+          account: { select: { method: { select: { currency: true } } } },
           InvoicePayment: {
-            include: {
+            select: {
+              amount: true,
               invoice: {
-                include: {
-                  client: { include: { block: true } },
-                  invoiceItems: { include: { product: true } },
+                select: {
+                  id: true,
+                  ...(type
+                    ? {
+                        invoiceItems: {
+                          select: {
+                            product: { select: { type: true } },
+                          },
+                        },
+                      }
+                    : {}),
                 },
               },
             },
           },
         },
-        where,
       });
 
       // Si se proporcionó `type`, mantener sólo las InvoicePayment cuya
@@ -776,10 +791,10 @@ export class PaymentsService {
 
       const totalAmountBsInUSD = processedPayments
         .filter((item) => item.account.method.currency === 'BS')
-        .reduce(
-          (acc, data) => acc + Number(data.amount) / Number(data.dolar.dolar),
-          0,
-        );
+        .reduce((acc, data) => {
+          const rate = Number(data.dolar.dolar);
+          return acc + (rate > 0 ? Number(data.amount) / rate : 0);
+        }, 0);
 
       const totalAmountUSD = processedPayments
         .filter((item) => item.account.method.currency === 'USD')
@@ -855,10 +870,13 @@ export class PaymentsService {
               0,
             );
 
+            const rate = Number(payment.dolar?.dolar ?? 0);
             const otherAssignedUSD =
               payment.account?.method?.currency === 'USD'
                 ? otherAssigned
-                : otherAssigned / Number(payment.dolar?.dolar);
+                : rate > 0
+                  ? otherAssigned / rate
+                  : 0;
 
             return acc + otherAssignedUSD;
           }, 0)
@@ -890,10 +908,10 @@ export class PaymentsService {
 
         const totalBsInUSD = payments
           .filter((item) => item.account.method.currency === 'BS')
-          .reduce(
-            (acc, data) => acc + Number(data.amount) / Number(data.dolar.dolar),
-            0,
-          );
+          .reduce((acc, data) => {
+            const rate = Number(data.dolar.dolar);
+            return acc + (rate > 0 ? Number(data.amount) / rate : 0);
+          }, 0);
 
         const totalUSD = payments
           .filter((item) => item.account.method.currency === 'USD')
@@ -1074,6 +1092,44 @@ export class PaymentsService {
   }
 
   /**
+   * Monto historico de pagos INCOME sin factura asociada, expresado en USD.
+   *
+   * Es el mismo valor que devuelve `getPaymentsStatistics().totals.unassociatedAmount`,
+   * pero sin cargar facturas ni items: el reporte solo necesita este numero
+   * para el "Sin asociar" acumulado. Los pagos sin asociar no dependen del
+   * filtro de producto, por eso no recibe `type`.
+   */
+  async getHistoricalUnassociatedAmount(filters: {
+    endDate: string | Date;
+  }): Promise<number> {
+    const payments = await this.prismaService.payment.findMany({
+      where: {
+        deleted: false,
+        type: 'INCOME',
+        paymentDate: {
+          gte: startOfDayUtc('2000-01-01'),
+          lte: endOfDayUtc(filters.endDate),
+        },
+        InvoicePayment: { none: {} },
+      },
+      select: {
+        amount: true,
+        dolar: { select: { dolar: true } },
+        account: { select: { method: { select: { currency: true } } } },
+      },
+    });
+
+    return payments.reduce((acc, payment) => {
+      const amount = Number(payment.amount);
+      if (payment.account.method.currency === 'USD') {
+        return acc + amount;
+      }
+      const rate = Number(payment.dolar?.dolar ?? 0);
+      return acc + amount / (rate > 0 ? rate : 1);
+    }, 0);
+  }
+
+  /**
    * Filas de pagos INCOME listas para los reportes (Excel del dashboard).
    *
    * Aplica el mismo filtro por tipo que `getPaymentsStatistics`: los pagos sin
@@ -1146,6 +1202,14 @@ export class PaymentsService {
           select: { dolar: true },
         },
         InvoicePayment: {
+          // Si hay `type`, la base ya descarta las asociaciones de otros tipos.
+          where: type
+            ? {
+                invoice: {
+                  invoiceItems: { some: { product: { type: type } } },
+                },
+              }
+            : undefined,
           select: {
             amount: true,
             invoice: {
