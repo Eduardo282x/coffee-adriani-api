@@ -413,6 +413,7 @@ export class DashboardService {
       paymentsReport,
       totalPagosSinAsociar,
       paymentStatisticsWeek,
+      paymentItemsAnalysis,
       stockRealPorProducto,
       inventarioEntradasEnRango,
       invoiceStatisticsWeek,
@@ -476,6 +477,16 @@ export class DashboardService {
           startDate: startYmd,
           endDate: endYmd,
           type: filter.type,
+        }),
+      ),
+
+      // Bultos pagados y facturas consideradas, reutilizando el mismo cálculo
+      // de la pagina de Items (/payments/analysis).
+      timed('pagos-items-analysis', () =>
+        this.paymentsService.getPaymentItemsAnalysis({
+          type: filter.type,
+          startDate: startYmd,
+          endDate: endYmd,
         }),
       ),
 
@@ -584,7 +595,9 @@ export class DashboardService {
     const pagosTransferencias = paymentStatisticsWeek.totals.totalBsInUSD;
 
     // 4. Estadísticas de facturas
-    const bultosPagados = invoiceStatisticsWeek.packagePaid;
+    // "Bultos pagados" se toma del mismo analisis de pagos que la pagina de
+    // Items, para que el reporte y la pagina muestren el mismo numero.
+    const bultosPagados = paymentItemsAnalysis.generalItems.totalItems;
     const bultosPorCobrar = invoiceStatistics.packagePending;
 
     // 5. Calcular despachados agrupados usando detPackage del servicio (aplica factor de conversión)
@@ -940,42 +953,111 @@ export class DashboardService {
     });
 
     // HOJA FACTURAS
+    // Se consolidan las filas por factura: `getPaymentItemsAnalysis` devuelve
+    // una fila por factura y dia cuando una factura recibio pagos en fechas
+    // distintas. Aqui se suman los bultos pagados y se concatenan las fechas
+    // de pago (`date`), no el nombre del dia.
+    type ConsolidatedInvoice = {
+      controlNumber: string;
+      client: string;
+      block: string;
+      zone: string;
+      blockId: number;
+      status: string;
+      dispatchDate: Date;
+      dueDate: Date;
+      paymentDates: Set<string>;
+      totalBultos: number;
+      totalBultosPagados: number;
+      totalAmount: number;
+      remaining: number;
+    };
+
+    const facturasPagadas = new Map<string, ConsolidatedInvoice>();
+    paymentItemsAnalysis.invoices.forEach((invoice) => {
+      const existing = facturasPagadas.get(invoice.controlNumber);
+      if (existing) {
+        existing.totalBultosPagados += invoice.totalBultosPagados;
+        existing.paymentDates.add(invoice.date);
+        return;
+      }
+
+      facturasPagadas.set(invoice.controlNumber, {
+        controlNumber: invoice.controlNumber,
+        client: invoice.client,
+        block: invoice.block,
+        zone: invoice.zone,
+        blockId: invoice.blockId,
+        status: invoice.status,
+        dispatchDate: invoice.dispatchDate,
+        dueDate: invoice.dueDate,
+        paymentDates: new Set([invoice.date]),
+        totalBultos: invoice.totalBultos,
+        totalBultosPagados: invoice.totalBultosPagados,
+        totalAmount: invoice.totalAmount,
+        remaining: invoice.remaining,
+      });
+    });
+
+    const facturasPagadasRows = Array.from(facturasPagadas.values()).sort(
+      (a, b) =>
+        a.blockId - b.blockId || a.controlNumber.localeCompare(b.controlNumber),
+    );
+
     const wsFact = workbook.addWorksheet('Facturas');
-    const prodHeaders = productos.map((p) => p.name);
     wsFact.addRow([
-      'Nro de control',
+      'Nro Control',
       'Cliente',
       'Bloque',
-      'Dirección zona',
-      'Fecha despacho',
-      'Fecha vencimiento',
+      'Zona',
+      'Fecha de despacho',
+      'Fecha de vencimiento',
       'Total',
       'Debe',
-      'Estado',
-      ...prodHeaders,
+      'Bultos',
+      'Bultos Pagados',
+      'Día del pago',
     ]);
 
-    facturas.forEach((f) => {
-      const invoiceRemaining = f.remaining;
-      const prodMap = {};
-      f.invoiceItems.forEach((item) => {
-        prodMap[item.product.name] = item.unitPriceUSD
-          ? Number(item.unitPriceUSD)
-          : Number(item.unitPrice);
-      });
-      wsFact.addRow([
-        f.controlNumber,
-        f.client.name,
-        f.client.block.name,
-        f.client.zone,
-        format(f.dispatchDate, 'dd/MM/yyyy'),
-        format(f.dueDate, 'dd/MM/yyyy'),
-        Number(f.totalAmount),
-        invoiceRemaining,
-        f.status,
-        ...productos.map((p) => prodMap[p.name] ?? ''),
+    facturasPagadasRows.forEach((invoice) => {
+      // Fechas de pago unicas en orden cronologico.
+      const paymentDates = Array.from(invoice.paymentDates)
+        .sort((dateA, dateB) => dateA.localeCompare(dateB))
+        .join(', ');
+
+      const row = wsFact.addRow([
+        invoice.controlNumber,
+        invoice.client,
+        invoice.block,
+        invoice.zone,
+        format(invoice.dispatchDate, 'dd/MM/yyyy'),
+        format(invoice.dueDate, 'dd/MM/yyyy'),
+        invoice.totalAmount,
+        invoice.remaining,
+        invoice.totalBultos,
+        invoice.totalBultosPagados,
+        paymentDates,
       ]);
+      row.getCell(7).numFmt = '#,##0.00';
+      row.getCell(8).numFmt = '#,##0.00';
+      row.getCell(9).numFmt = '#,##0.0000';
+      row.getCell(10).numFmt = '#,##0.0000';
     });
+
+    const totalFacturasPagadasRow = wsFact.addRow([
+      'Total',
+      `${facturasPagadasRows.length} facturas`,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      paymentItemsAnalysis.generalItems.totalItems,
+      '',
+    ]);
+    totalFacturasPagadasRow.getCell(10).numFmt = '#,##0.0000';
 
     // HOJA PAGOS
     const wsPagos = workbook.addWorksheet('Análisis de Pagos');
