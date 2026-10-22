@@ -44,6 +44,7 @@ interface FilterInvoice {
   blockId?: string;
   zone?: string;
   status?: string;
+  statuses?: string;
   productIds?: string;
   filter?: OptionalFilterInvoices;
 }
@@ -76,6 +77,51 @@ export class InvoicesService {
    * Acepta tanto un arreglo (body del export) como la cadena separada por comas
    * que envia el listado paginado. Ignora valores no numericos o invalidos.
    */
+  private parseStatuses(statuses?: string | string[]): string[] {
+    if (!statuses) return [];
+
+    const rawValues = Array.isArray(statuses)
+      ? statuses
+      : String(statuses).split(',');
+
+    return Array.from(
+      new Set(rawValues.map((value) => String(value).trim()).filter(Boolean)),
+    );
+  }
+
+  /**
+   * Construye las condiciones OR para los estados seleccionados. "Abonadas"
+   * no es un estado persistido: representa facturas con pagos y que no estan
+   * canceladas ni pagadas por completo.
+   */
+  private buildInvoiceStatusConditions(statuses: string[]): any[] {
+    const validStatuses = [
+      'Creada',
+      'Pendiente',
+      'Pagado',
+      'Vencida',
+      'Cancelada',
+      'Perdidas',
+    ];
+    const persistedStatuses = statuses.filter((status) =>
+      validStatuses.includes(status),
+    );
+    const conditions: any[] = [];
+
+    if (persistedStatuses.length > 0) {
+      conditions.push({ status: { in: persistedStatuses } });
+    }
+
+    if (statuses.includes('Abonadas')) {
+      conditions.push({
+        status: { notIn: ['Cancelada', 'Pagado'] },
+        InvoicePayment: { some: {} },
+      });
+    }
+
+    return conditions;
+  }
+
   private parseProductIds(productIds?: string | number[]): number[] {
     if (!productIds) return [];
 
@@ -173,6 +219,7 @@ export class InvoicesService {
         search,
         blockId,
         status,
+        statuses,
         productIds,
         filter,
       } = filters;
@@ -185,51 +232,43 @@ export class InvoicesService {
         deleted: false,
       };
 
-      const orFilters: any[] = [];
+      const andFilters: any[] = [];
+      const selectedStatuses = this.parseStatuses(statuses);
+      if (selectedStatuses.length === 0 && (filter?.status || status)) {
+        selectedStatuses.push((filter ? filter.status : status) as string);
+      }
 
-      if (filter?.status || status) {
-        const setStatusFilter = filter ? filter.status : status;
-        if (status == 'Abonadas') {
-          orFilters.push({
-            status: {
-              notIn: ['Cancelada', 'Pagado'],
-            },
-          });
-          where.AND = [
-            {
-              InvoicePayment: {
-                some: {},
-              },
-            },
-          ];
-        } else {
-          where.status = setStatusFilter as InvoiceStatus;
-        }
+      const statusConditions =
+        this.buildInvoiceStatusConditions(selectedStatuses);
+      if (statusConditions.length > 0) {
+        andFilters.push({ OR: statusConditions });
       }
 
       if (search) {
-        // Antes `search` sobrescribia `where.OR` y eliminaba en silencio el
-        // filtro de estado. Ahora ambos conviven.
-        orFilters.push(
-          {
-            client: {
-              name: {
+        // `search` y los estados conviven: cada uno se agrega como un grupo OR
+        // dentro del AND general, sin sobrescribirse.
+        andFilters.push({
+          OR: [
+            {
+              client: {
+                name: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+            },
+            {
+              controlNumber: {
                 contains: search,
                 mode: 'insensitive',
               },
             },
-          },
-          {
-            controlNumber: {
-              contains: search,
-              mode: 'insensitive',
-            },
-          },
-        );
+          ],
+        });
       }
 
-      if (orFilters.length > 0) {
-        where.OR = orFilters;
+      if (andFilters.length > 0) {
+        where.AND = andFilters;
       }
       if (zone) {
         where.client = {
@@ -273,76 +312,82 @@ export class InvoicesService {
       }
 
       // Consulta optimizada con menos includes iniciales
-      const [invoices, totalCount, allMatchingInvoices] = await Promise.all([
-        this.prismaService.invoice.findMany({
-          select: {
-            id: true,
-            controlNumber: true,
-            consignment: true,
-            status: true,
-            dispatchDate: true,
-            dueDate: true,
-            totalAmount: true,
-            clientId: true,
-            InvoicePayment: {
-              select: {
-                amount: true,
+      const [invoices, totalCount, allMatchingInvoices, clientGroups] =
+        await Promise.all([
+          this.prismaService.invoice.findMany({
+            select: {
+              id: true,
+              controlNumber: true,
+              consignment: true,
+              status: true,
+              dispatchDate: true,
+              dueDate: true,
+              totalAmount: true,
+              clientId: true,
+              InvoicePayment: {
+                select: {
+                  amount: true,
+                },
               },
-            },
-            invoiceItems: {
-              select: {
-                quantity: true,
-                type: true,
-                product: { select: { presentation: true } },
+              invoiceItems: {
+                select: {
+                  quantity: true,
+                  type: true,
+                  product: { select: { presentation: true } },
+                },
               },
-            },
-            client: {
-              select: {
-                id: true,
-                name: true,
-                rif: true,
-                zone: true,
-                blockId: true,
-                block: {
-                  select: {
-                    id: true,
-                    name: true,
+              client: {
+                select: {
+                  id: true,
+                  name: true,
+                  rif: true,
+                  zone: true,
+                  blockId: true,
+                  block: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
                   },
                 },
               },
             },
-          },
-          orderBy: {
-            dispatchDate: 'desc',
-          },
-          where,
-          skip: offset,
-          take: limit,
-        }),
-        this.prismaService.invoice.count({ where }),
-        /**
-         * Resumen de toda la coleccion filtrada. Antes este select pedia
-         * `product.presentation` en cada item, lo que hacia un JOIN a Product
-         * por cada una de las ~15k filas de `InvoiceProduct` en cada peticion
-         * de pagina. Ahora solo trae las columnas necesarias y la
-         * presentacion se resuelve con un Map de los 23 productos.
-         */
-        this.prismaService.invoice.findMany({
-          select: {
-            totalAmount: true,
-            InvoicePayment: { select: { amount: true } },
-            invoiceItems: {
-              select: {
-                quantity: true,
-                type: true,
-                productId: true,
+            orderBy: {
+              dispatchDate: 'desc',
+            },
+            where,
+            skip: offset,
+            take: limit,
+          }),
+          this.prismaService.invoice.count({ where }),
+          /**
+           * Resumen de toda la coleccion filtrada. Antes este select pedia
+           * `product.presentation` en cada item, lo que hacia un JOIN a Product
+           * por cada una de las ~15k filas de `InvoiceProduct` en cada peticion
+           * de pagina. Ahora solo trae las columnas necesarias y la
+           * presentacion se resuelve con un Map de los 23 productos.
+           */
+          this.prismaService.invoice.findMany({
+            select: {
+              totalAmount: true,
+              InvoicePayment: { select: { amount: true } },
+              invoiceItems: {
+                select: {
+                  quantity: true,
+                  type: true,
+                  productId: true,
+                },
               },
             },
-          },
-          where,
-        }),
-      ]);
+            where,
+          }),
+          this.prismaService.invoice.groupBy({
+            by: ['clientId'],
+            where,
+          }),
+        ]);
 
+      const totalClients = clientGroups.length;
       const allProducts = await this.prismaService.product.findMany({
         select: { id: true, presentation: true },
       });
@@ -433,6 +478,7 @@ export class InvoicesService {
           page,
           limit,
           totalCount,
+          totalClients,
           totalPages: Math.ceil(totalCount / limit),
           hasNext: page < Math.ceil(totalCount / limit),
           hasPrev: page > 1,
@@ -472,54 +518,48 @@ export class InvoicesService {
         search,
         blockId,
         status,
+        statuses,
         productIds,
       } = filters;
 
       const where: any = { deleted: false };
-      const orFilters: any[] = [];
+      const andFilters: any[] = [];
+      const selectedStatuses = this.parseStatuses(statuses);
+      if (selectedStatuses.length === 0 && status) {
+        selectedStatuses.push(status);
+      }
 
-      if (status) {
-        if (status == 'Abonadas') {
-          orFilters.push({
-            status: {
-              notIn: ['Cancelada', 'Pagado'],
-            },
-          });
-          where.AND = [
-            {
-              InvoicePayment: {
-                some: {},
-              },
-            },
-          ];
-        } else {
-          where.status = status as InvoiceStatus;
-        }
+      const statusConditions =
+        this.buildInvoiceStatusConditions(selectedStatuses);
+      if (statusConditions.length > 0) {
+        andFilters.push({ OR: statusConditions });
       }
 
       if (search) {
-        // Mismo criterio que `getInvoicesPaginated`: `search` no puede
-        // pisar el filtro de estado.
-        orFilters.push(
-          {
-            client: {
-              name: {
+        // Mismo criterio que `getInvoicesPaginated`: `search` y los estados
+        // conviven como grupos OR dentro del AND general.
+        andFilters.push({
+          OR: [
+            {
+              client: {
+                name: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+            },
+            {
+              controlNumber: {
                 contains: search,
                 mode: 'insensitive',
               },
             },
-          },
-          {
-            controlNumber: {
-              contains: search,
-              mode: 'insensitive',
-            },
-          },
-        );
+          ],
+        });
       }
 
-      if (orFilters.length > 0) {
-        where.OR = orFilters;
+      if (andFilters.length > 0) {
+        where.AND = andFilters;
       }
       if (zone) {
         where.client = {
@@ -2381,8 +2421,16 @@ export class InvoicesService {
   async exportInvoicesToExcelWithExcelJS(
     filter: DTOQueryFilterExport,
   ): Promise<Buffer> {
-    const { type, status, zone, startDate, endDate, blockId, productIds } =
-      filter;
+    const {
+      type,
+      status,
+      statuses,
+      zone,
+      startDate,
+      endDate,
+      blockId,
+      productIds,
+    } = filter;
 
     const where: any = { deleted: false };
     const selectedProductIds = this.parseProductIds(productIds);
@@ -2409,23 +2457,15 @@ export class InvoicesService {
       };
     }
 
-    if (status) {
-      if (status == 'Abonadas') {
-        where.OR = [
-          {
-            status: {
-              notIn: ['Cancelada', 'Pagado'],
-            },
-          },
-        ];
-        where.AND = {
-          InvoicePayment: {
-            some: {},
-          },
-        };
-      } else {
-        where.status = status as InvoiceStatus;
-      }
+    const selectedStatuses = this.parseStatuses(statuses);
+    if (selectedStatuses.length === 0 && status) {
+      selectedStatuses.push(status);
+    }
+
+    const statusConditions =
+      this.buildInvoiceStatusConditions(selectedStatuses);
+    if (statusConditions.length > 0) {
+      where.AND = [{ OR: statusConditions }];
     }
 
     if (zone) {

@@ -76,6 +76,12 @@ export class InvoicesController {
     description: 'Estado (opcional)',
   })
   @ApiQuery({
+    name: 'statuses',
+    type: String,
+    required: false,
+    description: 'Estados de factura separados por coma (opcional)',
+  })
+  @ApiQuery({
     name: 'productIds',
     type: String,
     required: false,
@@ -91,6 +97,7 @@ export class InvoicesController {
     @Query('search') search?: string,
     @Query('blockId') blockId?: string,
     @Query('status') status?: string,
+    @Query('statuses') statuses?: string,
     @Query('productIds') productIds?: string,
   ) {
     return await this.invoicesService.getInvoicesPaginated({
@@ -103,6 +110,7 @@ export class InvoicesController {
       search,
       blockId,
       status,
+      statuses,
       productIds,
     });
   }
@@ -139,6 +147,12 @@ export class InvoicesController {
     description: 'Estado (opcional)',
   })
   @ApiQuery({
+    name: 'statuses',
+    type: String,
+    required: false,
+    description: 'Estados de factura separados por coma (opcional)',
+  })
+  @ApiQuery({
     name: 'productIds',
     type: String,
     required: false,
@@ -152,6 +166,7 @@ export class InvoicesController {
     @Query('search') search?: string,
     @Query('blockId') blockId?: string,
     @Query('status') status?: string,
+    @Query('statuses') statuses?: string,
     @Query('productIds') productIds?: string,
   ) {
     return await this.invoicesService.getInvoiceStatistics({
@@ -162,6 +177,7 @@ export class InvoicesController {
       search,
       blockId,
       status,
+      statuses,
       productIds,
     });
   }
