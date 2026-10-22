@@ -35,6 +35,20 @@ export class ClientsController {
     res.header('Content-Disposition', 'attachment; filename=clientes.xlsx');
     return buffer;
   }
+
+  @Post('/excel')
+  async getClientExcelFiltered(
+    @Body() report: DTOReportClients,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    const buffer = await this.clientService.getClientExcel(report);
+    res.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.header('Content-Disposition', 'attachment; filename=clientes.xlsx');
+    return buffer;
+  }
   @Post()
   async createClients(@Body() client: DTOClients) {
     return await this.clientService.createClients(client);

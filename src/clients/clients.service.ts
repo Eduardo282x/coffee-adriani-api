@@ -5,7 +5,9 @@ import { DTOBlocks, DTOClients, DTOReportClients } from './client.dto';
 import { addDays } from 'date-fns/addDays';
 import { format } from 'date-fns/format';
 import { calculateInvoiceRemainingUsd } from 'src/common/remaining-calculator';
+import { endOfDayUtc } from 'src/common/date-utils';
 import { Block, Client } from 'src/generated/prisma/client';
+import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 @Injectable()
 export class ClientsService {
@@ -19,17 +21,188 @@ export class ClientsService {
     });
   }
 
-  async getClientExcel(): Promise<Buffer> {
-    const clients = await this.prismaService.client.findMany({
-      where: { active: true },
-      include: { block: true },
-      orderBy: { blockId: 'asc' },
+  /**
+   * Construye las filas del reporte de clientes con los mismos filtros para
+   * PDF y Excel: zona, bloque, tipo de producto, estados de factura y fecha
+   * hasta. El filtro de deuda se aplica sobre el saldo real resultante.
+   */
+  private async buildClientsReport(
+    filters: DTOReportClients,
+    options: { activeOnly?: boolean } = {},
+  ) {
+    const clientWhere: any = {};
+
+    if (options.activeOnly) {
+      clientWhere.active = true;
+    }
+
+    if (filters.zone) {
+      clientWhere.zone = { equals: filters.zone, mode: 'insensitive' };
+    }
+
+    if (filters.blockId && filters.blockId != 0) {
+      clientWhere.blockId = filters.blockId;
+    }
+
+    const selectedInvoiceStatuses = filters.invoiceStatuses ?? [];
+    const hasExplicitInvoiceStatuses = selectedInvoiceStatuses.length > 0;
+    const invoiceStatuses: InvoiceStatus[] = hasExplicitInvoiceStatuses
+      ? selectedInvoiceStatuses
+      : ['Creada', 'Pendiente', 'Vencida'];
+
+    const invoiceWhere: any = {
+      deleted: false,
+      status: { in: invoiceStatuses },
+      client: clientWhere,
+      invoiceItems: {
+        every: {
+          product: {
+            type: {
+              contains: filters.type,
+              mode: 'insensitive',
+            },
+          },
+        },
+      },
+    };
+
+    if (filters.endDate) {
+      invoiceWhere.dispatchDate = { lte: endOfDayUtc(filters.endDate) };
+    }
+
+    const [clients, invoiceTotals, lastInvoices] = await Promise.all([
+      this.prismaService.client.findMany({
+        where: clientWhere,
+        include: { block: true },
+        orderBy: { blockId: 'asc' },
+      }),
+      this.prismaService.invoice.findMany({
+        where: invoiceWhere,
+        select: {
+          clientId: true,
+          totalAmount: true,
+          InvoicePayment: {
+            select: {
+              amount: true,
+            },
+          },
+        },
+      }),
+      this.prismaService.invoice.findMany({
+        where: invoiceWhere,
+        orderBy: [{ clientId: 'asc' }, { dispatchDate: 'desc' }],
+        distinct: ['clientId'],
+        select: { clientId: true, controlNumber: true, dispatchDate: true },
+      }),
+    ]);
+
+    const totalMap = new Map<
+      number,
+      { totalAmount: number; remaining: number }
+    >();
+    invoiceTotals.forEach((item) => {
+      const previous = totalMap.get(item.clientId) || {
+        totalAmount: 0,
+        remaining: 0,
+      };
+      totalMap.set(item.clientId, {
+        totalAmount: previous.totalAmount + Number(item.totalAmount),
+        remaining:
+          previous.remaining +
+          calculateInvoiceRemainingUsd(item.totalAmount, item.InvoicePayment),
+      });
     });
 
-    // Asegurar orden determinístico por bloque y dirección
-    clients.sort((a, b) => {
+    const lastInvoiceMap = new Map<
+      number,
+      { controlNumber: string; dispatchDate: Date | null }
+    >();
+    lastInvoices.forEach((item) => {
+      lastInvoiceMap.set(item.clientId, {
+        controlNumber: item.controlNumber,
+        dispatchDate: item.dispatchDate,
+      });
+    });
+
+    let clientsReports = clients.map((c) => {
+      const totals = totalMap.get(c.id);
+      const totalInvoices = totals ? totals.totalAmount : 0;
+      const debt = totals ? totals.remaining : 0;
+      const totalPaid = totalInvoices - debt;
+      const lastInvoice = lastInvoiceMap.get(c.id);
+
+      return {
+        ...c,
+        totalInvoices,
+        totalPaid,
+        debt,
+        lastInvoiceControlNumber: lastInvoice ? lastInvoice.controlNumber : '',
+        lastInvoiceDispatchDate: lastInvoice ? lastInvoice.dispatchDate : null,
+      };
+    });
+
+    if (hasExplicitInvoiceStatuses) {
+      clientsReports = clientsReports.filter((c) => totalMap.has(c.id));
+    }
+
+    if (filters.status === 'clean') {
+      clientsReports = clientsReports.filter((c) => c.debt <= 0);
+    }
+
+    if (filters.status === 'pending') {
+      clientsReports = clientsReports.filter((c) => c.debt > 0);
+    }
+
+    clientsReports.sort((a, b) => {
+      if (filters.orderBy) {
+        const dir = filters.orderDirection === 'desc' ? -1 : 1;
+        let comparison = 0;
+
+        switch (filters.orderBy) {
+          case 'name':
+            comparison = a.name.localeCompare(b.name);
+            break;
+          case 'address':
+            comparison = a.address.localeCompare(b.address);
+            break;
+          case 'block':
+            comparison = (a.block?.name || '').localeCompare(
+              b.block?.name || '',
+            );
+            break;
+          case 'debt':
+            comparison = a.debt - b.debt;
+            break;
+          case 'totalPaid':
+            comparison = a.totalPaid - b.totalPaid;
+            break;
+          case 'totalInvoices':
+            comparison = a.totalInvoices - b.totalInvoices;
+            break;
+          case 'dispatchDate':
+            comparison =
+              (a.lastInvoiceDispatchDate?.getTime() || 0) -
+              (b.lastInvoiceDispatchDate?.getTime() || 0);
+            break;
+          default:
+            comparison = 0;
+        }
+
+        if (comparison !== 0) return comparison * dir;
+      }
+
       if (a.blockId !== b.blockId) return (a.blockId || 0) - (b.blockId || 0);
       return a.address.localeCompare(b.address);
+    });
+
+    return clientsReports;
+  }
+
+  async getClientExcel(filters?: DTOReportClients): Promise<Buffer> {
+    const reportFilters =
+      filters ?? ({ type: '', status: 'all' } as DTOReportClients);
+    const clients = await this.buildClientsReport(reportFilters, {
+      activeOnly: true,
     });
 
     const ExcelJS: any = (await import('exceljs')).default;
@@ -47,6 +220,11 @@ export class ClientsService {
       'Zona',
       'Bloque',
       'Activo',
+      'Facturas',
+      'Fecha despacho',
+      'Total',
+      'Pagado',
+      'Debe',
     ]);
 
     // Datos
@@ -61,6 +239,13 @@ export class ClientsService {
         cli.zone,
         cli.block ? cli.block.name : '',
         cli.active ? 'Sí' : 'No',
+        cli.lastInvoiceControlNumber,
+        cli.lastInvoiceDispatchDate
+          ? format(cli.lastInvoiceDispatchDate, 'dd/MM/yyyy')
+          : '',
+        cli.totalInvoices,
+        cli.totalPaid,
+        cli.debt,
       ]);
     });
 
@@ -296,167 +481,7 @@ export class ClientsService {
     client: DTOReportClients,
   ): Promise<Buffer | DTOBaseResponse> {
     try {
-      const clientWhere: any = {};
-      const invoiceStatusFilter = ['Creada', 'Pendiente', 'Vencida'];
-
-      if (client.zone) {
-        clientWhere.zone = { equals: client.zone, mode: 'insensitive' };
-      }
-
-      if (client.blockId && client.blockId != 0) {
-        clientWhere.blockId = client.blockId;
-      }
-
-      const clients = await this.prismaService.client.findMany({
-        where: clientWhere,
-        include: { block: true },
-        orderBy: { blockId: 'asc' },
-      });
-
-      const invoiceTotals = await this.prismaService.invoice.findMany({
-        where: {
-          status: { in: invoiceStatusFilter } as any,
-          client: clientWhere,
-          invoiceItems: {
-            every: {
-              product: {
-                type: {
-                  contains: client.type,
-                  mode: 'insensitive',
-                },
-              },
-            },
-          },
-        },
-        select: {
-          clientId: true,
-          totalAmount: true,
-          InvoicePayment: {
-            select: {
-              amount: true,
-            },
-          },
-        },
-      });
-
-      const lastInvoices = await this.prismaService.invoice.findMany({
-        where: {
-          status: { in: invoiceStatusFilter } as any,
-          client: clientWhere,
-          invoiceItems: {
-            every: {
-              product: {
-                type: {
-                  contains: client.type,
-                  mode: 'insensitive',
-                },
-              },
-            },
-          },
-        },
-        orderBy: [{ clientId: 'asc' }, { dispatchDate: 'desc' }],
-        distinct: ['clientId'],
-        select: { clientId: true, controlNumber: true, dispatchDate: true },
-      });
-
-      const totalMap = new Map<
-        number,
-        { totalAmount: number; remaining: number }
-      >();
-      invoiceTotals.forEach((item) => {
-        const previous = totalMap.get(item.clientId) || {
-          totalAmount: 0,
-          remaining: 0,
-        };
-        totalMap.set(item.clientId, {
-          totalAmount: previous.totalAmount + Number(item.totalAmount),
-          remaining:
-            previous.remaining +
-            calculateInvoiceRemainingUsd(item.totalAmount, item.InvoicePayment),
-        });
-      });
-
-      const lastInvoiceMap = new Map<
-        number,
-        { controlNumber: string; dispatchDate: Date | null }
-      >();
-      lastInvoices.forEach((item) => {
-        lastInvoiceMap.set(item.clientId, {
-          controlNumber: item.controlNumber,
-          dispatchDate: item.dispatchDate,
-        });
-      });
-
-      let clientsReports = clients.map((c) => {
-        const totals = totalMap.get(c.id);
-        const totalInvoices = totals ? totals.totalAmount : 0;
-        const debt = totals ? totals.remaining : 0;
-        const totalPaid = totalInvoices - debt;
-        const lastInvoice = lastInvoiceMap.get(c.id);
-
-        return {
-          ...c,
-          totalInvoices,
-          totalPaid,
-          debt,
-          lastInvoiceControlNumber: lastInvoice
-            ? lastInvoice.controlNumber
-            : '',
-          lastInvoiceDispatchDate: lastInvoice
-            ? lastInvoice.dispatchDate
-            : null,
-        };
-      });
-
-      if (client.status === 'clean') {
-        clientsReports = clientsReports.filter((c) => c.totalInvoices == 0);
-      }
-
-      if (client.status === 'pending') {
-        clientsReports = clientsReports.filter((c) => c.totalInvoices != 0);
-      }
-
-      clientsReports.sort((a, b) => {
-        if (client.orderBy) {
-          const dir = client.orderDirection === 'desc' ? -1 : 1;
-          let comparison = 0;
-
-          switch (client.orderBy) {
-            case 'name':
-              comparison = a.name.localeCompare(b.name);
-              break;
-            case 'address':
-              comparison = a.address.localeCompare(b.address);
-              break;
-            case 'block':
-              comparison = (a.block?.name || '').localeCompare(
-                b.block?.name || '',
-              );
-              break;
-            case 'debt':
-              comparison = a.debt - b.debt;
-              break;
-            case 'totalPaid':
-              comparison = a.totalPaid - b.totalPaid;
-              break;
-            case 'totalInvoices':
-              comparison = a.totalInvoices - b.totalInvoices;
-              break;
-            case 'dispatchDate':
-              comparison =
-                (a.lastInvoiceDispatchDate?.getTime() || 0) -
-                (b.lastInvoiceDispatchDate?.getTime() || 0);
-              break;
-            default:
-              comparison = 0;
-          }
-
-          if (comparison !== 0) return comparison * dir;
-        }
-
-        if (a.blockId !== b.blockId) return (a.blockId || 0) - (b.blockId || 0);
-        return a.address.localeCompare(b.address);
-      });
+      const clientsReports = await this.buildClientsReport(client);
 
       const PDFDocument = (await import('pdfkit')).default;
       const filePDF = await new Promise<Buffer>((resolve, reject) => {

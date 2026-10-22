@@ -1,5 +1,14 @@
-import { Type } from 'class-transformer';
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsArray,
+  IsDate,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { InvoiceStatus } from 'src/generated/prisma/enums';
 
 export class DTOClients {
   @IsString()
@@ -60,4 +69,12 @@ export class DTOReportClients {
   @IsString()
   @IsOptional()
   orderDirection: ReportOrderDirection;
+  @IsOptional()
+  @IsArray()
+  @IsEnum(InvoiceStatus, { each: true })
+  invoiceStatuses?: InvoiceStatus[];
+  @IsOptional()
+  @Transform(({ value }) => (value ? new Date(value) : undefined))
+  @IsDate()
+  endDate?: Date | string;
 }
