@@ -75,6 +75,12 @@ export class InvoicesController {
     required: false,
     description: 'Estado (opcional)',
   })
+  @ApiQuery({
+    name: 'productIds',
+    type: String,
+    required: false,
+    description: 'IDs de productos separados por coma (opcional)',
+  })
   async getInvoicesPaginated(
     @Query('page', ParseIntPipe) page: number,
     @Query('limit', ParseIntPipe) limit: number,
@@ -85,6 +91,7 @@ export class InvoicesController {
     @Query('search') search?: string,
     @Query('blockId') blockId?: string,
     @Query('status') status?: string,
+    @Query('productIds') productIds?: string,
   ) {
     return await this.invoicesService.getInvoicesPaginated({
       page,
@@ -96,6 +103,7 @@ export class InvoicesController {
       search,
       blockId,
       status,
+      productIds,
     });
   }
   @Get('/statistics')
@@ -130,6 +138,12 @@ export class InvoicesController {
     required: false,
     description: 'Estado (opcional)',
   })
+  @ApiQuery({
+    name: 'productIds',
+    type: String,
+    required: false,
+    description: 'IDs de productos separados por coma (opcional)',
+  })
   async getInvoiceStatistics(
     @Query('type') type: string,
     @Query('startDate') startDate: string,
@@ -138,6 +152,7 @@ export class InvoicesController {
     @Query('search') search?: string,
     @Query('blockId') blockId?: string,
     @Query('status') status?: string,
+    @Query('productIds') productIds?: string,
   ) {
     return await this.invoicesService.getInvoiceStatistics({
       type,
@@ -147,6 +162,7 @@ export class InvoicesController {
       search,
       blockId,
       status,
+      productIds,
     });
   }
   @Get('/details/:id')

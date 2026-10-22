@@ -44,6 +44,7 @@ interface FilterInvoice {
   blockId?: string;
   zone?: string;
   status?: string;
+  productIds?: string;
   filter?: OptionalFilterInvoices;
 }
 
@@ -69,6 +70,26 @@ export class InvoicesService {
 
   private getEndOfDayUtc(date: string | Date) {
     return endOfDayUtc(date);
+  }
+
+  /**
+   * Acepta tanto un arreglo (body del export) como la cadena separada por comas
+   * que envia el listado paginado. Ignora valores no numericos o invalidos.
+   */
+  private parseProductIds(productIds?: string | number[]): number[] {
+    if (!productIds) return [];
+
+    const rawValues = Array.isArray(productIds)
+      ? productIds
+      : String(productIds).split(',');
+
+    return Array.from(
+      new Set(
+        rawValues
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0),
+      ),
+    );
   }
 
   async notifyInvoiceCreated(
@@ -152,6 +173,7 @@ export class InvoicesService {
         search,
         blockId,
         status,
+        productIds,
         filter,
       } = filters;
 
@@ -225,13 +247,20 @@ export class InvoicesService {
         };
       }
 
-      if (type) {
-        // Filtrar por el campo `product.type` (string) en lugar del enum `InvoiceTypeProduct`
+      const selectedProductIds = this.parseProductIds(productIds);
+      if (type || selectedProductIds.length > 0) {
+        // Filtrar por el campo `product.type` (string) en lugar del enum
+        // `InvoiceTypeProduct` y por los productos seleccionados (OR).
         where.invoiceItems = {
           some: {
-            product: {
-              type: type,
-            },
+            ...(selectedProductIds.length > 0 && {
+              productId: { in: selectedProductIds },
+            }),
+            ...(type && {
+              product: {
+                type: type,
+              },
+            }),
           },
         };
       }
@@ -435,8 +464,16 @@ export class InvoicesService {
   ): Promise<InvoiceStatistics | DTOBaseResponse> {
     try {
       const includeDetails = options?.includeDetails ?? true;
-      const { type, zone, startDate, endDate, search, blockId, status } =
-        filters;
+      const {
+        type,
+        zone,
+        startDate,
+        endDate,
+        search,
+        blockId,
+        status,
+        productIds,
+      } = filters;
 
       const where: any = { deleted: false };
       const orFilters: any[] = [];
@@ -500,13 +537,20 @@ export class InvoicesService {
         };
       }
 
-      if (type) {
-        // Filtrar por el campo `product.type` (string) para evitar el enum InvoiceTypeProduct
+      const selectedProductIds = this.parseProductIds(productIds);
+      if (type || selectedProductIds.length > 0) {
+        // Filtrar por el campo `product.type` (string) para evitar el enum
+        // InvoiceTypeProduct y por los productos seleccionados (OR).
         where.invoiceItems = {
           some: {
-            product: {
-              type: type,
-            },
+            ...(selectedProductIds.length > 0 && {
+              productId: { in: selectedProductIds },
+            }),
+            ...(type && {
+              product: {
+                type: type,
+              },
+            }),
           },
         };
       }
@@ -2337,9 +2381,11 @@ export class InvoicesService {
   async exportInvoicesToExcelWithExcelJS(
     filter: DTOQueryFilterExport,
   ): Promise<Buffer> {
-    const { type, status, zone, startDate, endDate, blockId } = filter;
+    const { type, status, zone, startDate, endDate, blockId, productIds } =
+      filter;
 
     const where: any = { deleted: false };
+    const selectedProductIds = this.parseProductIds(productIds);
 
     if (startDate && endDate) {
       where.dispatchDate = {
@@ -2348,13 +2394,20 @@ export class InvoicesService {
       };
     }
 
-    where.invoiceItems = {
-      some: {
-        product: {
-          type: type,
+    if (type || selectedProductIds.length > 0) {
+      where.invoiceItems = {
+        some: {
+          ...(selectedProductIds.length > 0 && {
+            productId: { in: selectedProductIds },
+          }),
+          ...(type && {
+            product: {
+              type: type,
+            },
+          }),
         },
-      },
-    };
+      };
+    }
 
     if (status) {
       if (status == 'Abonadas') {

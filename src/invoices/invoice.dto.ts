@@ -261,4 +261,9 @@ export class DTOQueryFilterExport extends DashboardExcel {
   @IsString()
   @IsOptional()
   status: string;
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @Type(() => Number)
+  @IsOptional()
+  productIds?: number[];
 }
