@@ -27,6 +27,7 @@ import {
   calculateInvoiceRemainingUsd,
   calculateInvoiceRemainingUsdRaw,
   isInvoiceSettled,
+  round2,
 } from 'src/common/remaining-calculator';
 import { endOfDayUtc, startOfDayUtc } from 'src/common/date-utils';
 import { isNonNettableProduct } from 'src/common/business-rules';
@@ -1661,9 +1662,12 @@ export class InvoicesService {
 
       await this.prismaService.invoice.update({
         data: {
-          status: isInvoiceSettled(newRemaining)
-            ? 'Pagado'
-            : findInvoice.status,
+          status:
+            findInvoice.status === 'Perdidas'
+              ? 'Perdidas'
+              : isInvoiceSettled(newRemaining)
+                ? 'Pagado'
+                : findInvoice.status,
         },
         where: {
           id: invoiceId,
@@ -2253,6 +2257,21 @@ export class InvoicesService {
     try {
       const findInvoice = await this.prismaService.invoice.findFirst({
         where: { id },
+        include: {
+          invoiceItems: {
+            include: {
+              product: {
+                select: {
+                  purchasePrice: true,
+                  purchasePriceUSD: true,
+                },
+              },
+            },
+          },
+          InvoicePayment: {
+            select: { amount: true },
+          },
+        },
       });
 
       if (!findInvoice) {
@@ -2260,10 +2279,65 @@ export class InvoicesService {
         return badResponse;
       }
 
-      await this.prismaService.invoice.update({
-        where: { id },
-        data: { status: 'Perdidas' },
+      /**
+       * Una factura perdida no genera ganancia: el precio de venta se iguala
+       * al de compra. Los regalos no forman parte del total facturado (ver
+       * `createInvoice`), por eso solo se recalculan los items `SALE`.
+       */
+      const itemsToUpdate = findInvoice.invoiceItems
+        .filter((item) => item.type === 'SALE')
+        .map((item) => {
+          const purchasePriceUSD =
+            Number(item.product.purchasePriceUSD) ||
+            Number(item.product.purchasePrice);
+          const purchasePrice =
+            Number(item.product.purchasePrice) || purchasePriceUSD;
+          const quantity = Number(item.quantity);
+
+          return {
+            id: item.id,
+            unitPrice: round2(purchasePrice),
+            unitPriceUSD: round2(purchasePriceUSD),
+            subtotal: round2(purchasePrice * quantity),
+          };
+        });
+
+      const newTotal = round2(
+        itemsToUpdate.reduce((sum, item) => sum + item.subtotal, 0),
+      );
+      const paid = round2(
+        findInvoice.InvoicePayment.reduce(
+          (sum, payment) => sum + Number(payment.amount),
+          0,
+        ),
+      );
+
+      if (paid > 0 && newTotal <= paid) {
+        badResponse.message = `No se puede marcar como perdida: el nuevo total (${newTotal.toFixed(2)}) es menor o igual a lo ya pagado (${paid.toFixed(2)}).`;
+        return badResponse;
+      }
+
+      await this.prismaService.$transaction(async (tx) => {
+        for (const item of itemsToUpdate) {
+          await tx.invoiceProduct.update({
+            where: { id: item.id },
+            data: {
+              unitPrice: item.unitPrice,
+              unitPriceUSD: item.unitPriceUSD,
+              subtotal: item.subtotal,
+            },
+          });
+        }
+
+        await tx.invoice.update({
+          where: { id },
+          data: {
+            totalAmount: newTotal,
+            status: 'Perdidas',
+          },
+        });
       });
+
       baseResponse.message = 'Factura Marcada como perdida.';
       return baseResponse;
     } catch (err) {

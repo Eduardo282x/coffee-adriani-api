@@ -1957,11 +1957,11 @@ export class PaymentsService {
             ? 'PENDING'
             : 'CONFIRMED',
           accountId: payment.accountId,
-          ...(payment.type
-            ? { type: payment.type }
-            : looksLikeLegacyExpenseAccount(accountZelle.name)
-              ? { type: 'EXPENSE' }
-              : {}),
+          // Solo se cambia el tipo cuando el usuario lo envia explicitamente.
+          // Antes, editar un pago sin `type` lo reclasificaba como EXPENSE si
+          // la cuenta se llamaba "Gastos", pisando el tipo elegido al asociar
+          // el pago a una factura (incluidas las perdidas).
+          ...(payment.type ? { type: payment.type } : {}),
         },
         where: { id },
       });
@@ -2187,9 +2187,14 @@ export class PaymentsService {
           // Regla de negocio centralizada: tolerancia configurable
           // (PAYMENT_TOLERANCE_USD, default 2). Antes la misma comparacion
           // `remainingAfter <= 2` vivia duplicada en dos servicios.
-          const statusInvoice: InvoiceStatus = isInvoiceSettled(remainingAfter)
-            ? 'Pagado'
-            : 'Pendiente';
+          // Una factura perdida conserva su estado: asociarle un pago no debe
+          // devolverla a `Pendiente`/`Pagado`.
+          const statusInvoice: InvoiceStatus =
+            findInvoice.status === 'Perdidas'
+              ? 'Perdidas'
+              : isInvoiceSettled(remainingAfter)
+                ? 'Pagado'
+                : 'Pendiente';
 
           await prisma.invoice.update({
             where: { id: findInvoice.id },
@@ -2384,7 +2389,12 @@ export class PaymentsService {
           await tx.invoice.update({
             where: { id: invoice.id },
             data: {
-              status: isInvoiceSettled(remaining) ? 'Pagado' : 'Pendiente',
+              status:
+                invoice.status === 'Perdidas'
+                  ? 'Perdidas'
+                  : isInvoiceSettled(remaining)
+                    ? 'Pagado'
+                    : 'Pendiente',
             },
           });
         }
@@ -2426,7 +2436,11 @@ export class PaymentsService {
           );
           return {
             id: invoice.id,
-            status: (remaining <= 2 ? 'Pagado' : 'Pendiente') as InvoiceStatus,
+            status: (invoice.status === 'Perdidas'
+              ? 'Perdidas'
+              : remaining <= 2
+                ? 'Pagado'
+                : 'Pendiente') as InvoiceStatus,
           };
         });
 
@@ -2477,7 +2491,7 @@ export class PaymentsService {
       const allInvoices = await this.prismaService.invoice.findMany({
         include: { InvoicePayment: true },
         where: {
-          status: { notIn: ['Pagado', 'Cancelada', 'Creada'] },
+          status: { notIn: ['Pagado', 'Cancelada', 'Creada', 'Perdidas'] },
         },
       });
 
