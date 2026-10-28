@@ -1198,7 +1198,10 @@ export class InventoryService {
 
         const existingEntry = await tx.inventoryEntry.findUnique({
           where: { id },
-          include: { details: true, payments: true },
+          include: {
+            details: { include: { product: { select: { name: true } } } },
+            payments: true,
+          },
         });
 
         if (!existingEntry) {
@@ -1207,7 +1210,7 @@ export class InventoryService {
 
         if (existingEntry.payments.length > 0) {
           throw new InventoryValidationError(
-            'No se puede eliminar una entrada con pagos asociados',
+            `No se puede eliminar la entrada ${existingEntry.controlNumber}: tiene pagos asociados. Elimine primero los pagos.`,
           );
         }
 
@@ -1217,20 +1220,54 @@ export class InventoryService {
 
         await this.lockInventoryByProduct(tx, productIds);
 
+        const stockDeltas = computeNetStockDeltas(
+          existingEntry.movementType,
+          existingEntry.details,
+          [],
+        );
+
+        /**
+         * Antes de tocar el stock se valida que la reversión no lo deje
+         * negativo. Si el producto ya se consumió, borrar la entrada dejaría
+         * el inventario por debajo de cero; se aborta con un mensaje accionable.
+         */
+        const inventoryRows = await tx.inventory.findMany({
+          where: { productId: { in: [...stockDeltas.keys()] } },
+          select: { productId: true, quantity: true },
+        });
+        const stockByProduct = new Map(
+          inventoryRows.map((row) => [row.productId, Number(row.quantity)]),
+        );
+        const productNames = new Map(
+          existingEntry.details.map((detail) => [
+            detail.productId,
+            detail.product.name,
+          ]),
+        );
+
+        for (const [productId, delta] of stockDeltas) {
+          if (delta >= 0) {
+            continue;
+          }
+
+          const available = stockByProduct.get(productId) ?? 0;
+          const required = round3(Math.abs(delta));
+          const next = round3(available + delta);
+
+          if (next < 0) {
+            throw new InventoryValidationError(
+              `No se puede eliminar la entrada ${existingEntry.controlNumber}: el stock actual de "${productNames.get(productId) ?? `el producto ${productId}`}" es ${available} y se necesitan ${required} para revertir la entrada. Registre la diferencia como merma de inventario.`,
+            );
+          }
+        }
+
         /**
          * Borrar una entrada devuelve el stock que aplico, asi que el signo es
          * el inverso del que uso al crearla y sale del `movementType`. Antes se
          * restaba siempre, con lo cual borrar una salida (que ya habia
          * descontado) volvia a restar en vez de devolver.
          */
-        await this.applyStockDeltas(
-          tx,
-          computeNetStockDeltas(
-            existingEntry.movementType,
-            existingEntry.details,
-            [],
-          ),
-        );
+        await this.applyStockDeltas(tx, stockDeltas);
 
         await tx.inventoryEntryDetail.deleteMany({
           where: { inventoryEntryId: id },
